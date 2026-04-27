@@ -1,0 +1,22 @@
+{
+  "name": "test-project",
+  "version": "1.0.0",
+  "description": "Test project for VulnSweep tests",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "lodash": "^4.17.15",
+    "express": "^4.17.1",
+    "axios": "^0.21.1"
+  },
+  "devDependencies": {
+    "jest": "^27.0.0",
+    "eslint": "^7.32.0"
+  },
+  "keywords": ["test"],
+  "author": "Test Author",
+  "license": "MIT"
+}

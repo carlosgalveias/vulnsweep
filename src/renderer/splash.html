@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VulnSweep</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 100%;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      overflow: hidden;
+    }
+
+    .splash-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.5s ease-in;
+    }
+
+    .logo {
+      max-width: 250px;
+      max-height: 250px;
+      object-fit: contain;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    .version-text {
+      margin-top: 20px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-weight: 300;
+      letter-spacing: 0.5px;
+      animation: fadeIn 0.8s ease-in 0.3s both;
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-container">
+    <img src="../../assets/logo.png" alt="VulnSweep Logo" class="logo">
+    <div class="version-text" id="version">Loading...</div>
+  </div>
+
+  <script>
+    // Safely access the splashAPI exposed by the preload script
+    if (window.splashAPI && window.splashAPI.version) {
+      const versionElement = document.getElementById('version');
+      if (versionElement) {
+        versionElement.textContent = `v${window.splashAPI.version}`;
+      }
+    }
+  </script>
+</body>
+</html>

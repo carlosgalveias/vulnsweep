@@ -1,0 +1,106 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "lodash": {
+      "name": "lodash",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1084,
+          "name": "lodash",
+          "dependency": "lodash",
+          "title": "Prototype Pollution in lodash",
+          "url": "https://github.com/advisories/GHSA-example",
+          "severity": "high",
+          "cwe": ["CWE-1321"],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": "<4.17.21"
+        }
+      ],
+      "effects": [],
+      "range": "<4.17.21",
+      "nodes": ["node_modules/lodash"],
+      "fixAvailable": {
+        "name": "lodash",
+        "version": "4.17.21",
+        "isSemVerMajor": false
+      }
+    },
+    "ajv": {
+      "name": "ajv",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1084,
+          "name": "ajv",
+          "dependency": "ajv",
+          "title": "Prototype Pollution in ajv",
+          "url": "https://github.com/advisories/GHSA-example2",
+          "severity": "moderate",
+          "cwe": ["CWE-1321"],
+          "cvss": {
+            "score": 5.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          },
+          "range": "<6.12.3"
+        }
+      ],
+      "effects": ["some-parent-package"],
+      "range": "<6.12.3",
+      "nodes": ["node_modules/ajv"],
+      "fixAvailable": {
+        "name": "some-parent-package",
+        "version": "2.0.0",
+        "isSemVerMajor": false
+      }
+    },
+    "minimist": {
+      "name": "minimist",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1179,
+          "name": "minimist",
+          "dependency": "minimist",
+          "title": "Prototype Pollution in minimist",
+          "url": "https://github.com/advisories/GHSA-example3",
+          "severity": "critical",
+          "cwe": ["CWE-1321"],
+          "cvss": {
+            "score": 9.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "range": "<1.2.6"
+        }
+      ],
+      "effects": [],
+      "range": "<1.2.6",
+      "nodes": ["node_modules/minimist"],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 1,
+      "high": 1,
+      "critical": 1,
+      "total": 3
+    },
+    "dependencies": {
+      "prod": 42,
+      "dev": 18,
+      "optional": 0,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 60
+    }
+  }
+}
