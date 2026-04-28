@@ -1,0 +1,258 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@cypress/request": {
+      "name": "@cypress/request",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["uuid"],
+      "effects": [
+        "ari-client",
+        "request-ntlm-promise",
+        "request-promise",
+        "request-promise-core",
+        "request-promise-native"
+      ],
+      "range": "*",
+      "nodes": ["node_modules/@cypress/request", "node_modules/request"],
+      "fixAvailable": {
+        "name": "ari-client",
+        "version": "1.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@fonoster/streams": {
+      "name": "@fonoster/streams",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["uuid"],
+      "effects": [],
+      "range": "*",
+      "nodes": ["node_modules/@fonoster/streams"],
+      "fixAvailable": false
+    },
+    "@google-cloud/common": {
+      "name": "@google-cloud/common",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["retry-request", "teeny-request"],
+      "effects": ["@google-cloud/speech"],
+      "range": "0.32.1 - 5.0.2",
+      "nodes": ["node_modules/@google-cloud/common"],
+      "fixAvailable": {
+        "name": "@google-cloud/speech",
+        "version": "4.4.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@google-cloud/speech": {
+      "name": "@google-cloud/speech",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["@google-cloud/common", "uuid"],
+      "effects": [],
+      "range": ">=3.0.0",
+      "nodes": ["node_modules/@google-cloud/speech"],
+      "fixAvailable": {
+        "name": "@google-cloud/speech",
+        "version": "4.4.0",
+        "isSemVerMajor": true
+      }
+    },
+    "ari-client": {
+      "name": "ari-client",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["@cypress/request", "uuid"],
+      "effects": [],
+      "range": ">=1.1.1",
+      "nodes": ["node_modules/ari-client"],
+      "fixAvailable": {
+        "name": "ari-client",
+        "version": "1.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "aws-sdk": {
+      "name": "aws-sdk",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1111997,
+          "name": "aws-sdk",
+          "dependency": "aws-sdk",
+          "title": "AWS SDK v2 region validation",
+          "url": "https://github.com/advisories/GHSA-j965-2qgj-vjmq",
+          "severity": "low",
+          "cwe": ["CWE-20"],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N"
+          },
+          "range": ">=2.0.0 <=3.0.0"
+        },
+        "uuid"
+      ],
+      "effects": [],
+      "range": ">=2.0.1",
+      "nodes": ["node_modules/aws-sdk"],
+      "fixAvailable": {
+        "name": "aws-sdk",
+        "version": "1.18.0",
+        "isSemVerMajor": true
+      }
+    },
+    "gaxios": {
+      "name": "gaxios",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["uuid"],
+      "effects": [],
+      "range": "6.4.0 - 6.7.1",
+      "nodes": ["node_modules/gaxios"],
+      "fixAvailable": true
+    },
+    "google-gax": {
+      "name": "google-gax",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["retry-request", "uuid"],
+      "effects": [],
+      "range": "4.0.5-experimental - 4.6.1",
+      "nodes": ["node_modules/google-gax"],
+      "fixAvailable": true
+    },
+    "request-ntlm-promise": {
+      "name": "request-ntlm-promise",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["@cypress/request"],
+      "effects": [],
+      "range": "",
+      "nodes": ["node_modules/request-ntlm-promise"],
+      "fixAvailable": true
+    },
+    "request-promise": {
+      "name": "request-promise",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["@cypress/request", "request-promise-core"],
+      "effects": [],
+      "range": ">=4.2.6",
+      "nodes": ["node_modules/request-promise"],
+      "fixAvailable": true
+    },
+    "request-promise-core": {
+      "name": "request-promise-core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["@cypress/request"],
+      "effects": ["request-promise", "request-promise-native"],
+      "range": "",
+      "nodes": ["node_modules/request-promise-core"],
+      "fixAvailable": true
+    },
+    "request-promise-native": {
+      "name": "request-promise-native",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["@cypress/request", "request-promise-core"],
+      "effects": [],
+      "range": ">=1.0.9",
+      "nodes": ["node_modules/request-promise-native"],
+      "fixAvailable": true
+    },
+    "retry-request": {
+      "name": "retry-request",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["teeny-request"],
+      "effects": ["@google-cloud/common", "google-gax"],
+      "range": "7.0.0 - 7.0.2",
+      "nodes": ["node_modules/retry-request"],
+      "fixAvailable": {
+        "name": "@google-cloud/speech",
+        "version": "4.4.0",
+        "isSemVerMajor": true
+      }
+    },
+    "teeny-request": {
+      "name": "teeny-request",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": ["uuid"],
+      "effects": ["@google-cloud/common", "retry-request"],
+      "range": "3.9.1 - 9.0.0",
+      "nodes": ["node_modules/teeny-request"],
+      "fixAvailable": {
+        "name": "@google-cloud/speech",
+        "version": "4.4.0",
+        "isSemVerMajor": true
+      }
+    },
+    "uuid": {
+      "name": "uuid",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1116970,
+          "name": "uuid",
+          "dependency": "uuid",
+          "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+          "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+          "severity": "moderate",
+          "cwe": ["CWE-787", "CWE-1285"],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<14.0.0"
+        }
+      ],
+      "effects": [
+        "@cypress/request",
+        "@fonoster/streams",
+        "@google-cloud/speech",
+        "ari-client",
+        "aws-sdk",
+        "gaxios",
+        "google-gax",
+        "teeny-request"
+      ],
+      "range": "<14.0.0",
+      "nodes": [
+        "node_modules/@cypress/request/node_modules/uuid",
+        "node_modules/@fonoster/streams/node_modules/uuid",
+        "node_modules/ari-client/node_modules/uuid",
+        "node_modules/aws-sdk/node_modules/uuid",
+        "node_modules/request/node_modules/uuid",
+        "node_modules/uuid"
+      ],
+      "fixAvailable": {
+        "name": "ari-client",
+        "version": "1.1.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 15,
+      "high": 0,
+      "critical": 0,
+      "total": 15
+    },
+    "dependencies": {
+      "prod": 321,
+      "dev": 1,
+      "optional": 3,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 324
+    }
+  }
+}
