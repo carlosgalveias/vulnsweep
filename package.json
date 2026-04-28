@@ -1,6 +1,6 @@
 {
   "name": "vulnsweep",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automated dependency vulnerability orchestrator for bulk npm security updates across multiple repositories",
   "main": "dist-main/main.js",
   "scripts": {
@@ -57,7 +57,7 @@
     "babel-jest": "^30.3.0",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
-    "electron": "^28.2.0",
+    "electron": "41.3.0",
     "electron-builder": "^24.9.1",
     "esbuild": "^0.20.0",
     "eslint": "^9.39.4",
