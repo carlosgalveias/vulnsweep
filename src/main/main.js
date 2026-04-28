@@ -95,7 +95,7 @@ function createSplashWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, '../preload/splash-preload.js'),
+      preload: path.join(__dirname, 'preload', 'splash-preload.js'),
       // Disable DevTools in production builds
       devTools: isDevelopment,
     },
@@ -106,25 +106,26 @@ function createSplashWindow() {
   const appName = app.getName();
 
   // In production, load from dist-renderer; in development, load from src
-  const splashPath = process.env.NODE_ENV === 'development'
-    ? path.join(__dirname, '../renderer/splash.html')
-    : path.join(__dirname, '../../dist-renderer/splash.html');
-  
+  // Note: __dirname is always 'dist-main' because package.json main points to dist-main/main.js
+  const splashPath = isDevelopment
+    ? path.join(__dirname, '../src/renderer/splash.html')
+    : path.join(__dirname, '../dist-renderer/splash.html');
+
   splashWindow.loadFile(splashPath);
 
-  // Inject version data after page loads
+  // Inject version data and logo path after page loads
   splashWindow.webContents.on('did-finish-load', () => {
     splashWindow.webContents.executeJavaScript(`
-      window.splashAPI = {
-        version: '${appVersion}',
-        appName: '${appName}'
-      };
-      // Update the version element immediately
-      const versionElement = document.getElementById('version');
-      if (versionElement) {
-        versionElement.textContent = 'v${appVersion}';
-      }
-    `);
+        window.splashAPI = {
+          version: '${appVersion}',
+          appName: '${appName}'
+        };
+        // Update the version element immediately
+        const versionElement = document.getElementById('version');
+        if (versionElement) {
+          versionElement.textContent = 'v${appVersion}';
+        }
+      `);
   });
 
   // Remove menu bar from splash window
@@ -144,11 +145,16 @@ function createWindow() {
   // Determine if running in development mode
   const isDevelopment = process.env.NODE_ENV === 'development';
 
+  // Icon path: in dev mode use project assets, in production use built assets
+  const iconPath = isDevelopment
+    ? path.join(__dirname, '../../assets/mini_logo.png')
+    : path.join(__dirname, '../dist-renderer/assets/mini_logo.png');
+
   // Create the browser window with security settings
   mainWindow = new BrowserWindow({
     width: UI_CONFIG.WINDOW_WIDTH,
     height: UI_CONFIG.WINDOW_HEIGHT,
-    icon: path.join(__dirname, '../../assets/mini_logo.png'),
+    icon: iconPath,
     webPreferences: {
       // Enable context isolation for security
       contextIsolation: true,
@@ -157,7 +163,7 @@ function createWindow() {
       // Enable sandbox for additional security
       sandbox: true,
       // Preload script for IPC communication
-      preload: path.join(__dirname, '../preload/preload.js'),
+      preload: path.join(__dirname, 'preload', 'preload.js'),
       // Disable DevTools in production builds (prevents F12, Ctrl+Shift+I, etc.)
       devTools: isDevelopment,
     },
@@ -170,7 +176,7 @@ function createWindow() {
     // Open DevTools automatically in development
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../dist-renderer/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../dist-renderer/index.html'));
   }
 
   // Emitted when the window is closed
@@ -486,7 +492,7 @@ app.whenReady().then(() => {
   // After 5 seconds, show main window and close splash
   setTimeout(() => {
     createWindow();
-    
+
     // Close splash window after main window is created
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.close();

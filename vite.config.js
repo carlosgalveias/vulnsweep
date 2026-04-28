@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -13,47 +13,47 @@ export default defineConfig({
         // Create assets directory in dist-renderer
         const assetsDir = path.join(__dirname, 'dist-renderer', 'assets');
         mkdirSync(assetsDir, { recursive: true });
-        
+
         // Copy logo.png for splash screen
+        copyFileSync(path.join(__dirname, 'assets', 'logo.png'), path.join(assetsDir, 'logo.png'));
+
+        // Copy mini_logo.png for window icon
         copyFileSync(
-          path.join(__dirname, 'assets', 'logo.png'),
-          path.join(assetsDir, 'logo.png')
+          path.join(__dirname, 'assets', 'mini_logo.png'),
+          path.join(assetsDir, 'mini_logo.png')
         );
-        
+
         // Copy and transform splash.html to dist-renderer
         const splashSrcPath = path.join(__dirname, 'src', 'renderer', 'splash.html');
         const splashDestPath = path.join(__dirname, 'dist-renderer', 'splash.html');
-        
+
         // Read splash.html content
         let splashContent = readFileSync(splashSrcPath, 'utf-8');
-        
+
         // Replace the image path for production build
         // In development: ../../assets/logo.png (from src/renderer to assets)
         // In production: ./assets/logo.png (from dist-renderer to dist-renderer/assets)
-        splashContent = splashContent.replace(
-          '../../assets/logo.png',
-          './assets/logo.png'
-        );
-        
+        splashContent = splashContent.replace('../../assets/logo.png', './assets/logo.png');
+
         // Write modified content to dist-renderer
         writeFileSync(splashDestPath, splashContent, 'utf-8');
-      }
-    }
+      },
+    },
   ],
-  
+
   // Root directory for Vite (where index.html is located)
   root: path.join(__dirname, 'src/renderer'),
-  
+
   // Base public path
   base: './',
-  
+
   // Build configuration
   build: {
     // Output directory relative to project root
     outDir: path.join(__dirname, 'dist-renderer'),
     emptyOutDir: true,
     // Disable sourcemaps in production for obfuscation
-    sourcemap: false,
+    sourcemap: true,
     // Enable minification with terser for better obfuscation
     minify: 'terser',
     terserOptions: {
@@ -74,17 +74,17 @@ export default defineConfig({
     // Chunk size warnings
     chunkSizeWarningLimit: 1000,
   },
-  
+
   // Development server configuration
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
   },
-  
+
   // Resolve configuration
   resolve: {
     alias: {
-      '@': path.join(__dirname, 'src/renderer')
-    }
-  }
+      '@': path.join(__dirname, 'src/renderer'),
+    },
+  },
 });
