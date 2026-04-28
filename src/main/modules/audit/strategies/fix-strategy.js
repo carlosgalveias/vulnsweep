@@ -55,7 +55,55 @@ async function determineFixStrategy(vulnerability, auditData) {
     fixAvailable,
     patchedVersion,
     installedVersion,
+    isPromotedDependent,
+    unfixableRootCause,
   } = vulnerability;
+
+  // Promoted Dependent: root cause is unfixable, add override for this dependent instead
+  if (isPromotedDependent) {
+    // Determine the target version for the override from the vulnerability range
+    const vulnerabilityRange =
+      vulnerability.vulnerableRange || auditData.vulnerabilities?.[pkgName]?.range;
+    let targetVersion = patchedVersion;
+
+    if (!targetVersion && vulnerabilityRange) {
+      const { determineSafeVersion } = require('./version-resolver');
+      const safeVersion = await determineSafeVersion(
+        pkgName,
+        vulnerabilityRange,
+        installedVersion,
+        null
+      );
+      if (safeVersion) {
+        targetVersion = safeVersion;
+      }
+    }
+
+    if (!targetVersion) {
+      const { fetchLatestSafeVersion } = require('./version-resolver');
+      targetVersion = await fetchLatestSafeVersion(pkgName);
+    }
+
+    if (!targetVersion) {
+      return {
+        type: 'NO_FIX',
+        package: pkgName,
+        currentVersion: installedVersion,
+        targetVersion: null,
+        riskLevel: 'N/A',
+        reason: `Promoted dependent of unfixable root '${unfixableRootCause}' — no safe version could be determined`,
+      };
+    }
+
+    return {
+      type: 'ADD_OVERRIDE',
+      package: pkgName,
+      currentVersion: installedVersion,
+      targetVersion,
+      riskLevel: 'LOW',
+      reason: `Add override for ${pkgName} — its root cause '${unfixableRootCause}' has no available fix`,
+    };
+  }
 
   // Scenario A: Direct Dependency (Minor/Patch Update)
   if (isDirect) {
@@ -73,11 +121,22 @@ async function determineFixStrategy(vulnerability, auditData) {
     let targetVersion;
     let isMajor = false;
 
-    if (typeof fixAvailable === 'object' && fixAvailable.version) {
-      // fixAvailable is an object with version info
+    if (
+      typeof fixAvailable === 'object' &&
+      fixAvailable.version &&
+      // Only trust fixAvailable.version when:
+      //   (a) fixAvailable.name is absent — the object refers to this package implicitly, OR
+      //   (b) fixAvailable.name === pkgName — the object explicitly refers to this package.
+      // When fixAvailable.name is present and does NOT match pkgName, npm is pointing at a
+      // different package in the ecosystem chain; that version belongs to the other package.
+      (!fixAvailable.name || fixAvailable.name === pkgName)
+    ) {
       targetVersion = fixAvailable.version;
       isMajor = fixAvailable.isSemVerMajor || false;
-    } else if (typeof fixAvailable === 'boolean' && fixAvailable === true) {
+    } else if (
+      (typeof fixAvailable === 'boolean' && fixAvailable === true) ||
+      (typeof fixAvailable === 'object' && fixAvailable.name && fixAvailable.name !== pkgName)
+    ) {
       // fixAvailable is just true, need to determine version from vulnerability range
       const vulnerabilityRange =
         vulnerability.vulnerableRange || auditData.vulnerabilities[pkgName]?.range;
@@ -135,19 +194,32 @@ async function determineFixStrategy(vulnerability, auditData) {
   const parentPackage = findParentPackage(pkgName, auditData);
 
   if (parentPackage && fixAvailable) {
-    // Scenario B: Parent dependency can be updated
-    const targetVersion = typeof fixAvailable === 'object' ? fixAvailable.version : fixAvailable;
-    const isMajor = typeof fixAvailable === 'object' ? fixAvailable.isSemVerMajor : false;
+    // Scenario B: Parent dependency can be updated.
+    // Guard: if fixAvailable is an object whose name is a different package, the version
+    // belongs to that other package — do not use it as a target for THIS package.
+    const fixRefersToSelf = typeof fixAvailable !== 'object' || fixAvailable.name === pkgName;
+    const targetVersion = fixRefersToSelf
+      ? typeof fixAvailable === 'object'
+        ? fixAvailable.version
+        : fixAvailable
+      : null;
+    if (!targetVersion) {
+      // Fall through to Scenario C — override path
+    }
+    const isMajor =
+      typeof fixAvailable === 'object' && fixRefersToSelf ? fixAvailable.isSemVerMajor : false;
 
-    return {
-      type: 'UPDATE_PARENT',
-      package: pkgName,
-      parentPackage,
-      currentVersion: installedVersion,
-      targetVersion,
-      riskLevel: isMajor ? 'HIGH' : 'LOW',
-      reason: `Updating parent dependency '${parentPackage}' to ${targetVersion} will resolve transient vulnerability`,
-    };
+    if (targetVersion) {
+      return {
+        type: 'UPDATE_PARENT',
+        package: pkgName,
+        parentPackage,
+        currentVersion: installedVersion,
+        targetVersion,
+        riskLevel: isMajor ? 'HIGH' : 'LOW',
+        reason: `Updating parent dependency '${parentPackage}' to ${targetVersion} will resolve transient vulnerability`,
+      };
+    }
   }
 
   // Scenario C: Deep root or no direct update available - use npm overrides

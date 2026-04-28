@@ -9,6 +9,17 @@
  * - Determining safe versions based on vulnerability patterns
  *
  * Uses registry caching to improve performance during multi-project scans.
+ *
+ * Fix strategy for vulnerable ranges:
+ *   The safe version is always the MINIMUM published version that does NOT satisfy
+ *   the vulnerable range. For example, if the vulnerable range is "<14.0.0", the
+ *   complement (safe) range is ">=14.0.0", and we use semver.minSatisfying() against
+ *   the full list of published versions to find the lowest actually-published safe version.
+ *
+ *   This avoids two past bugs:
+ *   (A) Returning a version string that is not actually published on npm
+ *   (B) Returning the FIRST version satisfying the VULNERABLE range (e.g., "1.1.0")
+ *       instead of the first version OUTSIDE it
  */
 
 const { exec } = require('child_process');
@@ -138,94 +149,97 @@ async function getInstalledVersionFromLockfile(projectPath, packageName) {
 }
 
 /**
- * Find a safe version that's not in the vulnerable range
- * @param {string} packageName - Package name
- * @param {string} range - Vulnerable version range
- * @param {string} currentVersion - Current installed version (optional)
- * @returns {Promise<string|null>} - Safe version or null
+ * Find the minimum published version of a package that satisfies `safeRange`.
+ *
+ * Uses semver.minSatisfying() against the full list of published versions to guarantee
+ * the returned version actually exists on the npm registry, then validates it is not
+ * a downgrade from the currently-installed version.
+ *
+ * @param {string} packageName   - Package name
+ * @param {string} safeRange     - The SAFE semver range (complement of the vulnerable range)
+ *                                 e.g. ">=14.0.0" when the vulnerable range is "<14.0.0"
+ * @param {string|null} currentVersion - Currently installed version (may be null or 'unknown')
+ * @returns {Promise<string|null>} - Minimum safe version string (e.g. "14.0.0"), or null
  */
-async function findSafeVersionOutsideRange(packageName, range, currentVersion = null) {
+async function findMinSafeVersion(packageName, safeRange, currentVersion = null) {
   try {
-    // Check if current version is already safe (outside vulnerable range)
-    if (currentVersion) {
-      try {
-        const cleanCurrent = semver.coerce(currentVersion);
-        if (cleanCurrent && !semver.satisfies(cleanCurrent.version, range)) {
-          return null; // No fix needed
-        }
-      } catch (error) {
-        console.warn(
-          `[audit] Could not validate current version ${currentVersion}: ${error.message}`
-        );
-      }
-    }
-
     const allVersions = await fetchAllVersions(packageName);
     if (!allVersions || allVersions.length === 0) {
       return null;
     }
 
+    // Find the lowest published version that satisfies the safe range
+    const minSafe = semver.minSatisfying(allVersions, safeRange);
+    if (!minSafe) {
+      return null;
+    }
+
+    // Reject if it would be a downgrade from the currently installed version
+    if (currentVersion) {
+      const cleanCurrent = semver.coerce(currentVersion);
+      if (cleanCurrent && semver.lt(minSafe, cleanCurrent.version)) {
+        return null;
+      }
+    }
+
+    return minSafe;
+  } catch (error) {
+    console.warn(`[audit] Error finding minimum safe version for ${packageName}: ${error.message}`);
+    return null;
+  }
+}
+
+async function findSafeVersionOutsideRange(packageName, range, currentVersion = null) {
+  try {
+    if (currentVersion) {
+      try {
+        const cleanCurrent = semver.coerce(currentVersion);
+        if (cleanCurrent && !semver.satisfies(cleanCurrent.version, range)) {
+          return null;
+        }
+      } catch (err) {
+        console.warn(
+          `[audit] Could not validate current version ${currentVersion}: ${err.message}`
+        );
+      }
+    }
+    const allVersions = await fetchAllVersions(packageName);
+    if (!allVersions || allVersions.length === 0) return null;
     const cleanRange = range.replace(/\s+/g, ' ');
     const cleanCurrent = currentVersion ? semver.coerce(currentVersion) : null;
-
-    // Separate candidates by semantic distance from current version
     const patchCandidates = [];
     const minorCandidates = [];
     const majorCandidates = [];
-
     for (const version of allVersions) {
       try {
-        const isOutsideRange = !semver.satisfies(version, cleanRange);
-
-        // Skip if not safe or not an upgrade
-        if (!isOutsideRange) continue;
+        if (semver.satisfies(version, cleanRange)) continue;
         if (cleanCurrent && !semver.gte(version, cleanCurrent.version)) continue;
-
         const cleanVersion = semver.coerce(version);
         if (!cleanVersion) continue;
-
         if (cleanCurrent) {
-          const currentMajor = cleanCurrent.major;
-          const currentMinor = cleanCurrent.minor;
-          const candidateMajor = cleanVersion.major;
-          const candidateMinor = cleanVersion.minor;
-
-          // Categorize by semantic distance
-          if (candidateMajor === currentMajor && candidateMinor === currentMinor) {
+          if (
+            cleanVersion.major === cleanCurrent.major &&
+            cleanVersion.minor === cleanCurrent.minor
+          ) {
             patchCandidates.push(version);
-          } else if (candidateMajor === currentMajor) {
+          } else if (cleanVersion.major === cleanCurrent.major) {
             minorCandidates.push(version);
           } else {
             majorCandidates.push(version);
           }
         } else {
-          // No current version to compare against, treat as major
           majorCandidates.push(version);
         }
       } catch {
-        // Skip invalid versions
         continue;
       }
     }
-
-    // Try patch candidates first (minimal change)
-    if (patchCandidates.length > 0) {
-      const minVersion = patchCandidates.sort((a, b) => semver.compare(a, b))[0];
-      return `^${minVersion}`;
-    }
-
-    // Then try minor candidates
-    if (minorCandidates.length > 0) {
-      const minVersion = minorCandidates.sort((a, b) => semver.compare(a, b))[0];
-      return `^${minVersion}`;
-    }
-
-    // Finally try major candidates
-    if (majorCandidates.length > 0) {
-      const minVersion = majorCandidates.sort((a, b) => semver.compare(a, b))[0];
-      return `^${minVersion}`;
-    }
-
+    if (patchCandidates.length > 0)
+      return `^${patchCandidates.sort((a, b) => semver.compare(a, b))[0]}`;
+    if (minorCandidates.length > 0)
+      return `^${minorCandidates.sort((a, b) => semver.compare(a, b))[0]}`;
+    if (majorCandidates.length > 0)
+      return `^${majorCandidates.sort((a, b) => semver.compare(a, b))[0]}`;
     return null;
   } catch (error) {
     console.warn(`[audit] Error finding safe version for ${packageName}: ${error.message}`);
@@ -233,119 +247,46 @@ async function findSafeVersionOutsideRange(packageName, range, currentVersion = 
   }
 }
 
-/**
- * Parse vulnerability range and determine safe version
- * @param {string} packageName - Package name
- * @param {string} range - Version range from vulnerability (e.g., "< 6.14.0", "<= 1.1.0", "5.0.0 - 5.2.1")
- * @param {string} currentVersion - Current installed version (optional)
- * @param {string} projectPath - Project path for lockfile lookup (optional)
- * @returns {Promise<string|null>} - Safe version to use, or null if cannot determine
- */
 async function determineSafeVersion(packageName, range, currentVersion = null, projectPath = null) {
-  // Pattern: >= X.Y.Z (all versions from X.Y.Z onwards are vulnerable - NO FIX)
-  const greaterThanEqualMatch = range.match(/^>=\s*(\d+\.\d+\.\d+)$/);
-  if (greaterThanEqualMatch) {
-    return null; // No safe version available
+  // Pattern: >= X.Y.Z only — all versions are vulnerable, no fix possible
+  if (/^>=\s*\d+\.\d+\.\d+$/.test(range)) {
+    return null;
   }
 
-  // Pattern 1: < X.Y.Z (less than)
-  const lessThanMatch = range.match(/^<\s*(\d+\.\d+\.\d+)$/);
-
-  if (lessThanMatch) {
-    const version = lessThanMatch[1];
-    const safeVersion = `^${version}`;
-
-    // Validate that the recommended version is >= currentVersion
-    if (currentVersion) {
-      try {
-        const cleanCurrent = semver.coerce(currentVersion);
-        const cleanRecommended = semver.coerce(version);
-        if (cleanCurrent && cleanRecommended) {
-          if (semver.lt(cleanRecommended.version, cleanCurrent.version)) {
-            return null;
-          }
-        }
-      } catch (error) {
-        console.warn(`[audit] Could not compare versions: ${error.message}`);
-      }
-    }
-
-    return safeVersion;
+  // Pattern 1: < X.Y.Z — safe range is >= X.Y.Z
+  const ltMatch = range.match(/^<\s*(\d+\.\d+\.\d+)$/);
+  if (ltMatch) {
+    return findMinSafeVersion(packageName, `>=${ltMatch[1]}`, currentVersion);
   }
 
-  // Pattern 2: <= X.Y.Z (less than or equal)
-  const lessThanEqualMatch = range.match(/^<=\s*(\d+\.\d+\.\d+)$/);
-  if (lessThanEqualMatch) {
-    const latestVersion = await fetchLatestSafeVersion(packageName);
-
-    // Validate that the latest version is >= currentVersion
-    if (latestVersion && currentVersion) {
-      try {
-        const cleanCurrent = semver.coerce(currentVersion);
-        const cleanLatest = semver.coerce(latestVersion);
-        if (cleanCurrent && cleanLatest) {
-          if (semver.lt(cleanLatest.version, cleanCurrent.version)) {
-            return null;
-          }
-        }
-      } catch (error) {
-        console.warn(`[audit] Could not compare versions: ${error.message}`);
-      }
-    }
-
-    return latestVersion;
+  // Pattern 2: <= X.Y.Z — safe range is > X.Y.Z
+  const lteMatch = range.match(/^<=\s*(\d+\.\d+\.\d+)$/);
+  if (lteMatch) {
+    return findMinSafeVersion(packageName, `>${lteMatch[1]}`, currentVersion);
   }
 
-  // Pattern 3: X.Y.Z - A.B.C (range pattern)
-  const rangeMatch = range.match(/\d+\.\d+\.\d+\s*-\s*\d+\.\d+\.\d+/);
-  if (rangeMatch) {
-    const latestVersion = await fetchLatestSafeVersion(packageName);
-
-    // Validate that the latest version is >= currentVersion
-    if (latestVersion && currentVersion) {
-      try {
-        const cleanCurrent = semver.coerce(currentVersion);
-        const cleanLatest = semver.coerce(latestVersion);
-        if (cleanCurrent && cleanLatest) {
-          if (semver.lt(cleanLatest.version, cleanCurrent.version)) {
-            return null;
-          }
-        }
-      } catch (error) {
-        console.warn(`[audit] Could not compare versions: ${error.message}`);
-      }
-    }
-
-    return latestVersion;
+  // Pattern 3: X.Y.Z - A.B.C (hyphen range, both ends inclusive) — safe range is > A.B.C
+  const hyphenMatch = range.match(/(\d+\.\d+\.\d+)\s*-\s*(\d+\.\d+\.\d+)/);
+  if (hyphenMatch) {
+    return findMinSafeVersion(packageName, `>${hyphenMatch[2]}`, currentVersion);
   }
 
-  // Pattern 4: Complex ranges with || or multiple conditions
-  // Examples: ">=5.0.0 <5.2.3 || <4.12.3", ">1.0.0 <2.0.0 || >3.0.0"
+  // Pattern 4: Complex ranges with || or both > and < — delegate to findSafeVersionOutsideRange
   if (range.includes('||') || (range.includes('>') && range.includes('<'))) {
-    // Use provided currentVersion or get from package-lock.json
     let installedVersion = currentVersion;
     if (!installedVersion && projectPath) {
       installedVersion = await getInstalledVersionFromLockfile(projectPath, packageName);
     }
-
-    // Try to find a safe version outside the vulnerable range
-    return await findSafeVersionOutsideRange(packageName, range, installedVersion);
+    return findSafeVersionOutsideRange(packageName, range, installedVersion);
   }
 
   return null;
 }
 
-/**
- * Clear the registry cache
- * Should be called ONCE at the start of a scan session (when user clicks "Scan"),
- * NOT per-project. This ensures fresh data for each scan while preserving cache
- * hits across all projects within the same session.
- */
 function clearCache() {
   registryCache.clear();
 }
 
-// Export all functions
 module.exports = {
   fetchLatestSafeVersion,
   fetchAllVersions,

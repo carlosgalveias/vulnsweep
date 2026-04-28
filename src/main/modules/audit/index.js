@@ -15,7 +15,7 @@ const { applyFixes } = require('./appliers/fix-applier');
 const { generatePackageJsonChanges } = require('./appliers/package-updater');
 const { runNpmAudit } = require('./commands/npm-audit');
 const { runNpmInstall } = require('./commands/npm-install');
-const { parseVulnerabilities } = require('./parsers/vulnerability-parser');
+const { parseVulnerabilities, collectDependents } = require('./parsers/vulnerability-parser');
 const { determineFixStrategy, findParentPackage } = require('./strategies/fix-strategy');
 const {
   clearCache,
@@ -114,6 +114,14 @@ async function analyzeProject(projectPath, allowReset = false) {
     }
 
     // Step 5: Generate summary
+    // Step 5: Generate summary
+    // Note: vulnerabilities now contains ONLY root-cause packages; pure dependents
+    // are excluded from the list but counted in resolvedTransitively.
+    const resolvedTransitively = vulnerabilities.reduce(
+      (acc, v) => acc + (v.resolvesDependents ? v.resolvesDependents.length : 0),
+      0
+    );
+
     const summary = {
       total: vulnerabilities.length,
       critical: vulnerabilities.filter((v) => v.severity === 'critical').length,
@@ -123,6 +131,7 @@ async function analyzeProject(projectPath, allowReset = false) {
       fixable: strategies.filter((s) => s.type !== 'NO_FIX').length,
       directDependencies: vulnerabilities.filter((v) => v.isDirect).length,
       transientDependencies: vulnerabilities.filter((v) => !v.isDirect).length,
+      resolvedTransitively,
       strategies: {
         updateDirect: strategies.filter((s) => s.type === 'UPDATE_DIRECT').length,
         updateParent: strategies.filter((s) => s.type === 'UPDATE_PARENT').length,
@@ -130,7 +139,6 @@ async function analyzeProject(projectPath, allowReset = false) {
         noFix: strategies.filter((s) => s.type === 'NO_FIX').length,
       },
     };
-
     console.log('[audit] Analysis complete:', summary);
 
     return createSuccess({
@@ -167,6 +175,7 @@ module.exports = {
   runNpmInstall,
   runNpmAudit,
   parseVulnerabilities,
+  collectDependents,
   determineFixStrategy,
   determineSafeVersion,
   fetchLatestSafeVersion,

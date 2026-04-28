@@ -83,6 +83,65 @@
       "range": "<1.2.6",
       "nodes": ["node_modules/minimist"],
       "fixAvailable": true
+    },
+    "semver-dependent": {
+      "name": "semver-dependent",
+      "severity": "high",
+      "isDirect": false,
+      "via": ["lodash"],
+      "effects": [],
+      "range": "<4.17.21",
+      "nodes": ["node_modules/semver-dependent/node_modules/lodash"],
+      "fixAvailable": {
+        "name": "lodash",
+        "version": "4.17.21",
+        "isSemVerMajor": false
+      }
+    },
+    "uuid": {
+      "name": "uuid",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 2001,
+          "name": "uuid",
+          "dependency": "uuid",
+          "title": "Insecure Randomness in uuid",
+          "url": "https://github.com/advisories/GHSA-uuid-example",
+          "severity": "high",
+          "cwe": ["CWE-330"],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": ">=1.0.0 <9.0.0"
+        }
+      ],
+      "effects": ["@cypress/request", "ari-client"],
+      "range": ">=1.0.0 <9.0.0",
+      "nodes": ["node_modules/uuid"],
+      "fixAvailable": false
+    },
+    "@cypress/request": {
+      "name": "@cypress/request",
+      "severity": "high",
+      "isDirect": false,
+      "via": ["uuid"],
+      "effects": [],
+      "range": ">=1.0.0",
+      "nodes": ["node_modules/@cypress/request"],
+      "fixAvailable": false
+    },
+    "ari-client": {
+      "name": "ari-client",
+      "severity": "high",
+      "isDirect": false,
+      "via": ["uuid"],
+      "effects": [],
+      "range": ">=1.0.0",
+      "nodes": ["node_modules/ari-client"],
+      "fixAvailable": false
     }
   },
   "metadata": {
@@ -90,9 +149,9 @@
       "info": 0,
       "low": 0,
       "moderate": 1,
-      "high": 1,
+      "high": 3,
       "critical": 1,
-      "total": 3
+      "total": 5
     },
     "dependencies": {
       "prod": 42,
