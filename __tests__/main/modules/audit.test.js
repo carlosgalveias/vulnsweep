@@ -26,6 +26,7 @@ const path = require('path');
 const audit = require('../../../src/main/modules/audit');
 // Test fixtures
 const npmAuditExactVersion = require('../../fixtures/npm-audit-exact-version.json');
+const npmAuditPostcssIndirect = require('../../fixtures/npm-audit-postcss-indirect.json');
 const npmAuditRealWorld = require('../../fixtures/npm-audit-real-world.json');
 const npmAuditSample = require('../../fixtures/npm-audit-sample.json');
 const packageLockSample = require('../../fixtures/package-lock.json');
@@ -169,10 +170,10 @@ describe('audit module', () => {
                 title: 'Unfixable',
                 url: 'https://x.com',
                 cwe: ['CWE-200'],
-                range: '<9.0.0',
+                range: '*',
               },
             ],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/unfixable-root'],
             fixAvailable: false,
           },
@@ -180,7 +181,7 @@ describe('audit module', () => {
             severity: 'high',
             isDirect: false,
             via: ['unfixable-root'],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/dep-a'],
             fixAvailable: false,
           },
@@ -188,7 +189,7 @@ describe('audit module', () => {
             severity: 'high',
             isDirect: false,
             via: ['unfixable-root'],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/dep-b'],
             fixAvailable: false,
           },
@@ -213,10 +214,10 @@ describe('audit module', () => {
                 title: 'Critical',
                 url: 'https://x.com/6',
                 cwe: ['CWE-78'],
-                range: '<9.0.0',
+                range: '*',
               },
             ],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/no-fix-root'],
             fixAvailable: false,
           },
@@ -224,7 +225,7 @@ describe('audit module', () => {
             severity: 'critical',
             isDirect: false,
             via: ['no-fix-root'],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/my-dependent'],
             fixAvailable: false,
           },
@@ -365,10 +366,10 @@ describe('audit module', () => {
                 title: 'No-fix',
                 url: 'https://x.com/9',
                 cwe: ['CWE-79'],
-                range: '<9.0.0',
+                range: '*',
               },
             ],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/no-fix-pkg'],
             fixAvailable: false,
           },
@@ -376,7 +377,7 @@ describe('audit module', () => {
             severity: 'high',
             isDirect: false,
             via: ['no-fix-pkg'],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/mid-dep'],
             fixAvailable: false,
           },
@@ -384,7 +385,7 @@ describe('audit module', () => {
             severity: 'high',
             isDirect: false,
             via: ['mid-dep'],
-            range: '<9.0.0',
+            range: '*',
             nodes: ['node_modules/sub-dep'],
             fixAvailable: false,
           },
@@ -1081,6 +1082,154 @@ describe('audit module', () => {
       const strategy = await audit.determineFixStrategy(jwsVuln, npmAuditExactVersion);
       expect(strategy.type).not.toBe('NO_FIX');
       expect(strategy.targetVersion).toBe('4.0.1');
+    });
+  });
+  // ── Regression: hasBoundedRange suppression guard (postcss scenario) ─────────
+  // Bug: postcss had fixAvailable:false and range:'<8.5.10'. The old suppression
+  // logic treated any root-cause with fixAvailable:false + dependents as unfixable
+  // and promoted its dependents instead. None of them could compute a correct fix
+  // because they are the wrong packages. The fix adds a hasBoundedRange guard so
+  // that a root-cause with a concrete upper-bound range is NOT suppressed — the
+  // strategy layer then derives an ADD_OVERRIDE for postcss@8.5.10 directly.
+  // These tests must never be deleted.
+  describe('Regression: hasBoundedRange guard — postcss with fixAvailable:false and <X.Y.Z range', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      audit.clearCache();
+    });
+
+    // ── Parser-level tests ──────────────────────────────────────────────────────
+
+    it('postcss with fixAvailable:false and <X.Y.Z range is NOT suppressed — isRootCause:true', async () => {
+      const vulnerabilities = await audit.parseVulnerabilities(
+        npmAuditPostcssIndirect,
+        '/test/path'
+      );
+      const postcssVuln = vulnerabilities.find((v) => v.package === 'postcss');
+      expect(postcssVuln).toBeDefined();
+      expect(postcssVuln.isRootCause).toBe(true);
+    });
+
+    it('postcss with fixAvailable:false and <X.Y.Z range has vulnerableRange "<8.5.10"', async () => {
+      const vulnerabilities = await audit.parseVulnerabilities(
+        npmAuditPostcssIndirect,
+        '/test/path'
+      );
+      const postcssVuln = vulnerabilities.find((v) => v.package === 'postcss');
+      expect(postcssVuln).toBeDefined();
+      expect(postcssVuln.vulnerableRange).toBe('<8.5.10');
+    });
+
+    it('package with fixAvailable:false and UNBOUNDED range (*) IS still suppressed — regression guard', async () => {
+      // Confirm the hasBoundedRange guard does NOT break suppression for truly unfixable
+      // packages whose range is '*' (all versions vulnerable — no derivable safe version).
+      const auditData = {
+        vulnerabilities: {
+          'unbounded-root': {
+            severity: 'high',
+            isDirect: false,
+            via: [
+              {
+                source: 42,
+                title: 'Unbounded issue',
+                url: 'https://example.com/42',
+                cwe: ['CWE-200'],
+                range: '*',
+              },
+            ],
+            range: '*',
+            nodes: ['node_modules/unbounded-root'],
+            fixAvailable: false,
+          },
+          'unbounded-dep': {
+            severity: 'high',
+            isDirect: false,
+            via: ['unbounded-root'],
+            range: '*',
+            nodes: ['node_modules/unbounded-dep'],
+            fixAvailable: false,
+          },
+        },
+      };
+
+      const vulnerabilities = await audit.parseVulnerabilities(auditData, '/test/path');
+
+      // Root cause with '*' range must be suppressed (no bounded range -> old path)
+      expect(vulnerabilities.find((v) => v.package === 'unbounded-root')).toBeUndefined();
+      // Its dependent must be promoted
+      const promoted = vulnerabilities.find((v) => v.package === 'unbounded-dep');
+      expect(promoted).toBeDefined();
+      expect(promoted.isPromotedDependent).toBe(true);
+      expect(promoted.isRootCause).toBe(false);
+    });
+
+    // ── Integration-style tests — full fix strategy ─────────────────────────────
+
+    it('postcss fix strategy resolves to 8.5.10 and is NOT NO_FIX', async () => {
+      exec.mockImplementation((cmd, options, callback) => {
+        const promise = new Promise((resolve) => {
+          if (cmd.includes('versions --json') && cmd.includes('postcss')) {
+            resolve({
+              stdout: JSON.stringify(['8.4.0', '8.5.0', '8.5.9', '8.5.10', '8.5.11']),
+              stderr: '',
+            });
+          } else {
+            resolve({ stdout: '', stderr: '' });
+          }
+        });
+        if (callback) {
+          promise.then(
+            (r) => callback(null, r),
+            (e) => callback(e)
+          );
+        }
+        return promise;
+      });
+
+      const vulnerabilities = await audit.parseVulnerabilities(
+        npmAuditPostcssIndirect,
+        '/test/path'
+      );
+      const postcssVuln = vulnerabilities.find((v) => v.package === 'postcss');
+      expect(postcssVuln).toBeDefined();
+
+      const strategy = await audit.determineFixStrategy(postcssVuln, npmAuditPostcssIndirect);
+      expect(strategy.type).not.toBe('NO_FIX');
+      expect(strategy.targetVersion).toBe('8.5.10');
+    });
+
+    it('postcss fix is reported as ADD_OVERRIDE because postcss is not a direct dependency', async () => {
+      exec.mockImplementation((cmd, options, callback) => {
+        const promise = new Promise((resolve) => {
+          if (cmd.includes('versions --json') && cmd.includes('postcss')) {
+            resolve({
+              stdout: JSON.stringify(['8.4.0', '8.5.0', '8.5.9', '8.5.10', '8.5.11']),
+              stderr: '',
+            });
+          } else {
+            resolve({ stdout: '', stderr: '' });
+          }
+        });
+        if (callback) {
+          promise.then(
+            (r) => callback(null, r),
+            (e) => callback(e)
+          );
+        }
+        return promise;
+      });
+
+      const vulnerabilities = await audit.parseVulnerabilities(
+        npmAuditPostcssIndirect,
+        '/test/path'
+      );
+      const postcssVuln = vulnerabilities.find((v) => v.package === 'postcss');
+      expect(postcssVuln).toBeDefined();
+
+      // postcss is isDirect:false in the fixture, so the strategy must be ADD_OVERRIDE
+      const strategy = await audit.determineFixStrategy(postcssVuln, npmAuditPostcssIndirect);
+      expect(strategy.type).toBe('ADD_OVERRIDE');
+      expect(strategy.targetVersion).toBe('8.5.10');
     });
   });
 });
