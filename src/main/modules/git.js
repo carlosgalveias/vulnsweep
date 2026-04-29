@@ -120,7 +120,10 @@ function formatVulnerabilityTable(vulnerabilities) {
  * @param {Array} vulnerabilities - Array of resolved vulnerability objects
  * @returns {string} Complete commit message
  */
-function createCommitMessage(title = 'fix(security): update vulnerable dependencies', vulnerabilities = []) {
+function createCommitMessage(
+  title = 'fix(security): update vulnerable dependencies',
+  vulnerabilities = []
+) {
   const sanitizedTitle = title
     .replace(/`/g, "'")
     .replace(/\$/g, '')
@@ -139,7 +142,7 @@ function createCommitMessage(title = 'fix(security): update vulnerable dependenc
   }
 
   const body = formatVulnerabilityTable(vulnerabilities);
-  
+
   // Combine title and body with double newline
   return `${sanitizedTitle}\n\n${body}`;
 }
@@ -332,13 +335,23 @@ async function commitChanges(
     commitMessage = sanitizeGitMessage(messageOrOptions);
   } else if (typeof messageOrOptions === 'object' && messageOrOptions !== null) {
     // New format: object with message and vulnerabilities
-    const { message = 'fix(security): update vulnerable dependencies', vulnerabilities = [] } = messageOrOptions;
+    const { message = 'fix(security): update vulnerable dependencies', vulnerabilities = [] } =
+      messageOrOptions;
     commitMessage = createCommitMessage(message, vulnerabilities);
   } else {
     commitMessage = 'fix(security): update vulnerable dependencies';
   }
 
   console.log(`[Git] Committing changes with message: "${commitMessage.split('\n')[0]}..."`);
+
+  // Pre-flight check: if the working tree is clean, skip the commit entirely
+  const statusResult = await executeGitCommand('git status --porcelain', projectPath);
+  if (statusResult.success && !statusResult.content.stdout.trim()) {
+    const logs = [];
+    logs.push('[Git] Nothing to commit (working tree clean)');
+    console.log('[Git] Nothing to commit (working tree clean)');
+    return createSuccess({ logs, nothingToCommit: true });
+  }
 
   // Use git commit -a -F - to read message from stdin
   // This avoids shell escaping issues with multiline messages and special characters
@@ -352,10 +365,10 @@ async function commitChanges(
     );
 
     const result = createSuccess({
-      stdout: stdout,
-      stderr: stderr,
+      stdout,
+      stderr,
     });
-    
+
     console.log(`[Git] Commit successful`);
     return result;
   } catch (error) {
@@ -363,18 +376,22 @@ async function commitChanges(
       stdout: error.stdout || '',
       stderr: error.stderr || '',
     });
-    
-    // Check if there's nothing to commit (common case)
+
+    // Check if there's nothing to commit (common case — porcelain check bypassed or raced)
     const stdout = result.details?.stdout || '';
     const stderr = result.details?.stderr || '';
-    
-    if (stdout.includes('nothing to commit') || stdout.includes('no changes added') ||
-        stderr.includes('nothing to commit') || stderr.includes('no changes added')) {
-      console.log(`[Git] Nothing to commit (working tree clean)`);
-    } else {
-      console.error(`[Git] Commit failed: ${result.error}`);
+
+    if (
+      stdout.includes('nothing to commit') ||
+      stdout.includes('no changes added') ||
+      stderr.includes('nothing to commit') ||
+      stderr.includes('no changes added')
+    ) {
+      console.log('[Git] Nothing to commit (working tree clean)');
+      return createSuccess({ logs: [], nothingToCommit: true });
     }
-    
+
+    console.error(`[Git] Commit failed: ${result.error}`);
     return result;
   }
 }
@@ -488,12 +505,13 @@ async function commitAndPush(
       : commitResult.error,
   });
 
-  // Check if there was nothing to commit (success case with specific message)
-  if (commitResult.success && commitResult.content) {
-    const stdout = commitResult.content.stdout || '';
-    if (stdout.includes('nothing to commit') || stdout.includes('no changes added')) {
-      return createSuccess({ logs }, 'Nothing to commit');
-    }
+  // If commitChanges detected a clean working tree, skip push and return success
+  if (
+    commitResult.nothingToCommit ||
+    (commitResult.success && commitResult.content && commitResult.content.nothingToCommit)
+  ) {
+    logs.push('[Git] Nothing to commit — skipping push');
+    return createSuccess({ logs }, 'Nothing to commit');
   }
 
   if (!commitResult.success) {

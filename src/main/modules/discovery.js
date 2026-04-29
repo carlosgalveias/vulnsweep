@@ -4,7 +4,10 @@ const path = require('path');
 const { createSuccess, createError } = require('../utils/result');
 
 /**
- * Validates if a directory is a valid Node.js project
+ * Validates if a directory is a valid Node.js project.
+ * A valid project must have package.json. package-lock.json is NOT required
+ * for discovery — projects without a lock file are still discovered but may
+ * fail later at the `npm audit` stage.
  * @param {string} projectPath - Absolute path to the project directory
  * @returns {Promise<Object>} - Result object with success boolean
  */
@@ -12,14 +15,6 @@ async function validateProject(projectPath) {
   try {
     // Check if package.json exists and is accessible
     await fs.access(path.join(projectPath, 'package.json'), fsConstants.R_OK);
-
-    // Check if .git directory exists
-    const gitPath = path.join(projectPath, '.git');
-    const gitStat = await fs.stat(gitPath);
-
-    if (!gitStat.isDirectory()) {
-      return createError('Not a valid git repository (no .git directory)');
-    }
 
     return createSuccess(true);
   } catch (error) {

@@ -25,6 +25,7 @@ const path = require('path');
 // Local modules
 const audit = require('../../../src/main/modules/audit');
 // Test fixtures
+const npmAuditExactVersion = require('../../fixtures/npm-audit-exact-version.json');
 const npmAuditRealWorld = require('../../fixtures/npm-audit-real-world.json');
 const npmAuditSample = require('../../fixtures/npm-audit-sample.json');
 const packageLockSample = require('../../fixtures/package-lock.json');
@@ -973,6 +974,113 @@ describe('audit module', () => {
       expect(strategy.targetVersion).not.toBe('1.1.0');
       expect(strategy.targetVersion).toBe('14.0.0');
       expect(strategy.type).toBe('UPDATE_DIRECT');
+    });
+  });
+
+  // ── Regression: exact-version range detection (Pattern 5) ───────────────────
+  // Bug: ranges like "=4.0.0" or "4.0.0" fell through all pattern blocks and
+  // returned null even when newer versions existed on the registry.
+  // Fix: Pattern 5 in determineSafeVersion() now handles these forms by
+  // converting them to a ">X.Y.Z" safe range and calling findMinSafeVersion().
+  describe('determineSafeVersion — exact-version range handling (regression)', () => {
+    const jwsVersions = ['4.0.0', '4.0.1', '4.0.2'];
+
+    const mockJwsVersions = (versions) => {
+      exec.mockImplementation((cmd, options, callback) => {
+        const promise = new Promise((resolve) => {
+          if (cmd.includes('versions --json')) {
+            resolve({ stdout: JSON.stringify(versions), stderr: '' });
+          } else {
+            resolve({ stdout: '', stderr: '' });
+          }
+        });
+        if (callback) {
+          promise.then(
+            (r) => callback(null, r),
+            (e) => callback(e)
+          );
+        }
+        return promise;
+      });
+    };
+
+    beforeEach(() => {
+      mockJwsVersions(jwsVersions);
+    });
+
+    it('=X.Y.Z form returns the lowest version strictly greater than the pinned version', async () => {
+      // Range "=4.0.0" → safe range ">4.0.0"
+      // minSatisfying(['4.0.0','4.0.1','4.0.2'], '>4.0.0') = '4.0.1'
+      const v = await audit.determineSafeVersion('jws', '=4.0.0', '4.0.0', null);
+      expect(v).toBe('4.0.1');
+    });
+
+    it('bare X.Y.Z form returns the lowest version strictly greater than the pinned version', async () => {
+      // Range "4.0.0" → safe range ">4.0.0"
+      // minSatisfying(['4.0.0','4.0.1','4.0.2'], '>4.0.0') = '4.0.1'
+      const v = await audit.determineSafeVersion('jws', '4.0.0', '4.0.0', null);
+      expect(v).toBe('4.0.1');
+    });
+
+    it('=X.Y.Z when no higher version exists returns null', async () => {
+      // Registry only has '4.0.0' — no version satisfies '>4.0.0'
+      mockJwsVersions(['4.0.0']);
+      const v = await audit.determineSafeVersion('jws', '=4.0.0', '4.0.0', null);
+      expect(v).toBeNull();
+    });
+
+    it('>=X.Y.Z (all-versions-vulnerable guard) still returns null — regression guard', async () => {
+      // ">=4.0.0" must NOT be handled by Pattern 5;
+      // the all-vulnerable guard fires first and returns null
+      const v = await audit.determineSafeVersion('jws', '>=4.0.0', '4.0.0', null);
+      expect(v).toBeNull();
+    });
+  });
+
+  // ── Integration: full audit with exact-version vulnerability ────────────────
+  describe('Integration: exact-version vulnerability in full audit fixture', () => {
+    beforeEach(() => {
+      exec.mockImplementation((cmd, options, callback) => {
+        const promise = new Promise((resolve) => {
+          if (cmd.includes('npm audit --json')) {
+            resolve({ stdout: JSON.stringify(npmAuditExactVersion), stderr: '' });
+          } else if (cmd.includes('versions --json')) {
+            resolve({
+              stdout: JSON.stringify(['4.0.0', '4.0.1', '4.0.2']),
+              stderr: '',
+            });
+          } else {
+            resolve({ stdout: '', stderr: '' });
+          }
+        });
+        if (callback) {
+          promise.then(
+            (r) => callback(null, r),
+            (e) => callback(e)
+          );
+        }
+        return promise;
+      });
+    });
+
+    it('jws vulnerability with exact-version range is parsed as a root cause', async () => {
+      const vulnerabilities = await audit.parseVulnerabilities(npmAuditExactVersion, '/test/path');
+      const jwsVuln = vulnerabilities.find((v) => v.package === 'jws');
+      expect(jwsVuln).toBeDefined();
+      expect(jwsVuln.isRootCause).toBe(true);
+      // The parser uses the top-level `range` field ("4.0.0") as vulnerableRange,
+      // not the via[].range ("=4.0.0"). Both forms are handled by Pattern 5.
+      expect(jwsVuln.vulnerableRange).toBe('4.0.0');
+    });
+
+    it('jws fix strategy resolves to 4.0.1 and is NOT NO_FIX', async () => {
+      const vulnerabilities = await audit.parseVulnerabilities(npmAuditExactVersion, '/test/path');
+      const jwsVuln = vulnerabilities.find((v) => v.package === 'jws');
+      expect(jwsVuln).toBeDefined();
+
+      const strategy = await audit.determineFixStrategy(jwsVuln, npmAuditExactVersion);
+      expect(strategy.type).not.toBe('NO_FIX');
+      expect(strategy.targetVersion).toBe('4.0.1');
     });
   });
 });

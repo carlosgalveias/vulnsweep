@@ -265,10 +265,19 @@ async function determineSafeVersion(packageName, range, currentVersion = null, p
     return findMinSafeVersion(packageName, `>${lteMatch[1]}`, currentVersion);
   }
 
-  // Pattern 3: X.Y.Z - A.B.C (hyphen range, both ends inclusive) — safe range is > A.B.C
-  const hyphenMatch = range.match(/(\d+\.\d+\.\d+)\s*-\s*(\d+\.\d+\.\d+)/);
+  // Pattern 3: X.Y.Z[-prerelease] - A.B.C[-prerelease] (hyphen range, both ends inclusive)
+  // The lower bound may contain a prerelease suffix (e.g. "40.0.0-alpha.2 - 40.8.4"), so
+  // the left-side regex must allow optional prerelease/build-metadata segments.
+  // We only need the UPPER bound (right side) to compute the safe range (> upper).
+  const hyphenMatch = range.match(
+    /\d+\.\d+\.\d+(?:[-+][^\s]*)?\s*-\s*(\d+\.\d+\.\d+(?:[-+][^\s]*)?)/
+  );
   if (hyphenMatch) {
-    return findMinSafeVersion(packageName, `>${hyphenMatch[2]}`, currentVersion);
+    // Use the upper-bound version string directly; strip any prerelease for safe-range boundary
+    const upperBound = semver.coerce(hyphenMatch[1]);
+    if (upperBound) {
+      return findMinSafeVersion(packageName, `>${upperBound.version}`, currentVersion);
+    }
   }
 
   // Pattern 4: Complex ranges with || or both > and < — delegate to findSafeVersionOutsideRange
@@ -278,6 +287,12 @@ async function determineSafeVersion(packageName, range, currentVersion = null, p
       installedVersion = await getInstalledVersionFromLockfile(projectPath, packageName);
     }
     return findSafeVersionOutsideRange(packageName, range, installedVersion);
+  }
+
+  // Pattern 5: =X.Y.Z or bare X.Y.Z (exact-version pinned — only that one version is vulnerable)
+  const exactMatch = range.match(/^=\s*(\d+\.\d+\.\d+)$/) || range.match(/^(\d+\.\d+\.\d+)$/);
+  if (exactMatch) {
+    return findMinSafeVersion(packageName, `>${exactMatch[1]}`, currentVersion);
   }
 
   return null;
