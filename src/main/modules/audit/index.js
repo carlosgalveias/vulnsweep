@@ -27,6 +27,24 @@ const {
 } = require('./strategies/version-resolver');
 
 /**
+ * Determine whether npm install is required for a project
+ * (i.e., node_modules is missing or package-lock.json is missing)
+ * @param {string} projectPath - Absolute path to the project
+ * @returns {Promise<boolean>} true if npm install should be run
+ */
+async function isInstallRequired(projectPath) {
+  const fs = require('fs').promises;
+  const path = require('path');
+  try {
+    await fs.access(require('path').join(projectPath, 'node_modules'));
+    await fs.access(path.join(projectPath, 'package-lock.json'));
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * High-level function to analyze a project for vulnerabilities
  * @param {string} projectPath - Absolute path to the project
  * @param {boolean} allowReset - Whether to reset and pull the repository before scanning
@@ -55,11 +73,16 @@ async function analyzeProject(projectPath, allowReset = false) {
       }
     }
 
-    // Step 1: Run npm install
-    console.log('[audit] Step 1: Running npm install...');
-    const installResult = await runNpmInstall(projectPath);
-    if (!installResult.success) {
-      console.warn(`[audit] npm install had issues: ${installResult.error}`);
+    // Step 1: Run npm install only if required
+    console.log('[audit] Step 1: Checking if npm install is required...');
+    if (await isInstallRequired(projectPath)) {
+      console.log('[audit] Running npm install...');
+      const installResult = await runNpmInstall(projectPath);
+      if (!installResult.success) {
+        console.warn(`[audit] npm install had issues: ${installResult.error}`);
+      }
+    } else {
+      console.log('[audit] npm install skipped (node_modules and package-lock.json present)');
     }
 
     // Step 2: Run npm audit

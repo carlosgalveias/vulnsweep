@@ -204,7 +204,8 @@ describe('App component', () => {
         [], // vulnerabilities
         expect.any(Set), // selectedVulns
         expect.any(Function), // setVulnerabilities
-        [] // projects
+        [], // projects
+        true // bumpVersion
       );
     });
 

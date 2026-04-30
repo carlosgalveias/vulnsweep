@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { DEFAULT_COMMIT_MESSAGE } from '../constants.js';
 
 /**
  * Custom hook for managing git operations (commit and push)
@@ -59,13 +60,10 @@ export default function useGitOperations(addLog, vulnerabilitiesRef, projectsRef
 
         // Commit and push changes with vulnerability data
         addLog('info', `Committing and pushing ${projectName}...`);
-        const pushResult = await window.electronAPI.commitAndPush(
-          projectPath,
-          {
-            message: 'fix(security): update vulnerable dependencies',
-            vulnerabilities: projectVulnerabilities,
-          }
-        );
+        const pushResult = await window.electronAPI.commitAndPush(projectPath, {
+          message: DEFAULT_COMMIT_MESSAGE,
+          vulnerabilities: projectVulnerabilities,
+        });
 
         if (pushResult.success) {
           addLog('success', `Successfully committed and pushed ${projectName}`);

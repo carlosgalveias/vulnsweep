@@ -101,10 +101,6 @@ function createSplashWindow() {
     },
   });
 
-  // Get version from Electron app metadata (set by electron-builder from package.json)
-  const appVersion = app.getVersion();
-  const appName = app.getName();
-
   // In production, load from dist-renderer; in development, load from src
   // Note: __dirname is always 'dist-main' because package.json main points to dist-main/main.js
   const splashPath = isDevelopment
@@ -113,19 +109,12 @@ function createSplashWindow() {
 
   splashWindow.loadFile(splashPath);
 
-  // Inject version data and logo path after page loads
+  // Send version data to splash screen via IPC after page loads
   splashWindow.webContents.on('did-finish-load', () => {
-    splashWindow.webContents.executeJavaScript(`
-        window.splashAPI = {
-          version: '${appVersion}',
-          appName: '${appName}'
-        };
-        // Update the version element immediately
-        const versionElement = document.getElementById('version');
-        if (versionElement) {
-          versionElement.textContent = 'v${appVersion}';
-        }
-      `);
+    splashWindow.webContents.send('splash:data', {
+      version: app.getVersion(),
+      appName: app.getName(),
+    });
   });
 
   // Remove menu bar from splash window
@@ -443,7 +432,7 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
 /**
  * Handler: Apply fixes to a project
  */
-ipcMain.handle('apply-fixes', async (event, projectPath, strategies) => {
+ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion = true) => {
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
@@ -457,7 +446,7 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies) => {
     }
 
     // Apply fixes - returns Result object { success, data, message }
-    const result = await audit.applyFixes(sanitized, strategies);
+    const result = await audit.applyFixes(sanitized, strategies, bumpVersion);
 
     // Check if fixes failed
     if (!result.success) {

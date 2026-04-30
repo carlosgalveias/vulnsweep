@@ -11,6 +11,7 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const semver = require('semver');
 const { createSuccess, createError } = require('../../../utils/result');
 const { runNpmAudit } = require('../commands/npm-audit');
 const { runNpmInstall } = require('../commands/npm-install');
@@ -18,30 +19,13 @@ const { parseVulnerabilities } = require('../parsers/vulnerability-parser');
 const { generatePackageJsonChanges } = require('./package-updater');
 
 /**
- * Increment the patch version of a semver version string
- * @param {string} version - Current version (e.g., "1.0.1")
- * @returns {string} Incremented version (e.g., "1.0.2")
- */
-function incrementPatchVersion(version) {
-  const parts = version.split('.');
-  if (parts.length !== 3) {
-    console.warn(`[audit] Invalid version format: ${version}`);
-    return version; // Return unchanged if not valid semver
-  }
-  
-  const [major, minor, patch] = parts;
-  const newPatch = parseInt(patch, 10) + 1;
-  
-  return `${major}.${minor}.${newPatch}`;
-}
-
-/**
  * Apply fixes to a project by modifying package.json and running npm install
  * @param {string} projectPath - Absolute path to the project
  * @param {Array} strategies - Array of strategy objects
+ * @param {boolean} bumpVersion - Whether to bump the patch version after applying fixes
  * @returns {Promise<Object>} { success: boolean, applied: array, resolved: array, remaining: array }
  */
-async function applyFixes(projectPath, strategies) {
+async function applyFixes(projectPath, strategies, bumpVersion = true) {
   try {
     console.log(`[audit] Applying fixes to: ${projectPath}`);
 
@@ -84,17 +68,21 @@ async function applyFixes(projectPath, strategies) {
     await fs.writeFile(packageJsonPath, JSON.stringify(modifiedPackageJson, null, 2));
     console.log('[audit] Updated package.json');
 
-    // Increment patch version after applying fixes
-    if (modifiedPackageJson.version) {
+    // Bump patch version after applying fixes (if enabled)
+    if (bumpVersion && modifiedPackageJson.version) {
       const oldVersion = modifiedPackageJson.version;
-      modifiedPackageJson.version = incrementPatchVersion(oldVersion);
-      
-      // Write the updated package.json with new version
-      await fs.writeFile(packageJsonPath, JSON.stringify(modifiedPackageJson, null, 2));
-      
-      console.log(
-        `[audit] Bumped project version from ${oldVersion} to ${modifiedPackageJson.version}`
-      );
+      const newVersion = semver.inc(oldVersion, 'patch');
+
+      if (newVersion) {
+        modifiedPackageJson.version = newVersion;
+        // Write the updated package.json with new version
+        await fs.writeFile(packageJsonPath, JSON.stringify(modifiedPackageJson, null, 2));
+        console.log(`[audit] Bumped project version from ${oldVersion} to ${newVersion}`);
+      } else {
+        console.warn(`[audit] Could not bump version from ${oldVersion}, skipping`);
+      }
+    } else if (!bumpVersion) {
+      console.log('[audit] Version bump skipped (bumpVersion=false)');
     } else {
       console.warn('[audit] No version field found in package.json, skipping version bump');
     }
@@ -105,6 +93,12 @@ async function applyFixes(projectPath, strategies) {
       // Restore backup on failure
       await fs.writeFile(packageJsonPath, JSON.stringify(currentPackageJson, null, 2));
       console.error('[audit] npm install failed, restored backup');
+      // Clean up backup file
+      try {
+        await fs.unlink(backupPath);
+      } catch (unlinkErr) {
+        console.warn(`[audit] Could not remove backup: ${unlinkErr.message}`);
+      }
       return createError(installResult.error, {
         applied: changes,
         resolved: [],
@@ -131,6 +125,13 @@ async function applyFixes(projectPath, strategies) {
     console.log(
       `[audit] Applied ${changes.length} fixes, resolved ${resolved.length} vulnerabilities, ${remaining.length} remaining`
     );
+
+    // Clean up backup file on success
+    try {
+      await fs.unlink(backupPath);
+    } catch (unlinkErr) {
+      console.warn(`[audit] Could not remove backup: ${unlinkErr.message}`);
+    }
 
     return createSuccess({
       applied: changes,

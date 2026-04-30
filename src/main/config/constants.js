@@ -34,7 +34,7 @@ const GIT_CONFIG = {
    * Default commit message used when none is provided
    * @type {string}
    */
-  DEFAULT_COMMIT_MESSAGE: 'chore(security): update vulnerable dependencies',
+  DEFAULT_COMMIT_MESSAGE: 'fix(security): update vulnerable dependencies',
 };
 
 // ============================================

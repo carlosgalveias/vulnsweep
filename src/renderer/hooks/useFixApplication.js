@@ -14,7 +14,8 @@ export default function useFixApplication(
   vulnerabilities,
   selectedVulns,
   setVulnerabilities,
-  projects
+  projects,
+  bumpVersion = true
 ) {
   const [isApplying, setIsApplying] = useState(false);
   const [showHighRiskModal, setShowHighRiskModal] = useState(false);
@@ -65,7 +66,7 @@ export default function useFixApplication(
           continue;
         }
 
-        const result = await window.electronAPI.applyFixes(projectPath, strategies);
+        const result = await window.electronAPI.applyFixes(projectPath, strategies, bumpVersion);
 
         if (result.success) {
           // Update status to 'resolved' for applied fixes
@@ -104,7 +105,7 @@ export default function useFixApplication(
 
     setIsApplying(false);
     addLog('success', 'Fix application complete');
-  }, [addLog, vulnerabilities, selectedVulns, setVulnerabilities, projects]);
+  }, [addLog, vulnerabilities, selectedVulns, setVulnerabilities, projects, bumpVersion]);
 
   /**
    * Apply fixes to selected vulnerabilities (with HIGH risk confirmation)

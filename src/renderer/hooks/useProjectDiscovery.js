@@ -19,7 +19,6 @@ export default function useProjectDiscovery(addLog, onProjectsDiscovered) {
   const browseFolder = useCallback(async () => {
     try {
       const folder = await window.electronAPI.selectFolder();
-      addLog('info', `[DEBUG] Folder selection response: ${JSON.stringify(folder)}`);
 
       if (folder && folder.content) {
         setSelectedFolder(folder.content);

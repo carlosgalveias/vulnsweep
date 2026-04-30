@@ -8,6 +8,8 @@ function Header({
   buttonsState,
   allowReset,
   onAllowResetChange,
+  bumpVersion,
+  onBumpVersionChange,
 }) {
   const showProgress = progress && progress.total > 0;
 
@@ -59,6 +61,21 @@ function Header({
               </span>
             </label>
             <span className="text-xs text-red-400 font-medium">(Destructive)</span>
+          </div>
+
+          {/* Bump Version Toggle */}
+          <div className="flex items-center gap-2 px-2">
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={bumpVersion}
+                onChange={(e) => onBumpVersionChange(e.target.checked)}
+                className="w-3.5 h-3.5 text-blue-600 bg-surface-overlay border-gray-600 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+              />
+              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
+                Bump patch version on fix
+              </span>
+            </label>
           </div>
         </div>
 

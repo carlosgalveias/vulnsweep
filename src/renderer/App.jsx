@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
@@ -26,6 +26,9 @@ function App() {
    */
   const projectsRef = useRef([]);
   const vulnerabilitiesRef = useRef([]);
+
+  // bumpVersion state: whether to bump patch version when applying fixes
+  const [bumpVersion, setBumpVersion] = useState(true);
 
   // Git operations hook (defines allowReset state)
   // Receives refs instead of actual arrays to avoid circular dependency
@@ -75,7 +78,14 @@ function App() {
     highRiskCount,
     closeHighRiskModal,
     confirmHighRiskFixes,
-  } = useFixApplication(addLog, vulnerabilities, selectedVulns, setVulnerabilities, projects);
+  } = useFixApplication(
+    addLog,
+    vulnerabilities,
+    selectedVulns,
+    setVulnerabilities,
+    projects,
+    bumpVersion
+  );
 
   // Button states
   const buttonsState = {
@@ -102,6 +112,8 @@ function App() {
           buttonsState={buttonsState}
           allowReset={allowReset}
           onAllowResetChange={handleAllowResetChange}
+          bumpVersion={bumpVersion}
+          onBumpVersionChange={setBumpVersion}
         />
       </ErrorBoundary>
 
