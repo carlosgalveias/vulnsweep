@@ -26,6 +26,7 @@ const path = require('path');
 const audit = require('../../../src/main/modules/audit');
 // Test fixtures
 const npmAuditExactVersion = require('../../fixtures/npm-audit-exact-version.json');
+const npmAuditMinimatchOrRange = require('../../fixtures/npm-audit-minimatch-or-range.json');
 const npmAuditPostcssIndirect = require('../../fixtures/npm-audit-postcss-indirect.json');
 const npmAuditRealWorld = require('../../fixtures/npm-audit-real-world.json');
 const npmAuditSample = require('../../fixtures/npm-audit-sample.json');
@@ -1230,6 +1231,146 @@ describe('audit module', () => {
       const strategy = await audit.determineFixStrategy(postcssVuln, npmAuditPostcssIndirect);
       expect(strategy.type).toBe('ADD_OVERRIDE');
       expect(strategy.targetVersion).toBe('8.5.10');
+    });
+  });
+
+  // Regression: complex OR vulnerability range handling
+  // Bug A: Pattern 3 unanchored hyphen regex was firing on OR ranges.
+  //   Fix: Pattern 3 is now guarded by if (!range.includes('||')).
+  // Bug B: Pattern 4 returned global minimum instead of installed-version-aware fix.
+  //   Fix: Pattern 4 now splits on ||, finds matching segment, returns segment boundary.
+  // Correct result: minimatch@9.0.5 range "<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6" => 9.0.7
+  // These tests must never be deleted.
+  describe('Regression: complex OR vulnerability range handling (minimatch pattern)', () => {
+    const mockVersions = (versions) => {
+      exec.mockImplementation((cmd, options, callback) => {
+        const promise = new Promise((resolve) => {
+          if (cmd.includes('versions --json')) {
+            resolve({ stdout: JSON.stringify(versions), stderr: '' });
+          } else {
+            resolve({ stdout: '', stderr: '' });
+          }
+        });
+        if (callback) {
+          promise.then(
+            (r) => callback(null, r),
+            (e) => callback(e)
+          );
+        }
+        return promise;
+      });
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      audit.clearCache();
+    });
+
+    // Pattern 3 guard unit tests
+
+    it('pure hyphen range still returns the first safe version after the upper bound (regression guard)', async () => {
+      // Range "1.0.0 - 2.0.0" => upper bound 2.0.0 => safe range ">2.0.0"
+      // minSatisfying(['1.0.0','2.0.0','2.5.0','3.0.0'], '>2.0.0') = '2.5.0'
+      mockVersions(['1.0.0', '2.0.0', '2.5.0', '3.0.0']);
+      const v = await audit.determineSafeVersion('pkg', '1.0.0 - 2.0.0', '1.5.0', null);
+      expect(v).toBe('2.5.0');
+    });
+
+    it('OR range containing a hyphen segment does NOT trigger Pattern 3 (Bug A regression)', async () => {
+      // Before fix: Pattern 3 matched "5.0.0 - 5.1.7" inside OR range => 5.1.8 (wrong)
+      // After fix: Pattern 3 skipped for OR ranges, Pattern 4 returns 9.0.7 (correct)
+      mockVersions(['3.1.4', '5.1.8', '9.0.7', '9.0.8', '9.0.9']);
+      const v = await audit.determineSafeVersion(
+        'minimatch',
+        '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        '9.0.5',
+        null
+      );
+      expect(v).toBe('9.0.7');
+      expect(v).not.toBe('3.1.4');
+    });
+
+    // Pattern 4 segment-aware unit tests
+
+    it('OR range - installed version in first segment returns that segment boundary', async () => {
+      // installedVersion 3.1.2 satisfies "<=3.1.3" => safe range ">3.1.3" => 3.1.4
+      mockVersions(['3.1.4', '3.1.5', '5.1.8', '9.0.7']);
+      const v = await audit.determineSafeVersion(
+        'minimatch',
+        '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        '3.1.2',
+        null
+      );
+      expect(v).toBe('3.1.4');
+    });
+
+    it('OR range - installed version in second segment returns that segment boundary', async () => {
+      // installedVersion 5.1.0 satisfies "5.0.0 - 5.1.7" => safe range ">5.1.7" => 5.1.8
+      mockVersions(['3.1.4', '5.1.8', '9.0.7']);
+      const v = await audit.determineSafeVersion(
+        'minimatch',
+        '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        '5.1.0',
+        null
+      );
+      expect(v).toBe('5.1.8');
+    });
+
+    it('OR range - installed version in third segment returns 9.0.7 not 3.1.4 (Bug B regression)', async () => {
+      // The exact reported case: minimatch@9.0.5.
+      // Before fix: findSafeVersionOutsideRange returned '^3.1.4' (downgrade from 9.x)
+      // After fix: segment "9.0.0 - 9.0.6" matched => safe boundary 9.0.7
+      mockVersions(['3.1.4', '5.1.8', '9.0.7', '9.0.8', '9.0.9']);
+      const v = await audit.determineSafeVersion(
+        'minimatch',
+        '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        '9.0.5',
+        null
+      );
+      expect(v).toBe('9.0.7');
+      expect(v).not.toBe('3.1.4');
+    });
+
+    it('OR range - currentVersion null falls back without throwing (no crash regression)', async () => {
+      // When currentVersion is null, segment-aware path is skipped.
+      // Falls back to findSafeVersionOutsideRange; result is non-null (some safe version found).
+      mockVersions(['3.1.4', '5.1.8', '9.0.7']);
+      const v = await audit.determineSafeVersion(
+        'minimatch',
+        '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        null,
+        null
+      );
+      // Should not throw and should return a string or null (not undefined)
+      expect(v).not.toBeUndefined();
+    });
+    // Integration tests with the minimatch fixture
+
+    it('minimatch fixture vulnerability is parsed as a root cause (integration)', async () => {
+      const vulnerabilities = await audit.parseVulnerabilities(
+        npmAuditMinimatchOrRange,
+        '/test/path'
+      );
+      const minimatchVuln = vulnerabilities.find((v) => v.package === 'minimatch');
+      expect(minimatchVuln).toBeDefined();
+      expect(minimatchVuln.isRootCause).toBe(true);
+      expect(minimatchVuln.vulnerableRange).toBe('<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6');
+    });
+
+    it('minimatch@9.0.5 fix strategy resolves to 9.0.7 and is NOT NO_FIX (integration)', async () => {
+      // Mock registry to return versions for minimatch
+      mockVersions(['3.1.4', '5.1.8', '9.0.7', '9.0.8']);
+      const vuln = {
+        package: 'minimatch',
+        isDirect: false,
+        fixAvailable: true,
+        installedVersion: '9.0.5',
+        vulnerableRange: '<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6',
+        patchedVersion: null,
+      };
+      const strategy = await audit.determineFixStrategy(vuln, npmAuditMinimatchOrRange);
+      expect(strategy.type).not.toBe('NO_FIX');
+      expect(strategy.targetVersion).toBe('9.0.7');
     });
   });
 });

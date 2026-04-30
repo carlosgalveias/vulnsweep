@@ -269,23 +269,76 @@ async function determineSafeVersion(packageName, range, currentVersion = null, p
   // The lower bound may contain a prerelease suffix (e.g. "40.0.0-alpha.2 - 40.8.4"), so
   // the left-side regex must allow optional prerelease/build-metadata segments.
   // We only need the UPPER bound (right side) to compute the safe range (> upper).
-  const hyphenMatch = range.match(
-    /\d+\.\d+\.\d+(?:[-+][^\s]*)?\s*-\s*(\d+\.\d+\.\d+(?:[-+][^\s]*)?)/
-  );
-  if (hyphenMatch) {
-    // Use the upper-bound version string directly; strip any prerelease for safe-range boundary
-    const upperBound = semver.coerce(hyphenMatch[1]);
-    if (upperBound) {
-      return findMinSafeVersion(packageName, `>${upperBound.version}`, currentVersion);
+  // Guard: skip if this is an OR range — Pattern 4 handles those correctly per-segment.
+  if (!range.includes('||')) {
+    const hyphenMatch = range.match(
+      /\d+\.\d+\.\d+(?:[-+][^\s]*)?\s*-\s*(\d+\.\d+\.\d+(?:[-+][^\s]*)?)/
+    );
+    if (hyphenMatch) {
+      // Use the upper-bound version string directly; strip any prerelease for safe-range boundary
+      const upperBound = semver.coerce(hyphenMatch[1]);
+      if (upperBound) {
+        return findMinSafeVersion(packageName, `>${upperBound.version}`, currentVersion);
+      }
     }
   }
 
-  // Pattern 4: Complex ranges with || or both > and < — delegate to findSafeVersionOutsideRange
+  // Pattern 4: OR ranges (||) — find the safe boundary of the segment containing currentVersion.
+  // Also handles complex ranges with both > and <.
   if (range.includes('||') || (range.includes('>') && range.includes('<'))) {
     let installedVersion = currentVersion;
     if (!installedVersion && projectPath) {
       installedVersion = await getInstalledVersionFromLockfile(projectPath, packageName);
     }
+
+    // Segment-aware path for OR ranges when we know the installed version
+    if (range.includes('||') && installedVersion && semver.valid(semver.coerce(installedVersion))) {
+      const coercedCurrent = semver.coerce(installedVersion).version;
+      const segments = range.split('||').map((s) => s.trim());
+      const matchingSegmentSafeBounds = [];
+
+      for (const segment of segments) {
+        let segmentSatisfied = false;
+        try {
+          segmentSatisfied = semver.satisfies(coercedCurrent, segment);
+        } catch {
+          // If semver can't parse the segment, skip it
+        }
+        if (!segmentSatisfied) continue;
+
+        // Found a segment containing installedVersion — compute its safe boundary
+        const hyphenSeg = segment.match(
+          /^(\d+\.\d+\.\d+(?:[-+][^\s]*)?)\s*-\s*(\d+\.\d+\.\d+(?:[-+][^\s]*)?)$/
+        );
+        const lteSeg = segment.match(/^<=\s*(\d+\.\d+\.\d+)$/);
+        const ltSeg = segment.match(/^<\s*(\d+\.\d+\.\d+)$/);
+        const complexSeg = segment.match(/>=?\s*[\d.]+\s*<\s*(\d+\.\d+\.\d+)/);
+
+        let safeRange = null;
+        if (hyphenSeg) {
+          const upperBound = semver.coerce(hyphenSeg[2]);
+          safeRange = upperBound ? `>${upperBound.version}` : null;
+        } else if (lteSeg) {
+          safeRange = `>${lteSeg[1]}`;
+        } else if (ltSeg) {
+          safeRange = `>=${ltSeg[1]}`;
+        } else if (complexSeg) {
+          safeRange = `>=${complexSeg[1]}`;
+        }
+
+        if (safeRange) {
+          const candidate = await findMinSafeVersion(packageName, safeRange, coercedCurrent);
+          if (candidate) matchingSegmentSafeBounds.push(candidate);
+        }
+      }
+
+      if (matchingSegmentSafeBounds.length > 0) {
+        // Return the minimum candidate (prefer staying as close to current version as possible)
+        return matchingSegmentSafeBounds.sort((a, b) => semver.compare(a, b))[0];
+      }
+    }
+
+    // Fallback: no installedVersion, installedVersion matches no segment, or non-OR complex range
     return findSafeVersionOutsideRange(packageName, range, installedVersion);
   }
 
