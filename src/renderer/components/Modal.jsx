@@ -17,7 +17,7 @@ function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 max-w-md w-full mx-4 animate-fadeIn">
+      <div className="bg-surface-raised rounded-lg shadow-2xl border border-gray-700 max-w-md w-full mx-4 animate-fadeIn">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-700">
           <h3 className="text-lg font-semibold text-gray-100">{title}</h3>
@@ -29,7 +29,7 @@ function Modal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-gray-850 rounded-b-lg border-t border-gray-700 flex justify-end gap-3">
+        <div className="px-6 py-4 bg-surface-mid rounded-b-lg border-t border-gray-700 flex justify-end gap-3">
           <button
             onClick={onClose}
             className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium rounded-lg transition-colors"

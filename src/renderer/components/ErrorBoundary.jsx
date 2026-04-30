@@ -1,3 +1,5 @@
+import { AlertTriangle } from 'lucide-react';
+import PropTypes from 'prop-types';
 import React from 'react';
 
 /**
@@ -75,15 +77,15 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       // Render fallback UI
       return (
-        <div className="flex items-center justify-center min-h-[200px] bg-gray-800 rounded-lg p-6 m-2">
+        <div className="flex items-center justify-center min-h-[200px] bg-surface-raised rounded-lg p-6 m-2">
           <div className="text-center max-w-2xl">
-            {/* Error Icon */}
-            <div className="text-5xl mb-4">⚠️</div>
-
-            {/* Error Title */}
-            <h2 className="text-xl font-semibold text-white mb-2">
-              {this.props.fallbackMessage || 'Something went wrong'}
-            </h2>
+            {/* Error Icon + Title */}
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <AlertTriangle size={20} strokeWidth={2} className="text-yellow-400 shrink-0" />
+              <h2 className="text-xl font-semibold text-white">
+                {this.props.fallbackMessage || 'Something went wrong'}
+              </h2>
+            </div>
 
             {/* Error Description */}
             <p className="text-gray-400 mb-4">
@@ -93,7 +95,7 @@ class ErrorBoundary extends React.Component {
 
             {/* Development Mode: Show Error Details */}
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="text-left mb-4 bg-gray-900 rounded p-4">
+              <details className="text-left mb-4 bg-surface rounded p-4">
                 <summary className="text-blue-400 cursor-pointer hover:text-blue-300 font-medium mb-2">
                   🔍 Error details (Development Mode)
                 </summary>
@@ -108,7 +110,7 @@ class ErrorBoundary extends React.Component {
                   {this.state.error.stack && (
                     <div>
                       <span className="text-red-400 font-semibold">Stack Trace:</span>
-                      <pre className="text-xs text-gray-500 mt-1 overflow-auto max-h-40 bg-black p-2 rounded">
+                      <pre className="text-xs text-text-muted mt-1 overflow-auto max-h-40 bg-surface-sunken p-2 rounded">
                         {this.state.error.stack}
                       </pre>
                     </div>
@@ -118,7 +120,7 @@ class ErrorBoundary extends React.Component {
                   {this.state.errorInfo && this.state.errorInfo.componentStack && (
                     <div>
                       <span className="text-red-400 font-semibold">Component Stack:</span>
-                      <pre className="text-xs text-gray-500 mt-1 overflow-auto max-h-40 bg-black p-2 rounded">
+                      <pre className="text-xs text-text-muted mt-1 overflow-auto max-h-40 bg-surface-sunken p-2 rounded">
                         {this.state.errorInfo.componentStack}
                       </pre>
                     </div>
@@ -143,5 +145,16 @@ class ErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
+ErrorBoundary.propTypes = {
+  /** Child components to wrap */
+  children: PropTypes.node.isRequired,
+  /** Custom error message to display in the heading */
+  fallbackMessage: PropTypes.string,
+};
+
+ErrorBoundary.defaultProps = {
+  fallbackMessage: undefined,
+};
 
 export default ErrorBoundary;

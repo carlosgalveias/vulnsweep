@@ -43,9 +43,9 @@ function LogConsole({ logs, onClear }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-black border-l border-gray-700">
+    <div className="flex flex-col h-full bg-surface-sunken border-l border-gray-700">
       {/* Header */}
-      <div className="flex items-center justify-between compact-header bg-gray-900 border-b border-gray-700">
+      <div className="flex items-center justify-between compact-header bg-surface border-b border-gray-700">
         <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Log Console</h3>
         <div className="flex compact-gap-sm">
           <button
@@ -74,13 +74,18 @@ function LogConsole({ logs, onClear }) {
       </div>
 
       {/* Log Display */}
-      <div ref={consoleRef} className="flex-1 overflow-auto compact-header font-mono text-[0.65rem] leading-tight">
+      <div
+        ref={consoleRef}
+        className="flex-1 overflow-auto compact-header font-mono text-[0.65rem] leading-tight"
+      >
         {logs.length === 0 ? (
-          <div className="text-gray-600 italic text-xs">No logs yet. Start a scan to see activity...</div>
+          <div className="text-gray-600 italic text-xs">
+            No logs yet. Start a scan to see activity...
+          </div>
         ) : (
           logs.map((log, index) => (
             <div key={index} className="mb-0.5 hover:bg-gray-900 px-1.5 py-0.5 rounded">
-              <span className="text-gray-500">[{formatTimestamp(log.timestamp)}]</span>{' '}
+              <span className="text-text-muted">[{formatTimestamp(log.timestamp)}]</span>{' '}
               <span className={`font-semibold ${getLogColor(log.level)}`}>
                 [{log.level.toUpperCase()}]
               </span>{' '}

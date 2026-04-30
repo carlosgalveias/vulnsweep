@@ -69,11 +69,11 @@ jest.mock('../../src/renderer/hooks/useFixApplication', () => ({
 }));
 
 // Import mocked hooks after mocking
-import useLogConsole from '../../src/renderer/hooks/useLogConsole';
-import useGitOperations from '../../src/renderer/hooks/useGitOperations';
-import useVulnerabilityScanner from '../../src/renderer/hooks/useVulnerabilityScanner';
-import useProjectDiscovery from '../../src/renderer/hooks/useProjectDiscovery';
 import useFixApplication from '../../src/renderer/hooks/useFixApplication';
+import useGitOperations from '../../src/renderer/hooks/useGitOperations';
+import useLogConsole from '../../src/renderer/hooks/useLogConsole';
+import useProjectDiscovery from '../../src/renderer/hooks/useProjectDiscovery';
+import useVulnerabilityScanner from '../../src/renderer/hooks/useVulnerabilityScanner';
 
 describe('App component', () => {
   let consoleErrorSpy;
@@ -81,7 +81,7 @@ describe('App component', () => {
   beforeEach(() => {
     // Mock console.error to catch any initialization errors
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    
+
     // Reset all mocks
     jest.clearAllMocks();
   });
@@ -97,39 +97,46 @@ describe('App component', () => {
 
     it('should not throw initialization order errors', () => {
       render(<App />);
-      
+
       // Check that no "Cannot access before initialization" errors occurred
-      const initializationErrors = consoleErrorSpy.mock.calls.filter(call =>
-        call.some(arg => 
-          typeof arg === 'string' && 
-          (arg.includes('Cannot access') || arg.includes('before initialization'))
+      const initializationErrors = consoleErrorSpy.mock.calls.filter((call) =>
+        call.some(
+          (arg) =>
+            typeof arg === 'string' &&
+            (arg.includes('Cannot access') || arg.includes('before initialization'))
         )
       );
-      
+
       expect(initializationErrors).toHaveLength(0);
     });
 
     it('should render main container with correct layout classes', () => {
       const { container } = render(<App />);
-      
+
       const mainContainer = container.firstChild;
-      expect(mainContainer).toHaveClass('h-screen', 'flex', 'flex-col', 'bg-gray-900', 'text-gray-100');
+      expect(mainContainer).toHaveClass(
+        'h-screen',
+        'flex',
+        'flex-col',
+        'bg-surface',
+        'text-gray-100'
+      );
     });
 
     it('should render Header component', () => {
       const { container } = render(<App />);
-      
+
       // Header should be present - check for the actual header element
       const headerElement = container.querySelector('header');
       expect(headerElement).toBeInTheDocument();
-      
+
       // Verify header has expected content (Browse button is a good indicator)
       expect(screen.getByRole('button', { name: /browse/i })).toBeInTheDocument();
     });
 
     it('should render VulnerabilityGrid section', () => {
       const { container } = render(<App />);
-      
+
       // Check for the vulnerability grid container
       const gridContainer = container.querySelector('.h-\\[60\\%\\]');
       expect(gridContainer).toBeInTheDocument();
@@ -137,7 +144,7 @@ describe('App component', () => {
 
     it('should render LogConsole section', () => {
       const { container } = render(<App />);
-      
+
       // Check for the log console container
       const logContainer = container.querySelector('.h-\\[40\\%\\]');
       expect(logContainer).toBeInTheDocument();
@@ -147,26 +154,26 @@ describe('App component', () => {
   describe('hook initialization order', () => {
     it('should initialize useLogConsole first', () => {
       render(<App />);
-      
+
       // useLogConsole should be called exactly once
       expect(useLogConsole).toHaveBeenCalledTimes(1);
     });
 
     it('should initialize useGitOperations with correct parameters', () => {
       render(<App />);
-      
+
       // useGitOperations should be called with addLog and refs
       expect(useGitOperations).toHaveBeenCalledTimes(1);
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) })  // projectsRef
+        expect.objectContaining({ current: expect.any(Array) }) // projectsRef
       );
     });
 
     it('should initialize useVulnerabilityScanner with correct parameters', () => {
       render(<App />);
-      
+
       // useVulnerabilityScanner should be called with addLog, getProjects callback, and allowReset
       expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
       expect(useVulnerabilityScanner).toHaveBeenCalledWith(
@@ -178,18 +185,18 @@ describe('App component', () => {
 
     it('should initialize useProjectDiscovery with correct parameters', () => {
       render(<App />);
-      
+
       // useProjectDiscovery should be called with addLog and resetVulnerabilities
       expect(useProjectDiscovery).toHaveBeenCalledTimes(1);
       expect(useProjectDiscovery).toHaveBeenCalledWith(
         expect.any(Function), // addLog
-        expect.any(Function)  // resetVulnerabilities from useVulnerabilityScanner
+        expect.any(Function) // resetVulnerabilities from useVulnerabilityScanner
       );
     });
 
     it('should initialize useFixApplication with correct parameters', () => {
       render(<App />);
-      
+
       // useFixApplication should be called with all necessary parameters
       expect(useFixApplication).toHaveBeenCalledTimes(1);
       expect(useFixApplication).toHaveBeenCalledWith(
@@ -203,7 +210,7 @@ describe('App component', () => {
 
     it('should call all hooks exactly once on mount', () => {
       render(<App />);
-      
+
       expect(useLogConsole).toHaveBeenCalledTimes(1);
       expect(useGitOperations).toHaveBeenCalledTimes(1);
       expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
@@ -221,7 +228,7 @@ describe('App component', () => {
       });
 
       render(<App />);
-      
+
       // Scan button should be disabled when no projects
       // (This is tested indirectly through the buttonsState prop passed to Header)
       expect(useProjectDiscovery).toHaveBeenCalled();
@@ -241,7 +248,7 @@ describe('App component', () => {
       });
 
       render(<App />);
-      
+
       // Apply fixes button should be disabled when no vulnerabilities are selected
       expect(useVulnerabilityScanner).toHaveBeenCalled();
     });
@@ -260,7 +267,7 @@ describe('App component', () => {
       });
 
       render(<App />);
-      
+
       // Commit button should be disabled when no resolved vulnerabilities
       expect(useVulnerabilityScanner).toHaveBeenCalled();
     });
@@ -278,7 +285,7 @@ describe('App component', () => {
       });
 
       render(<App />);
-      
+
       // Modal should be rendered (Modal component handles visibility based on isOpen)
       const modalElements = screen.queryAllByText(/Confirm HIGH Risk Fixes/i);
       expect(modalElements.length).toBeGreaterThanOrEqual(0);
@@ -296,7 +303,7 @@ describe('App component', () => {
       });
 
       render(<App />);
-      
+
       // Modal should be rendered
       const modalElements = screen.queryAllByText(/Confirm Destructive Git Reset/i);
       expect(modalElements.length).toBeGreaterThanOrEqual(0);
@@ -306,7 +313,7 @@ describe('App component', () => {
   describe('error boundary integration', () => {
     it('should wrap Header in ErrorBoundary', () => {
       const { container } = render(<App />);
-      
+
       // Check that ErrorBoundary is present (it's a component wrapper)
       // We can verify this indirectly by checking the structure
       expect(container.querySelector('.h-screen')).toBeInTheDocument();
@@ -314,7 +321,7 @@ describe('App component', () => {
 
     it('should wrap VulnerabilityGrid in ErrorBoundary', () => {
       const { container } = render(<App />);
-      
+
       // Verify the grid section exists within error boundary
       const gridSection = container.querySelector('.h-\\[60\\%\\]');
       expect(gridSection).toBeInTheDocument();
@@ -322,7 +329,7 @@ describe('App component', () => {
 
     it('should wrap LogConsole in ErrorBoundary', () => {
       const { container } = render(<App />);
-      
+
       // Verify the log console section exists within error boundary
       const logSection = container.querySelector('.h-\\[40\\%\\]');
       expect(logSection).toBeInTheDocument();
@@ -334,12 +341,10 @@ describe('App component', () => {
       // This test ensures the bug doesn't return
       // If vulnerabilities is accessed before initialization, it will throw
       expect(() => render(<App />)).not.toThrow();
-      
+
       // Verify no temporal dead zone errors in console
-      const tdzErrors = consoleErrorSpy.mock.calls.filter(call =>
-        call.some(arg => 
-          typeof arg === 'string' && arg.includes('before initialization')
-        )
+      const tdzErrors = consoleErrorSpy.mock.calls.filter((call) =>
+        call.some((arg) => typeof arg === 'string' && arg.includes('before initialization'))
       );
       expect(tdzErrors).toHaveLength(0);
     });
@@ -347,12 +352,12 @@ describe('App component', () => {
     it('should not reference projects before it is defined', () => {
       // This test ensures projects isn't accessed before initialization
       expect(() => render(<App />)).not.toThrow();
-      
+
       // Verify no reference errors
-      const refErrors = consoleErrorSpy.mock.calls.filter(call =>
-        call.some(arg => 
-          typeof arg === 'string' && 
-          (arg.includes('projects') && arg.includes('not defined'))
+      const refErrors = consoleErrorSpy.mock.calls.filter((call) =>
+        call.some(
+          (arg) =>
+            typeof arg === 'string' && arg.includes('projects') && arg.includes('not defined')
         )
       );
       expect(refErrors).toHaveLength(0);
@@ -360,19 +365,19 @@ describe('App component', () => {
 
     it('should pass correct parameters to hooks on initial render', () => {
       render(<App />);
-      
+
       // Verify useGitOperations gets refs (not arrays) to avoid circular dependency
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function),
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) })  // projectsRef
+        expect.objectContaining({ current: expect.any(Array) }) // projectsRef
       );
-      
+
       // Verify useVulnerabilityScanner gets getProjects callback (not empty array)
       expect(useVulnerabilityScanner).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function), // getProjects callback
-        expect.any(Boolean)   // allowReset
+        expect.any(Boolean) // allowReset
       );
     });
   });
@@ -415,7 +420,7 @@ describe('App component', () => {
       // Verify: The getProjects callback should return the discovered projects
       expect(capturedGetProjects).toBeDefined();
       expect(typeof capturedGetProjects).toBe('function');
-      
+
       // Call the getProjects callback to verify it returns current projects
       const retrievedProjects = capturedGetProjects();
       expect(retrievedProjects).toEqual(mockProjects);
@@ -427,9 +432,7 @@ describe('App component', () => {
       const { rerender } = render(<App />);
 
       // Simulate project discovery
-      const mockProjects = [
-        { path: '/test/project1', name: 'Project 1' },
-      ];
+      const mockProjects = [{ path: '/test/project1', name: 'Project 1' }];
 
       useProjectDiscovery.mockReturnValue({
         selectedFolder: '/test',
@@ -503,7 +506,7 @@ describe('App component', () => {
       expect(useVulnerabilityScanner).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function), // getProjects callback (NOT an array)
-        expect.any(Boolean)   // allowReset
+        expect.any(Boolean) // allowReset
       );
 
       // Get the getProjects argument

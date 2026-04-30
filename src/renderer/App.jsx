@@ -29,12 +29,11 @@ function App() {
 
   // Git operations hook (defines allowReset state)
   // Receives refs instead of actual arrays to avoid circular dependency
-  const {
-    isCommitting,
-    allowReset,
-    handleAllowResetChange,
-    commitAndPush,
-  } = useGitOperations(addLog, vulnerabilitiesRef, projectsRef);
+  const { isCommitting, allowReset, handleAllowResetChange, commitAndPush } = useGitOperations(
+    addLog,
+    vulnerabilitiesRef,
+    projectsRef
+  );
 
   // Vulnerability scanner hook (uses allowReset from above, projectsRef)
   // Note: Receives a callback that accesses projectsRef.current for latest projects
@@ -90,7 +89,7 @@ function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900 text-gray-100">
+    <div className="h-screen flex flex-col bg-surface text-gray-100">
       {/* Header */}
       <ErrorBoundary fallbackMessage="Failed to load header">
         <Header

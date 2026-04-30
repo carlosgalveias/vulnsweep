@@ -12,7 +12,7 @@ function Header({
   const showProgress = progress && progress.total > 0;
 
   return (
-    <header className="bg-gray-800 border-b border-gray-700 compact-header">
+    <header className="bg-surface-raised border-b border-gray-700 compact-header">
       <div className="flex items-center justify-between compact-gap">
         {/* Left Section: Folder Selector & Settings */}
         <div className="flex flex-col compact-gap-sm flex-1 max-w-md">
@@ -22,7 +22,7 @@ function Header({
               type="text"
               readOnly
               value={selectedFolder || 'No folder selected'}
-              className="flex-1 bg-gray-900 text-gray-100 compact-input rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-default text-xs"
+              className="flex-1 bg-surface text-gray-100 compact-input rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-default text-xs"
               placeholder="Select a folder..."
             />
             <button
@@ -40,7 +40,7 @@ function Header({
                 type="checkbox"
                 checked={allowReset}
                 onChange={(e) => onAllowResetChange(e.target.checked)}
-                className="w-3.5 h-3.5 text-red-600 bg-gray-700 border-gray-600 rounded focus:ring-red-500 focus:ring-2 cursor-pointer"
+                className="w-3.5 h-3.5 text-red-600 bg-surface-overlay border-gray-600 rounded focus:ring-red-500 focus:ring-2 cursor-pointer"
               />
               <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
                 Allow Git Reset
@@ -74,9 +74,9 @@ function Header({
                   {progress.current} / {progress.total}
                 </span>
               </div>
-              <div className="w-full bg-gray-700 rounded-full h-1.5 overflow-hidden">
+              <div className="w-full bg-surface-overlay rounded-full h-1.5 overflow-hidden">
                 <div
-                  className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                  className="bg-brand-muted h-1.5 rounded-full transition-all duration-300"
                   style={{
                     width: `${(progress.current / progress.total) * 100}%`,
                   }}
@@ -100,7 +100,7 @@ function Header({
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
               buttonsState.applyFixes
                 ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
           >
             Apply Selected Fixes
@@ -111,7 +111,7 @@ function Header({
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
               buttonsState.commitPush
                 ? 'bg-green-600 hover:bg-green-700 text-white'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
           >
             Commit & Push
