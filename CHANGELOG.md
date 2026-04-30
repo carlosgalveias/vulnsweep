@@ -5,6 +5,85 @@ All notable changes to VulnSweep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-30
+
+### Added
+
+#### Task 6.2 — Dynamic Skeleton Loading ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+
+- Replaced static skeleton row count with a `ResizeObserver`-based dynamic calculation driven by the container's actual height at runtime
+- Row count formula: `Math.min(20, Math.max(3, Math.floor((containerHeight - 36) / 32)))` — clamps between 3 and 20 rows, accounting for the 36 px header and 32 px row height
+- Initial fallback height: `window.innerHeight * 0.6`, mirroring the grid's layout proportion before the first `ResizeObserver` callback fires
+- Added `ResizeObserver: 'readonly'` to browser globals in [`eslint.config.js`](eslint.config.js) to silence the no-undef lint error
+
+#### Task 6.4 — Column Header Tooltips ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+
+- Added [`<InfoTooltip>`](src/renderer/components/InfoTooltip.jsx) to 4 column headers using the existing component — no new npm package required:
+  - **Severity** — explains CVSS score scale and severity hierarchy (critical → info)
+  - **Status** — explains all 5 lifecycle values: `FIXED`, `PENDING`, `APPLYING`, `FAILED`, `SKIPPED`
+  - **Risk Level** — explains contextual risk vs generic severity and the LOW / HIGH distinction
+  - **Dependency Type** — explains the direct vs transitive dependency relationship
+
+#### Task 6.5 — Rich Empty States ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+
+- Replaced 3 minimal placeholder empty states with rich, icon-illustrated, actionable states:
+  - **No project selected** (trigger: `!hasFolder`) — `FolderOpen` icon (48 px, `text-text-muted`) + "No project selected" heading + "Browse for a folder containing a package.json to get started." subtitle
+  - **No vulnerabilities found** (trigger: `hasFolder && results.length === 0 && !searchTerm`) — `ShieldCheck` icon (48 px, `text-status-fixed`) + "No vulnerabilities found" heading + "Your project dependencies are clean." subtitle
+  - **No filter results** (trigger: `hasFolder && results.length === 0 && searchTerm`) — `SearchX` icon (40 px, `text-text-muted`) + "No results match your filter" heading + "Try adjusting your search or filter criteria." subtitle
+
+### Changed
+
+#### Task 6.1 — React Performance Optimisations
+
+- Wrapped [`Badge`](src/renderer/components/Badge.jsx), [`Spinner`](src/renderer/components/Spinner.jsx), [`InfoTooltip`](src/renderer/components/InfoTooltip.jsx), and [`Modal`](src/renderer/components/Modal.jsx) with `memo()` (named import from `react`) to prevent unnecessary re-renders when parent state changes do not affect these components
+- Added `useMemo` to [`src/renderer/App.jsx`](src/renderer/App.jsx) wrapping the `buttonsState` object (dependencies: `projects.length`, `isScanning`, `isApplying`, `isCommitting`, `selectedVulns.size`, `vulnerabilities`) to prevent [`<Header>`](src/renderer/components/Header.jsx) re-renders when button state is unchanged
+- Added `useCallback` wrapping `handleSort` and `useMemo` wrapping `selectableVulns` in [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx)
+- All 5 custom hooks already had `useCallback` applied correctly — no changes needed: [`useLogConsole.js`](src/renderer/hooks/useLogConsole.js), [`useProjectDiscovery.js`](src/renderer/hooks/useProjectDiscovery.js), [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js), [`useFixApplication.js`](src/renderer/hooks/useFixApplication.js), [`useGitOperations.js`](src/renderer/hooks/useGitOperations.js)
+
+#### Task 6.3 — Table Column Order ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+
+- Reordered all 12 columns across `<thead>`, `<tbody>` data rows, and skeleton rows for improved information hierarchy:
+  - **Old order**: `Checkbox | Project Name | Severity | Package | Installed | Vulnerable Range | Fixed | Dep Type | Resolves | CVEs | Risk | Status`
+  - **New order**: `Checkbox | Severity | Status | Package | Project | Risk | Dep Type | Fixed | Installed | Vulnerable Range | CVEs | Resolves`
+- Updated `colSpan` from `11` to `12` on both empty-state rows
+- Expanded skeleton rows from 9 to 12 placeholder cells to match the new column count
+
+### Fixed
+
+#### Task 6.5 — Test Suite Corrections ([`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx))
+
+- Updated 6 pre-existing `toHaveBeenCalledTimes` assertions that were incorrectly counting React Strict Mode double-invocations; assertions now reflect the true single-call expectation
+
+### Technical Details
+
+#### Files Modified (8)
+
+1. [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx) — dynamic skeleton rows, column reorder, header tooltips, rich empty states, `useCallback`/`useMemo` optimisations
+2. [`src/renderer/App.jsx`](src/renderer/App.jsx) — `useMemo` on `buttonsState`
+3. [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx) — wrapped with `memo()`
+4. [`src/renderer/components/Spinner.jsx`](src/renderer/components/Spinner.jsx) — wrapped with `memo()`
+5. [`src/renderer/components/InfoTooltip.jsx`](src/renderer/components/InfoTooltip.jsx) — wrapped with `memo()`
+6. [`src/renderer/components/Modal.jsx`](src/renderer/components/Modal.jsx) — wrapped with `memo()`
+7. [`eslint.config.js`](eslint.config.js) — `ResizeObserver: 'readonly'` added to browser globals
+8. [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx) — 6 `toHaveBeenCalledTimes` assertions corrected
+
+#### Testing & Validation
+
+- ✅ **241/241 tests passing** across 10 test suites — no regressions introduced
+- ✅ **0 ESLint errors** across all modified files
+
+### Notes
+
+This release completes Phase 6 (Final Polish & Optimization) of VERSION_1_PLAN. The renderer is now fully optimised with `memo()`, `useCallback`, and `useMemo` applied at every appropriate boundary, skeleton loading adapts fluidly to the actual grid height, the table column order surfaces the most actionable information first, complex column headers carry inline explanatory tooltips, and every empty state guides the user toward the next action.
+
+**Upgrade Considerations:**
+
+- No breaking changes to application functionality or IPC contracts
+- No new npm packages installed in this phase
+- `ResizeObserver` is a standard browser API available in all Electron versions used by this project
+
+---
+
 ## [1.5.0] - 2026-04-30
 
 ### Added
