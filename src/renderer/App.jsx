@@ -1,8 +1,10 @@
+/* eslint-disable import/order */
 import { useRef, useEffect, useState } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
 import Modal from './components/Modal';
+import BuyModal from './components/BuyModal';
 import VulnerabilityGrid from './components/VulnerabilityGrid';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
@@ -12,8 +14,28 @@ import useProjectDiscovery from './hooks/useProjectDiscovery';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
 
 function App() {
+  const [licStatus, setLicStatus] = useState(null);
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [scanCount, setScanCount] = useState(0);
+
   // Initialize hooks - each hook called EXACTLY ONCE
   const { logs, addLog, clearLogs } = useLogConsole();
+
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const status = await window.electronAPI.getCommercialStatus();
+        setLicStatus(status);
+        if (status.isCommercial && !status.isLicensed) {
+          setShowBuyModal(true);
+        }
+      } catch (err) {
+        console.error('Failed to get commercial status', err);
+        addLog('error', `Commercial status check failed: ${err.message}`);
+      }
+    };
+    fetchStatus();
+  }, [addLog]);
 
   /**
    * Use refs to store projects and vulnerabilities for accessing in useGitOperations.
@@ -54,6 +76,18 @@ function App() {
     confirmGitReset,
     cancelGitReset,
   } = useVulnerabilityScanner(addLog, () => projectsRef.current, allowReset);
+
+  // Wrapper for scan to count scans and prompt for license
+  const handleScanAudit = async () => {
+    if (licStatus?.isCommercial && !licStatus?.isLicensed) {
+      const newCount = scanCount + 1;
+      setScanCount(newCount);
+      if (newCount % 10 === 0) {
+        setShowBuyModal(true);
+      }
+    }
+    await scanProjects();
+  };
 
   // Project discovery hook (uses resetVulnerabilities from above)
   const { selectedFolder, projects, browseFolder } = useProjectDiscovery(
@@ -106,7 +140,7 @@ function App() {
           selectedFolder={selectedFolder}
           onBrowseFolder={browseFolder}
           progress={progress}
-          onScanAudit={scanProjects}
+          onScanAudit={handleScanAudit}
           onApplyFixes={applyFixes}
           onCommitPush={commitAndPush}
           buttonsState={buttonsState}
@@ -114,6 +148,8 @@ function App() {
           onAllowResetChange={handleAllowResetChange}
           bumpVersion={bumpVersion}
           onBumpVersionChange={setBumpVersion}
+          licStatus={licStatus}
+          onBuyNow={() => setShowBuyModal(true)}
         />
       </ErrorBoundary>
 
@@ -161,6 +197,27 @@ function App() {
         message='Git reset is ENABLED. VulnSweep will run "git reset --hard" on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?'
         confirmText="Proceed with Scan"
         confirmStyle="danger"
+      />
+
+      {/* Commercial License Modal */}
+      <BuyModal
+        isOpen={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        onPaymentSuccess={async (details) => {
+          try {
+            const res = await window.electronAPI.activateLicense(details);
+            if (res.success) {
+              const status = await window.electronAPI.getCommercialStatus();
+              setLicStatus(status);
+              setShowBuyModal(false);
+              addLog('info', 'Commercial license activated successfully!');
+            } else {
+              addLog('error', `License activation failed: ${res.error}`);
+            }
+          } catch (err) {
+            addLog('error', `License activation error: ${err.message}`);
+          }
+        }}
       />
     </div>
   );

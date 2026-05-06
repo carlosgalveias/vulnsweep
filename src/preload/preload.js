@@ -65,7 +65,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param {boolean} allowReset - Whether to perform git reset before scanning
    * @returns {Promise<Object>} { success: boolean, content?: Array, error?: string }
    */
-  analyzeProjects: (projectPaths, allowReset) => ipcRenderer.invoke('analyze-projects', projectPaths, allowReset),
+  analyzeProjects: (projectPaths, allowReset) =>
+    ipcRenderer.invoke('analyze-projects', projectPaths, allowReset),
 
   /**
    * Applies fix strategies to a project
@@ -75,6 +76,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   applyFixes: (projectPath, strategies) =>
     ipcRenderer.invoke('apply-fixes', projectPath, strategies),
+
+  // ============================================
+  // COMMERCIAL & LICENSING
+  // ============================================
+
+  getCommercialStatus: () => ipcRenderer.invoke('get-commercial-status'),
+
+  activateLicense: (paymentData) => ipcRenderer.invoke('activate-license', paymentData),
 
   // ============================================
   // LOGGING & EVENTS

@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 function Header({
   selectedFolder,
   onBrowseFolder,
@@ -10,8 +11,17 @@ function Header({
   onAllowResetChange,
   bumpVersion,
   onBumpVersionChange,
+  licStatus,
+  onBuyNow,
 }) {
   const showProgress = progress && progress.total > 0;
+  const isUnlicensedCommercial = licStatus?.isCommercial && !licStatus?.isLicensed;
+
+  const disableApplyFixes = !buttonsState.applyFixes || isUnlicensedCommercial;
+  const applyFixesTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
+
+  const disableCommitPush = !buttonsState.commitPush || isUnlicensedCommercial;
+  const commitPushTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
 
   return (
     <header className="bg-surface-raised border-b border-gray-700 compact-header">
@@ -113,9 +123,10 @@ function Header({
           </button>
           <button
             onClick={onApplyFixes}
-            disabled={!buttonsState.applyFixes}
+            disabled={disableApplyFixes}
+            title={applyFixesTitle}
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
-              buttonsState.applyFixes
+              !disableApplyFixes
                 ? 'bg-orange-600 hover:bg-orange-700 text-white'
                 : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
@@ -124,15 +135,24 @@ function Header({
           </button>
           <button
             onClick={onCommitPush}
-            disabled={!buttonsState.commitPush}
+            disabled={disableCommitPush}
+            title={commitPushTitle}
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
-              buttonsState.commitPush
+              !disableCommitPush
                 ? 'bg-green-600 hover:bg-green-700 text-white'
                 : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
           >
             Commit & Push
           </button>
+          {licStatus?.isCommercial && !licStatus?.isLicensed && (
+            <button
+              onClick={onBuyNow}
+              className="compact-btn bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors duration-200 whitespace-nowrap font-bold"
+            >
+              Buy Now
+            </button>
+          )}
         </div>
       </div>
     </header>

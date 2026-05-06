@@ -8,6 +8,8 @@
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
     "build": "cross-env NODE_ENV=production vite build && node build-main.js && electron-builder",
+    "build_com": "cross-env COMMERCIAL_BUILD=true npm run build",
+    "build_license": "node scripts/generate-license.js",
     "build:main": "node build-main.js",
     "start": "electron .",
     "postinstall": "electron-builder install-app-deps",
@@ -78,10 +80,13 @@
     "wait-on": "^7.2.0"
   },
   "dependencies": {
+    "@paypal/react-paypal-js": "^9.2.0",
     "lucide-react": "^1.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "semver": "^7.6.0"
+    "semver": "^7.6.0",
+    "sludge-crypt": "^1.0.3",
+    "systeminformation": "^5.31.5"
   },
   "build": {
     "appId": "com.vulnsweep.app",

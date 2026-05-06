@@ -1,3 +1,4 @@
+/* eslint-disable import/order */
 const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 
@@ -6,6 +7,7 @@ const { UI_CONFIG } = require('./config/constants');
 const audit = require('./modules/audit');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
+const license = require('./modules/license');
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
@@ -467,6 +469,18 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
     sendLogMessage('error', `Failed to apply fixes: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+// ============================================
+// IPC HANDLERS - LICENSE
+// ============================================
+
+ipcMain.handle('get-commercial-status', async () => {
+  return await license.checkLicense();
+});
+
+ipcMain.handle('activate-license', async (event, paymentData) => {
+  return await license.activateLicense(paymentData);
 });
 
 // ============================================
