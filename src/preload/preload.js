@@ -85,6 +85,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   activateLicense: (paymentData) => ipcRenderer.invoke('activate-license', paymentData),
 
+  getInstallInfo: () => ipcRenderer.invoke('get-install-info'),
+
+  /**
+   * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
+   * Resolves when the user completes payment (success URL detected) or closes
+   * the window without paying.
+   * @returns {Promise<{ ok: true, key: string } | { ok: false, cancelled?: true, error?: string }>}
+   */
+  openPaymentWindow: (isPromo) => ipcRenderer.invoke('open-payment-window', isPromo),
+
   // ============================================
   // LOGGING & EVENTS
   // ============================================

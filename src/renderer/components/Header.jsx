@@ -153,6 +153,11 @@ function Header({
               Buy Now
             </button>
           )}
+          {licStatus?.isCommercial && licStatus?.isLicensed && (
+            <span className="compact-btn bg-green-700 text-green-100 rounded whitespace-nowrap font-bold tracking-wide cursor-default select-none">
+              ✓ LICENSED
+            </span>
+          )}
         </div>
       </div>
     </header>

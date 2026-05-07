@@ -17,6 +17,7 @@ function App() {
   const [licStatus, setLicStatus] = useState(null);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [scanCount, setScanCount] = useState(0);
+  const [installInfo, setInstallInfo] = useState(null);
 
   // Initialize hooks - each hook called EXACTLY ONCE
   const { logs, addLog, clearLogs } = useLogConsole();
@@ -26,6 +27,8 @@ function App() {
       try {
         const status = await window.electronAPI.getCommercialStatus();
         setLicStatus(status);
+        const info = await window.electronAPI.getInstallInfo();
+        setInstallInfo(info);
         if (status.isCommercial && !status.isLicensed) {
           setShowBuyModal(true);
         }
@@ -175,6 +178,27 @@ function App() {
             <LogConsole logs={logs} onClear={clearLogs} />
           </ErrorBoundary>
         </div>
+
+        {/* Promo countdown banner — shown only when unlicensed & within 30-day promo */}
+        {licStatus?.isCommercial && !licStatus?.isLicensed && installInfo?.isPromo && (
+          <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs">
+            <span>
+              🔥{' '}
+              <strong>
+                Promotion ends in {installInfo.daysRemaining} day
+                {installInfo.daysRemaining !== 1 ? 's' : ''}!
+              </strong>
+              &nbsp;Get the full version for <strong>{installInfo.price}€</strong> — price rises to{' '}
+              <strong>30.00€</strong> after the promo.
+            </span>
+            <button
+              onClick={() => setShowBuyModal(true)}
+              className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+            >
+              Buy Now
+            </button>
+          </div>
+        )}
       </div>
 
       {/* HIGH Risk Fixes Confirmation Modal */}
@@ -203,19 +227,17 @@ function App() {
       <BuyModal
         isOpen={showBuyModal}
         onClose={() => setShowBuyModal(false)}
-        onPaymentSuccess={async (details) => {
+        installInfo={installInfo}
+        onPaymentSuccess={async ({ licenseKey }) => {
+          // generateLicense() was already called in the main process when the
+          // PayPal success URL was detected. We only need to refresh UI state here.
           try {
-            const res = await window.electronAPI.activateLicense(details);
-            if (res.success) {
-              const status = await window.electronAPI.getCommercialStatus();
-              setLicStatus(status);
-              setShowBuyModal(false);
-              addLog('info', 'Commercial license activated successfully!');
-            } else {
-              addLog('error', `License activation failed: ${res.error}`);
-            }
+            const status = await window.electronAPI.getCommercialStatus();
+            setLicStatus(status);
+            setShowBuyModal(false);
+            addLog('info', `Commercial license activated! Key: ${licenseKey}`);
           } catch (err) {
-            addLog('error', `License activation error: ${err.message}`);
+            addLog('error', `Failed to refresh license status: ${err.message}`);
           }
         }}
       />

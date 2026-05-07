@@ -135,6 +135,44 @@ const UI_CONFIG = {
 };
 
 // ============================================
+// PAYMENT CONFIGURATION
+// ============================================
+
+/**
+ * PayPal payment link configuration for the "Success URL" payment flow.
+ * The main process opens a BrowserWindow to PAYMENT_URL, then monitors
+ * navigation events. When the URL matches SUCCESS_HOST + SUCCESS_PATH,
+ * the window is closed and a license is generated automatically.
+ * @namespace PAYPAL_CONFIG
+ */
+const PAYPAL_CONFIG = {
+  /**
+   * PayPal Payment Link URL for the promo price period.
+   * @type {string}
+   */
+  PAYMENT_URL_PROMO: 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
+
+  /**
+   * PayPal Payment Link URL for the full (non-promo) price.
+   * @type {string}
+   */
+  PAYMENT_URL_FULL: 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
+
+  /**
+   * Hostname of the success/return URL configured in the PayPal payment link.
+   * PayPal will redirect the buyer here after a successful payment.
+   * @type {string}
+   */
+  SUCCESS_HOST: 'vulnsweep.app',
+
+  /**
+   * Path portion of the success/return URL.
+   * @type {string}
+   */
+  SUCCESS_PATH: '/success',
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -143,4 +181,5 @@ module.exports = {
   CACHE_CONFIG,
   API_CONFIG,
   UI_CONFIG,
+  PAYPAL_CONFIG,
 };
