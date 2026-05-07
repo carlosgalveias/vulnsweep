@@ -68,12 +68,30 @@
         letter-spacing: 0.5px;
         animation: fadeIn 0.8s ease-in 0.3s both;
       }
+      .licensed-badge {
+        margin-top: 10px;
+        padding: 4px 16px;
+        background: rgba(34, 197, 94, 0.25);
+        border: 1px solid rgba(34, 197, 94, 0.6);
+        border-radius: 999px;
+        color: #86efac;
+        font-size: 12px;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
+          sans-serif;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        animation: fadeIn 1s ease-in 0.5s both;
+        display: none;
+      }
     </style>
   </head>
   <body>
     <div class="splash-container">
       <img src="../../assets/logo.png" alt="VulnSweep Logo" class="logo" />
       <div class="version-text" id="version">Loading...</div>
+      <div class="licensed-badge" id="licensed-badge">✓ LICENSED</div>
     </div>
 
     <script>
@@ -83,6 +101,10 @@
           const versionElement = document.getElementById('version');
           if (versionElement && data && data.version) {
             versionElement.textContent = `v${data.version}`;
+          }
+          const badge = document.getElementById('licensed-badge');
+          if (badge && data && data.isLicensed) {
+            badge.style.display = 'block';
           }
         });
       }

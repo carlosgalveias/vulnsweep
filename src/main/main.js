@@ -1,11 +1,13 @@
+/* eslint-disable import/order */
 const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 
 // Import backend modules
-const { UI_CONFIG } = require('./config/constants');
+const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
 const audit = require('./modules/audit');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
+const license = require('./modules/license');
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
@@ -110,10 +112,18 @@ function createSplashWindow() {
   splashWindow.loadFile(splashPath);
 
   // Send version data to splash screen via IPC after page loads
-  splashWindow.webContents.on('did-finish-load', () => {
+  splashWindow.webContents.on('did-finish-load', async () => {
+    let isLicensed = false;
+    try {
+      const licStatus = await license.checkLicense();
+      isLicensed = licStatus.isLicensed === true;
+    } catch {
+      // ignore — splash will just not show LICENSED badge
+    }
     splashWindow.webContents.send('splash:data', {
       version: app.getVersion(),
       appName: app.getName(),
+      isLicensed,
     });
   });
 
@@ -139,6 +149,11 @@ function createWindow() {
     ? path.join(__dirname, '../../assets/mini_logo.png')
     : path.join(__dirname, '../dist-renderer/assets/mini_logo.png');
 
+  // Named persistent session shared between main window and any PayPal popups.
+  // This is required for PayPal's SDK capture flow: the buyer access token is stored
+  // in the session after the login popup, and must be accessible by the main window.
+  const SESSION_PARTITION = 'persist:vulnsweep';
+
   // Create the browser window with security settings
   mainWindow = new BrowserWindow({
     width: UI_CONFIG.WINDOW_WIDTH,
@@ -155,7 +170,35 @@ function createWindow() {
       preload: path.join(__dirname, 'preload', 'preload.js'),
       // Disable DevTools in production builds (prevents F12, Ctrl+Shift+I, etc.)
       devTools: isDevelopment,
+      // Named partition so PayPal popups can share the same session/cookies
+      partition: SESSION_PARTITION,
     },
+  });
+
+  // Allow PayPal's payment popup (window.open) to share the same session.
+  // Without this, the popup gets an isolated session and the buyer's access
+  // token is lost when it closes, causing the "token not present" capture error.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const isPayPal =
+      url.includes('paypal.com') ||
+      url.includes('paypalobjects.com') ||
+      url.startsWith('about:blank');
+    if (isPayPal) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          webPreferences: {
+            partition: SESSION_PARTITION,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
+    }
+    // All other external links open in system browser
+    require('electron').shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   // In development, load from Vite dev server
@@ -470,11 +513,142 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
 });
 
 // ============================================
+// IPC HANDLERS - LICENSE
+// ============================================
+
+ipcMain.handle('get-commercial-status', async () => {
+  return await license.checkLicense();
+});
+
+ipcMain.handle('activate-license', async (event, paymentData) => {
+  return await license.activateLicense(paymentData);
+});
+
+ipcMain.handle('get-install-info', () => {
+  return license.getInstallInfo();
+});
+
+/**
+ * Handler: Open a payment BrowserWindow pointing at the PayPal payment link.
+ * Monitors navigation events; when the success URL is detected the window is
+ * closed, generateLicense() is called, and the result is returned to the renderer.
+ * If the user closes the window manually before payment completes, resolves with
+ * { ok: false, cancelled: true }.
+ */
+ipcMain.handle('open-payment-window', async (_event, isPromo) => {
+  return new Promise((resolve) => {
+    const paymentUrl = isPromo ? PAYPAL_CONFIG.PAYMENT_URL_PROMO : PAYPAL_CONFIG.PAYMENT_URL_FULL;
+
+    const paymentWin = new BrowserWindow({
+      width: 800,
+      height: 600,
+      autoHideMenuBar: true,
+      title: 'Complete Payment',
+      parent: mainWindow || undefined,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    paymentWin.setMenuBarVisibility(false);
+    paymentWin.loadURL(paymentUrl);
+
+    let settled = false;
+
+    /**
+     * Checks whether `url` matches the configured PayPal success redirect.
+     * @param {string} url
+     * @returns {boolean}
+     */
+    function isSuccessUrl(url) {
+      try {
+        const parsed = new URL(url);
+        return (
+          parsed.hostname === PAYPAL_CONFIG.SUCCESS_HOST &&
+          parsed.pathname.startsWith(PAYPAL_CONFIG.SUCCESS_PATH)
+        );
+      } catch {
+        return false;
+      }
+    }
+
+    /**
+     * Shared handler for both did-navigate and did-navigate-in-page.
+     * @param {Electron.Event} _event
+     * @param {string} url
+     */
+    async function onNavigate(_event, url) {
+      if (settled) return;
+      if (!isSuccessUrl(url)) return;
+
+      settled = true;
+      console.log('[Payment] Success URL detected:', url);
+
+      if (!paymentWin.isDestroyed()) {
+        paymentWin.close();
+      }
+
+      const result = await license.generateLicense();
+      resolve(result);
+    }
+
+    paymentWin.webContents.on('did-navigate', onNavigate);
+    paymentWin.webContents.on('did-navigate-in-page', onNavigate);
+
+    // User closed the window without completing payment
+    paymentWin.on('closed', () => {
+      if (!settled) {
+        settled = true;
+        console.log('[Payment] Window closed by user before payment completed.');
+        resolve({ ok: false, cancelled: true });
+      }
+    });
+  });
+});
+
+// ============================================
 // APP LIFECYCLE
 // ============================================
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
+  const { session } = require('electron');
+
+  // Apply permissive CSP to the named session used by the main window and PayPal popups.
+  // Using a named partition ensures the CSP applies to all windows sharing that session.
+  const mainSession = session.fromPartition('persist:vulnsweep');
+
+  // Strip "Electron/x.x.x" and the app name from the user agent.
+  // PayPal's SDK detects "Electron" in the UA and sets disableSetCookie=true,
+  // which breaks the buyer access token flow — the token is passed via cookies
+  // from the login popup back to the parent window. Without cookies, capture fails.
+  // Presenting as a standard Chrome browser makes PayPal use its normal cookie auth.
+  const chromeUA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.188 Safari/537.36';
+  mainSession.setUserAgent(chromeUA);
+
+  mainSession.webRequest.onHeadersReceived((details, callback) => {
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://* http://* blob:",
+      "style-src 'self' 'unsafe-inline' https://* http://*",
+      "img-src 'self' data: https: blob:",
+      "connect-src 'self' https://* http://*",
+      "frame-src 'self' https://* http://*",
+      "font-src 'self' data: https://* http://*",
+      'worker-src blob:',
+    ].join('; ');
+
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
+
   // Create splash screen first
   createSplashWindow();
 

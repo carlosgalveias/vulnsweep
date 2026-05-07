@@ -46,6 +46,9 @@ export default [
         clearInterval: 'readonly',
         setImmediate: 'readonly',
         clearImmediate: 'readonly',
+        // Web-standard globals (available in both Node.js 10+ and browsers)
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
         // Browser globals
         window: 'readonly',
         document: 'readonly',
