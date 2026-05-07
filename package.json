@@ -80,9 +80,12 @@
     "wait-on": "^7.2.0"
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^1.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "recharts": "^3.8.1",
     "semver": "^7.6.0",
     "sludge-crypt": "^1.0.3",
     "systeminformation": "^5.31.5"

@@ -6,6 +6,7 @@ import LogConsole from './components/LogConsole';
 import Modal from './components/Modal';
 import BuyModal from './components/BuyModal';
 import VulnerabilityGrid from './components/VulnerabilityGrid';
+import StatisticsTab from './components/StatisticsTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
@@ -18,6 +19,7 @@ function App() {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [scanCount, setScanCount] = useState(0);
   const [installInfo, setInstallInfo] = useState(null);
+  const [activeTab, setActiveTab] = useState('scanner');
 
   // Initialize hooks - each hook called EXACTLY ONCE
   const { logs, addLog, clearLogs } = useLogConsole();
@@ -156,30 +158,58 @@ function App() {
         />
       </ErrorBoundary>
 
+      {/* Tab Bar */}
+      <div className="flex items-end bg-surface-raised border-b border-gray-700 px-4 pt-1 flex-shrink-0">
+        {[
+          { id: 'scanner', label: 'Scanner' },
+          { id: 'statistics', label: 'Statistics' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${
+              activeTab === tab.id
+                ? 'bg-surface text-white border-blue-500'
+                : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Vulnerability Grid - Full width, 60% height */}
-        <div className="h-[60%] overflow-hidden">
-          <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
-            <VulnerabilityGrid
-              vulnerabilities={vulnerabilities}
-              selectedVulns={selectedVulns}
-              onToggleVuln={toggleVulnerability}
-              onToggleAll={toggleAll}
-              isLoading={isScanning}
-              hasFolder={!!selectedFolder}
-            />
-          </ErrorBoundary>
-        </div>
+        {activeTab === 'scanner' && (
+          <>
+            <div className="h-[60%] overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
+                <VulnerabilityGrid
+                  vulnerabilities={vulnerabilities}
+                  selectedVulns={selectedVulns}
+                  onToggleVuln={toggleVulnerability}
+                  onToggleAll={toggleAll}
+                  isLoading={isScanning}
+                  hasFolder={!!selectedFolder}
+                />
+              </ErrorBoundary>
+            </div>
+            <div className="h-[40%] overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load log console">
+                <LogConsole logs={logs} onClear={clearLogs} />
+              </ErrorBoundary>
+            </div>
+          </>
+        )}
 
-        {/* Log Console - Full width, 40% height */}
-        <div className="h-[40%] overflow-hidden">
-          <ErrorBoundary fallbackMessage="Failed to load log console">
-            <LogConsole logs={logs} onClear={clearLogs} />
-          </ErrorBoundary>
-        </div>
+        {activeTab === 'statistics' && (
+          <div className="flex-1 overflow-hidden">
+            <ErrorBoundary fallbackMessage="Failed to load statistics">
+              <StatisticsTab vulnerabilities={vulnerabilities} />
+            </ErrorBoundary>
+          </div>
+        )}
 
-        {/* Promo countdown banner — shown only when unlicensed & within 30-day promo */}
         {licStatus?.isCommercial && !licStatus?.isLicensed && installInfo?.isPromo && (
           <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs">
             <span>
