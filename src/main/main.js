@@ -1,6 +1,6 @@
 /* eslint-disable import/order */
 const path = require('path');
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
@@ -8,6 +8,13 @@ const audit = require('./modules/audit');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
+const isDevelopment = process.env.NODE_ENV === 'development';
+if (!isDevelopment) {
+  Menu.setApplicationMenu(null);
+}
+// Imported at top level — pre-warm call happens inside app.whenReady() after
+// app.getPath('userData') is available, ensuring the correct store path is used.
+const { storeGet } = require('./utils/secure-store');
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
@@ -84,7 +91,9 @@ function sanitizePath(inputPath) {
 function createSplashWindow() {
   // Determine if running in development mode
   const isDevelopment = process.env.NODE_ENV === 'development';
-
+  if (!isDevelopment) {
+    Menu.setApplicationMenu(null);
+  }
   splashWindow = new BrowserWindow({
     width: 400,
     height: 400,
@@ -517,15 +526,35 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
 // ============================================
 
 ipcMain.handle('get-commercial-status', async () => {
-  return await license.checkLicense();
+  try {
+    return await license.checkLicense();
+  } catch (err) {
+    console.error('[IPC] get-commercial-status error:', err.message);
+    // Fail closed: isCommercial:false means the renderer treats this as a free/community
+    // build, showing no commercial UI. Safer than exposing monetization intent on error.
+    return { isCommercial: false, isLicensed: false };
+  }
 });
 
 ipcMain.handle('activate-license', async (event, paymentData) => {
-  return await license.activateLicense(paymentData);
+  try {
+    return await license.activateLicense(paymentData);
+  } catch (err) {
+    console.error('[IPC] activate-license error:', err.message);
+    // Do NOT forward err.message to the renderer — it may contain internal file paths,
+    // encryption details, or the hidden .vsweep marker path. Return a safe user message.
+    return { success: false, error: 'License activation failed. Please try again.' };
+  }
 });
 
 ipcMain.handle('get-install-info', () => {
-  return license.getInstallInfo();
+  try {
+    return license.getInstallInfo();
+  } catch (err) {
+    console.error('[IPC] get-install-info error:', err.message);
+    // Use constants exported from license.js rather than duplicating magic numbers here.
+    return license.getPromoDefaults();
+  }
 });
 
 /**
@@ -614,6 +643,12 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
+  // Pre-warm the secure store now that app.getPath('userData') is available.
+  // storeGet is imported at the top of this file; calling it here (post app.ready)
+  // guarantees _getInstance() binds to the correct Electron userData path rather
+  // than the ~/.vsweep-store fallback that would be used if called before app.ready.
+  storeGet('_init'); // triggers lazy initialization while app is ready
+
   const { session } = require('electron');
 
   // Apply permissive CSP to the named session used by the main window and PayPal popups.

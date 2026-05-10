@@ -1,3 +1,5 @@
+import PropTypes from 'prop-types';
+
 function Spinner({ size = 'md', className = '' }) {
   const sizeClasses = {
     sm: 'w-4 h-4 border-2',
@@ -12,5 +14,10 @@ function Spinner({ size = 'md', className = '' }) {
     />
   );
 }
+
+Spinner.propTypes = {
+  size: PropTypes.oneOf(['sm', 'md', 'lg', 'xl']),
+  className: PropTypes.string,
+};
 
 export default Spinner;

@@ -5,6 +5,97 @@ All notable changes to VulnSweep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-05-07
+
+### Breaking Changes
+
+#### Windows Registry Data Not Migrated
+
+Previous releases stored license data in the Windows Registry via REG.exe shell calls. This release removes all Registry-based storage. **Existing Windows installations will lose stored license data on upgrade** — the app will behave as a fresh install (no stored license key, install date reset). Users with active commercial licenses must re-activate after upgrading. There is no automatic migration path.
+
+### Added
+
+#### Phase 1 — Cross-Platform Encrypted Storage ([`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) NEW, [`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
+
+- **New module** [`src/main/utils/secure-store.js`](src/main/utils/secure-store.js): cross-platform encrypted key-value store replacing all Windows-only REG.exe shell calls in `license.js`
+- Uses `secure-ls` with AES encoding backed by a JSON file (`store.dat` in Electron `userData` directory)
+- Encryption key derived from the first non-loopback MAC address via `crypto.createHash('sha256')`; falls back to a static seed if no physical adapter is found
+- Exports: `storeGet(key)`, `storeSet(key, value)`, `storeRemove(key)`, `storeGetAll()` — all synchronous
+- Lazy initialisation with `_initFailed` guard: set permanently **only** on `MODULE_NOT_FOUND`; transient I/O errors allow retry on next call
+- Falls back to `~/.vsweep-store/store.dat` if Electron is not yet ready; upgrades to Electron `userData` once `app.ready` fires
+- In [`license.js`](src/main/modules/license.js): removed `setRegistryValue()` / `getRegistryValue()` entirely; all 8 Registry call sites replaced with `storeGet` / `storeSet`
+
+#### Phase 2 — Cross-Platform `.vsweep` Date Control File ([`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
+
+- [`getVsweepFilePath()`](src/main/modules/license.js) now returns OS-specific camouflaged paths:
+  - **Windows**: `%USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\.vsweep`
+  - **macOS**: `~/Library/Caches/com.apple.helpd/.vsweep`
+  - **Linux**: `~/.local/share/recently-used.xbel.d/.vsweep`
+  - **Other**: `~/.config/.vsweep`
+- Extracted [`ensureVsweepDir(filePath)`](src/main/modules/license.js) as a separate function — called only from write paths (activateLicense, generateLicense), never from read-only paths
+- `getVsweepFilePath()` is now a **pure function** (no filesystem I/O)
+
+#### Phase 3 — Multi-Platform Electron Builder Config ([`package.json`](package.json) MODIFIED, [`build/entitlements.mac.plist`](build/entitlements.mac.plist) NEW)
+
+- `mac` build block: `dmg` + `zip` targets for `x64` + `arm64`, `hardenedRuntime: true`, entitlements configured
+- `linux` build block: `AppImage` (x64 + arm64), `deb` (x64), `rpm` (x64) targets; maintainer / synopsis / description fields populated
+- `dmg` block: standard drag-to-Applications DMG window layout
+- New file [`build/entitlements.mac.plist`](build/entitlements.mac.plist): entitlements required for macOS hardened runtime
+- Icon fields: `mac.icon` points to `assets/icon.icns` (must be generated from `assets/logo.png`); `win.icon` points to `assets/icon.ico` (must be generated); Linux uses `assets/logo.png` directly
+- See [`BUILDING.md`](BUILDING.md) for icon generation instructions
+
+#### Phase 4 — Integration Fixes ([`src/main/main.js`](src/main/main.js) MODIFIED)
+
+- [`storeGet`](src/main/utils/secure-store.js) imported at the top of [`main.js`](src/main/main.js)
+- Store pre-warm: `storeGet('_init')` called immediately after `app.whenReady()` resolves, binding the store to the correct Electron `userData` path before any license IPC handler runs
+- IPC handlers hardened with try/catch and safe non-leaking fallbacks:
+  - `get-commercial-status`: fails closed to `{ isCommercial: false, isLicensed: false }`
+  - `activate-license`: returns `{ success: false, error: 'License activation failed. Please try again.' }` — no internal path or key data forwarded to renderer
+  - `get-install-info`: returns `license.getPromoDefaults()` on error
+
+### Build
+
+#### New Platform-Specific Build Scripts
+
+| Script            | Description                                    |
+| ----------------- | ---------------------------------------------- |
+| `build:win`       | Windows NSIS installer (free tier)             |
+| `build:mac`       | macOS DMG + ZIP for x64 and arm64 (free tier)  |
+| `build:linux`     | Linux AppImage + deb + rpm (free tier)         |
+| `build:win:com`   | Windows installer with `COMMERCIAL_BUILD=true` |
+| `build:mac:com`   | macOS packages with `COMMERCIAL_BUILD=true`    |
+| `build:linux:com` | Linux packages with `COMMERCIAL_BUILD=true`    |
+
+### Dependencies
+
+- Added **`secure-ls`** (`^2.0.0`) to `dependencies` — AES-encrypted file-backed store powering `secure-store.js`
+
+### Technical Details
+
+#### Files Added (2)
+
+1. [`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) — new cross-platform encrypted key-value store module
+2. [`build/entitlements.mac.plist`](build/entitlements.mac.plist) — macOS hardened runtime entitlements file
+
+#### Files Modified (3)
+
+1. [`src/main/modules/license.js`](src/main/modules/license.js) — all Registry calls removed; storeGet/storeSet substituted at all 8 sites; getVsweepFilePath made pure; ensureVsweepDir extracted; cross-platform .vsweep paths implemented
+2. [`package.json`](package.json) — mac/linux/dmg build blocks added; 6 new build scripts; secure-ls added to dependencies
+3. [`src/main/main.js`](src/main/main.js) — storeGet import added; store pre-warm call added; IPC handlers wrapped in try/catch with safe fallbacks
+
+### Notes
+
+This release completes the cross-platform migration (Phases 1–4). VulnSweep now builds and runs on Windows, macOS, and Linux. The AES-encrypted `store.dat` format is identical across all platforms.
+
+**Upgrade Considerations:**
+
+- **Breaking**: Windows users with existing installs will lose stored license data — a re-activation flow will occur on first launch
+- macOS and Linux builds require icon assets to be generated before building — see [`BUILDING.md`](BUILDING.md)
+- `build:mac` and `build:mac:com` must be run on a macOS host or a macOS CI runner — cross-compilation from Windows/Linux is not supported
+- Run `npm install` after pulling this
+
+---
+
 ## [1.6.0] - 2026-04-30
 
 ### Added

@@ -1,44 +1,73 @@
-const { execSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const sludge = require('sludge-crypt');
 const systeminformation = require('systeminformation');
+const { storeGet, storeSet } = require('../utils/secure-store');
 
-// Registry helper functions
-function setRegistryValue(keyName, value) {
-  const b64 = Buffer.from(value, 'utf8').toString('base64');
-  execSync(`REG ADD HKCU\\Software\\vsweep /v ${keyName} /t REG_SZ /d "${b64}" /f`, {
-    stdio: 'ignore',
-  });
-}
+// COMMERCIAL_BUILD environment variable (set via cross-env in build scripts):
+//   cross-env COMMERCIAL_BUILD=true
+// Currently available for future feature-gating (e.g. disabling free-tier
+// scan limits in commercial distributions). Not yet read at runtime.
+// To branch on it: const isCommercialBuild = process.env.COMMERCIAL_BUILD === 'true';
 
-function getRegistryValue(keyName) {
-  try {
-    const output = execSync(`REG QUERY HKCU\\Software\\vsweep /v ${keyName}`, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const lines = output.split('\n');
-    let val = null;
-    for (const line of lines) {
-      if (line.includes(keyName) && line.includes('REG_SZ')) {
-        val = line.substring(line.indexOf('REG_SZ') + 6).trim();
-        break;
-      }
-    }
-    if (val) {
-      return Buffer.from(val, 'base64').toString('utf8');
-    }
-    return null;
-  } catch (e) {
-    console.log(e);
-    return null;
+/**
+ * Returns the OS-specific path to the .vsweep marker file.
+ *
+ * Each platform uses a different, non-obvious subdirectory so that no
+ * single "delete this file to reset the trial" tip works cross-platform:
+ *
+ *   Windows  → %LOCALAPPDATA%\Microsoft\OneDrive\logs\.vsweep
+ *              Buried inside the OneDrive log tree; routinely ignored by AV
+ *              heuristics because real OneDrive log noise already lives there.
+ *              The previous path (AppData\Local\Microsoft\Windows\) sits inside
+ *              a directory that Windows Defender actively monitors — a random
+ *              dotfile there would be flagged or silently removed on many systems.
+ *
+ *   macOS    → ~/Library/Caches/com.apple.helpd/.vsweep
+ *              Looks like Apple's help-daemon cache; not a typical user location.
+ *
+ *   Linux    → ~/.local/share/recently-used.xbel.d/.vsweep
+ *              Camouflaged as a GTK recently-used auxiliary directory.
+ *
+ *   Other    → ~/.config/.vsweep  (safe fallback)
+ *
+ * IMPORTANT: This function is a pure path resolver. It performs NO filesystem
+ * I/O. Call ensureVsweepDir() before any write that requires the directory to
+ * exist. These two concerns must remain separated.
+ *
+ * @returns {string} Absolute path to the .vsweep marker file.
+ */
+function getVsweepFilePath() {
+  const home = os.homedir();
+
+  switch (process.platform) {
+    case 'win32':
+      return path.join(home, 'AppData', 'Local', 'Microsoft', 'OneDrive', 'logs', '.vsweep');
+    case 'darwin':
+      return path.join(home, 'Library', 'Caches', 'com.apple.helpd', '.vsweep');
+    case 'linux':
+      return path.join(home, '.local', 'share', 'recently-used.xbel.d', '.vsweep');
+    default:
+      return path.join(home, '.config', '.vsweep');
   }
 }
 
-function getVsweepFilePath() {
-  return path.join(os.homedir(), 'AppData', 'Roaming', '.vsweep');
+/**
+ * Ensures the parent directory of the vsweep marker file exists, creating it
+ * recursively if necessary. Must be called explicitly before any write to the
+ * marker file. Separated from getVsweepFilePath() so that read-only callers
+ * (e.g. checkLicense) never trigger unnecessary filesystem side effects, and
+ * so that failures during directory creation are attributed to the write path,
+ * not to a function whose name implies it only returns a string.
+ *
+ * @param {string} filePath - Absolute path whose parent directory must exist.
+ * @throws {Error} Propagates the underlying fs error (e.g. EACCES on a
+ *   read-only filesystem) so callers can handle or surface it appropriately.
+ */
+function ensureVsweepDir(filePath) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
 }
 
 const PROMO_DAYS = 30;
@@ -46,13 +75,29 @@ const PROMO_PRICE = '9.00';
 const FULL_PRICE = '30.00';
 
 /**
- * Stores the install timestamp in registry on first run.
- * Key 'i' holds the ms timestamp as a plain number string (base64-wrapped like all others).
+ * Returns the safe promo-defaults object used as a fallback when getInstallInfo()
+ * throws. Exported so main.js IPC handlers can reference canonical constants
+ * rather than duplicating magic numbers in error fallback branches.
+ * @returns {{ installDate: null, daysElapsed: number, daysRemaining: number, isPromo: boolean, price: string }}
+ */
+function getPromoDefaults() {
+  return {
+    installDate: null,
+    daysElapsed: 0,
+    daysRemaining: PROMO_DAYS,
+    isPromo: true,
+    price: PROMO_PRICE,
+  };
+}
+
+/**
+ * Stores the install timestamp in the encrypted store on first run.
+ * Key 'i' holds the ms timestamp as a plain number string.
  */
 function initInstallDate() {
-  const existing = getRegistryValue('i');
+  const existing = storeGet('i');
   if (!existing) {
-    setRegistryValue('i', String(Date.now()));
+    storeSet('i', String(Date.now()));
   }
 }
 
@@ -61,7 +106,7 @@ function initInstallDate() {
  */
 function getInstallInfo() {
   initInstallDate();
-  const raw = getRegistryValue('i');
+  const raw = storeGet('i');
   const installTs = raw ? parseInt(raw, 10) : Date.now();
   const now = Date.now();
   const msElapsed = now - installTs;
@@ -99,6 +144,7 @@ async function checkLicense() {
   // Always ensure install date is recorded
   initInstallDate();
 
+  // Pure path resolution — no filesystem side effect on a read-only check path.
   const vsweepFile = getVsweepFilePath();
   console.log('[License] Checking vsweep marker at:', vsweepFile);
   if (!fs.existsSync(vsweepFile)) {
@@ -106,20 +152,22 @@ async function checkLicense() {
     return { isCommercial: true, isLicensed: false };
   }
 
-  const v = getRegistryValue('v');
-  const k = getRegistryValue('k');
+  const v = storeGet('v');
+  const k = storeGet('k');
 
   if (!v || !k) {
-    console.log('[License] Registry keys missing.');
+    console.log('[License] Store keys missing.');
     return { isCommercial: true, isLicensed: false };
   }
 
   try {
     const stat = fs.statSync(vsweepFile);
-    const creationDate = stat.birthtimeMs || stat.ctimeMs;
+    const creationDate = Math.floor(stat.birthtimeMs || stat.ctimeMs);
     console.log(
       '[License] Decrypting license payload with marker date:',
-      new Date(creationDate).toISOString()
+      new Date(creationDate).toISOString(),
+      '| creationDate (ms):',
+      creationDate
     );
 
     const privateKey = JSON.parse(k);
@@ -129,7 +177,7 @@ async function checkLicense() {
     try {
       parsed = typeof decrypted === 'string' ? JSON.parse(decrypted) : decrypted;
     } catch (e) {
-      console.log(e);
+      console.warn('[License] Failed to JSON.parse decrypted payload, using raw value:', e.message);
       parsed = decrypted;
     }
 
@@ -151,18 +199,19 @@ async function activateLicense(paymentData) {
   try {
     const vsweepFile = getVsweepFilePath();
     if (!fs.existsSync(vsweepFile)) {
+      ensureVsweepDir(vsweepFile);
       fs.writeFileSync(vsweepFile, '');
     }
 
     const stat = fs.statSync(vsweepFile);
-    const creationDate = stat.birthtimeMs || stat.ctimeMs;
+    const creationDate = Math.floor(stat.birthtimeMs || stat.ctimeMs);
 
     const keys = await sludge.generateBilePair();
     const pStr = JSON.stringify(keys.publicKey);
     const kStr = JSON.stringify(keys.privateKey);
 
-    setRegistryValue('p', pStr);
-    setRegistryValue('k', kStr);
+    storeSet('p', pStr);
+    storeSet('k', kStr);
 
     const deviceData = await getDeviceData();
     const payload = {
@@ -173,7 +222,7 @@ async function activateLicense(paymentData) {
     };
 
     const encrypted = await sludge.compose(payload, keys.publicKey, creationDate);
-    setRegistryValue('v', encrypted);
+    storeSet('v', encrypted);
 
     return { success: true };
   } catch (err) {
@@ -194,15 +243,16 @@ async function generateLicense() {
   try {
     const vsweepFile = getVsweepFilePath();
     if (!fs.existsSync(vsweepFile)) {
+      ensureVsweepDir(vsweepFile);
       fs.writeFileSync(vsweepFile, '');
     }
 
     const stat = fs.statSync(vsweepFile);
-    const creationDate = stat.birthtimeMs || stat.ctimeMs;
+    const creationDate = Math.floor(stat.birthtimeMs || stat.ctimeMs);
 
     const keys = await sludge.generateBilePair();
-    setRegistryValue('p', JSON.stringify(keys.publicKey));
-    setRegistryValue('k', JSON.stringify(keys.privateKey));
+    storeSet('p', JSON.stringify(keys.publicKey));
+    storeSet('k', JSON.stringify(keys.privateKey));
 
     const deviceData = await getDeviceData();
     const payload = {
@@ -212,7 +262,7 @@ async function generateLicense() {
     };
 
     const encrypted = await sludge.compose(payload, keys.publicKey, creationDate);
-    setRegistryValue('v', encrypted);
+    storeSet('v', encrypted);
 
     // Build a human-readable license key string for display/confirmation.
     // Format: VS-<base64url-truncated-serial>-<timestamp-hex>
@@ -237,4 +287,5 @@ module.exports = {
   activateLicense,
   generateLicense,
   getInstallInfo,
+  getPromoDefaults,
 };

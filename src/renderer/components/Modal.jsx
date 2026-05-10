@@ -1,3 +1,5 @@
+import PropTypes from 'prop-types';
+
 function Modal({
   isOpen,
   onClose,
@@ -47,5 +49,16 @@ function Modal({
     </div>
   );
 }
+
+Modal.propTypes = {
+  isOpen: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onConfirm: PropTypes.func.isRequired,
+  title: PropTypes.string.isRequired,
+  message: PropTypes.string,
+  confirmText: PropTypes.string,
+  confirmStyle: PropTypes.string,
+  children: PropTypes.node,
+};
 
 export default Modal;
