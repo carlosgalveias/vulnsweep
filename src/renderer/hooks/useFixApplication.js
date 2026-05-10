@@ -7,6 +7,9 @@ import { useState, useCallback } from 'react';
  * @param {Set} selectedVulns - Set of selected vulnerability IDs
  * @param {Function} setVulnerabilities - Function to update vulnerabilities state
  * @param {Array} projects - Array of discovered projects
+ * @param {boolean} bumpVersion - Whether to bump patch version when applying fixes
+ * @param {Function|null} onTrialUpdated - Optional callback invoked after a successful fix
+ *   application so the caller can refresh the trial status shown in the footer.
  * @returns {Object} Fix application state and methods
  */
 export default function useFixApplication(
@@ -15,7 +18,8 @@ export default function useFixApplication(
   selectedVulns,
   setVulnerabilities,
   projects,
-  bumpVersion = true
+  bumpVersion = true,
+  onTrialUpdated = null
 ) {
   const [isApplying, setIsApplying] = useState(false);
   const [showHighRiskModal, setShowHighRiskModal] = useState(false);
@@ -83,6 +87,20 @@ export default function useFixApplication(
           if (result.content.failed?.length > 0) {
             addLog('warning', `${result.content.failed.length} fix(es) failed in ${projectName}`);
           }
+
+          // Notify caller to refresh trial status after a successful fix application.
+          if (typeof onTrialUpdated === 'function') {
+            onTrialUpdated();
+          }
+        } else if (result.trialExhausted) {
+          // Trial exhausted — reset status back to 'pending' so the vulnerability remains
+          // visible and actionable once the user upgrades.
+          setVulnerabilities((prev) =>
+            prev.map((v) =>
+              projectVulns.find((pv) => pv.id === v.id) ? { ...v, status: 'pending' } : v
+            )
+          );
+          addLog('error', result.error || 'Free fixes exhausted. Please upgrade to continue.');
         } else {
           // Update status to 'failed'
           setVulnerabilities((prev) =>
@@ -105,7 +123,15 @@ export default function useFixApplication(
 
     setIsApplying(false);
     addLog('success', 'Fix application complete');
-  }, [addLog, vulnerabilities, selectedVulns, setVulnerabilities, projects, bumpVersion]);
+  }, [
+    addLog,
+    vulnerabilities,
+    selectedVulns,
+    setVulnerabilities,
+    projects,
+    bumpVersion,
+    onTrialUpdated,
+  ]);
 
   /**
    * Apply fixes to selected vulnerabilities (with HIGH risk confirmation)

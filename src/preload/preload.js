@@ -88,6 +88,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getInstallInfo: () => ipcRenderer.invoke('get-install-info'),
 
   /**
+   * Returns the current trial status for unlicensed users.
+   * @returns {Promise<{ fixesRemaining: number, fixesConsumed: number, daysUntilPriceChange: number, trialExhausted: boolean }>}
+   */
+  getTrialStatus: () => ipcRenderer.invoke('get-trial-status'),
+
+  /**
    * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
    * Resolves when the user completes payment (success URL detected) or closes
    * the window without paying.

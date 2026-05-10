@@ -15,6 +15,7 @@ if (!isDevelopment) {
 // Imported at top level — pre-warm call happens inside app.whenReady() after
 // app.getPath('userData') is available, ensuring the correct store path is used.
 const { storeGet } = require('./utils/secure-store');
+const trialStore = require('./utils/trial-store');
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
@@ -483,11 +484,42 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
 
 /**
  * Handler: Apply fixes to a project
+ *
+ * Gate logic:
+ *   1. If user is licensed → allow unconditionally.
+ *   2. If unlicensed and trial exhausted (0 fixes remaining) → block with message.
+ *   3. If unlicensed and trial not exhausted → allow, then increment fix counter.
  */
 ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion = true) => {
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
+
+    // --- Trial / license gate ---
+    let isLicensed = false;
+    try {
+      const licStatus = await license.checkLicense();
+      isLicensed = licStatus.isLicensed === true;
+    } catch (licErr) {
+      console.warn(
+        '[IPC] apply-fixes: license check failed, treating as unlicensed:',
+        licErr.message
+      );
+    }
+
+    if (!isLicensed) {
+      const trialStatus = trialStore.getTrialStatus();
+      if (trialStatus.trialExhausted) {
+        console.log('[IPC] apply-fixes: trial exhausted for unlicensed user.');
+        sendLogMessage('warn', 'Free trial exhausted. Upgrade to apply more fixes.');
+        return {
+          success: false,
+          trialExhausted: true,
+          error: 'Free fixes exhausted. Please upgrade to continue applying fixes.',
+        };
+      }
+    }
+    // ----------------------------
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
@@ -507,6 +539,12 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
       return { success: false, error: result.error };
     }
 
+    // Increment trial counter for unlicensed users after a successful fix application.
+    if (!isLicensed) {
+      trialStore.incrementFixCount();
+      console.log('[IPC] apply-fixes: trial fix count incremented.');
+    }
+
     // Unwrap the Result object and return just the fix data
     sendLogMessage(
       'success',
@@ -518,6 +556,29 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
     console.error(`[IPC] apply-fixes error: ${error.message}`);
     sendLogMessage('error', `Failed to apply fixes: ${error.message}`);
     return { success: false, error: error.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - TRIAL
+// ============================================
+
+/**
+ * Handler: Return current trial status (fixes remaining, days until price change, exhausted flag).
+ * Called by the renderer on mount and after each fix application to keep the footer current.
+ */
+ipcMain.handle('get-trial-status', async () => {
+  try {
+    return trialStore.getTrialStatus();
+  } catch (err) {
+    console.error('[IPC] get-trial-status error:', err.message);
+    // Safe fallback — show full quota so the UI never incorrectly blocks the user.
+    return {
+      fixesRemaining: 10,
+      fixesConsumed: 0,
+      daysUntilPriceChange: 30,
+      trialExhausted: false,
+    };
   }
 });
 

@@ -1,5 +1,5 @@
 /* eslint-disable import/order */
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
@@ -20,9 +20,20 @@ function App() {
   const [scanCount, setScanCount] = useState(0);
   const [installInfo, setInstallInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
+  const [trialStatus, setTrialStatus] = useState(null);
 
   // Initialize hooks - each hook called EXACTLY ONCE
   const { logs, addLog, clearLogs } = useLogConsole();
+
+  /** Fetches and caches the current trial status from the main process. */
+  const refreshTrialStatus = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.getTrialStatus();
+      setTrialStatus(status);
+    } catch (err) {
+      console.error('Failed to get trial status', err);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -40,7 +51,8 @@ function App() {
       }
     };
     fetchStatus();
-  }, [addLog]);
+    refreshTrialStatus();
+  }, [addLog, refreshTrialStatus]);
 
   /**
    * Use refs to store projects and vulnerabilities for accessing in useGitOperations.
@@ -109,7 +121,8 @@ function App() {
     vulnerabilitiesRef.current = vulnerabilities;
   }, [vulnerabilities]);
 
-  // Fix application hook
+  // Fix application hook — passes refreshTrialStatus so the footer updates
+  // immediately after each successful fix application.
   const {
     isApplying,
     applyFixes,
@@ -123,7 +136,8 @@ function App() {
     selectedVulns,
     setVulnerabilities,
     projects,
-    bumpVersion
+    bumpVersion,
+    refreshTrialStatus
   );
 
   // Button states
@@ -136,6 +150,12 @@ function App() {
       !isApplying &&
       !isScanning,
   };
+
+  // Derived trial footer values (safe fallbacks while status loads)
+  const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
+  const fixesLeft = trialStatus?.fixesRemaining ?? 10;
+  const daysLeft = trialStatus?.daysUntilPriceChange ?? installInfo?.daysRemaining ?? 30;
+  const trialExhausted = trialStatus?.trialExhausted === true;
 
   return (
     <div className="h-screen flex flex-col bg-surface text-gray-100">
@@ -210,23 +230,42 @@ function App() {
           </div>
         )}
 
-        {licStatus?.isCommercial && !licStatus?.isLicensed && installInfo?.isPromo && (
-          <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs">
-            <span>
-              🔥{' '}
-              <strong>
-                Promotion ends in {installInfo.daysRemaining} day
-                {installInfo.daysRemaining !== 1 ? 's' : ''}!
-              </strong>
-              &nbsp;Get the full version for <strong>{installInfo.price}€</strong> — price rises to{' '}
-              <strong>30.00€</strong> after the promo.
-            </span>
-            <button
-              onClick={() => setShowBuyModal(true)}
-              className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-            >
-              Buy Now
-            </button>
+        {/* Trial / promo footer — only shown for unlicensed commercial users */}
+        {isUnlicensed && (
+          <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
+            {trialExhausted ? (
+              <>
+                <span>
+                  🚫 <strong>Free fixes exhausted</strong>
+                  {' · '}Upgrade to continue applying fixes
+                </span>
+                <button
+                  onClick={() => setShowBuyModal(true)}
+                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                >
+                  Upgrade Now
+                </button>
+              </>
+            ) : (
+              <>
+                <span>
+                  🔥{' '}
+                  <strong>
+                    You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left
+                  </strong>
+                  {' · '}
+                  <strong>
+                    {daysLeft} {daysLeft !== 1 ? 'days' : 'day'} until price changes
+                  </strong>
+                </span>
+                <button
+                  onClick={() => setShowBuyModal(true)}
+                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                >
+                  Buy Now
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
