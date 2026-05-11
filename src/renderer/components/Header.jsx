@@ -12,16 +12,27 @@ function Header({
   bumpVersion,
   onBumpVersionChange,
   licStatus,
+  trialStatus,
   onBuyNow,
 }) {
   const showProgress = progress && progress.total > 0;
   const isUnlicensedCommercial = licStatus?.isCommercial && !licStatus?.isLicensed;
+  const trialActive = isUnlicensedCommercial && trialStatus && !trialStatus.trialExhausted;
+  const canApplyFix = !isUnlicensedCommercial || trialActive;
 
-  const disableApplyFixes = !buttonsState.applyFixes || isUnlicensedCommercial;
-  const applyFixesTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
+  const disableApplyFixes = !buttonsState.applyFixes || !canApplyFix;
+  const applyFixesTitle = trialActive
+    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
+    : isUnlicensedCommercial
+      ? 'Requires commercial license or active trial'
+      : '';
 
-  const disableCommitPush = !buttonsState.commitPush || isUnlicensedCommercial;
-  const commitPushTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
+  const disableCommitPush = !buttonsState.commitPush || !canApplyFix;
+  const commitPushTitle = trialActive
+    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
+    : isUnlicensedCommercial
+      ? 'Requires commercial license or active trial'
+      : '';
 
   return (
     <header className="bg-surface-raised border-b border-gray-700 compact-header">

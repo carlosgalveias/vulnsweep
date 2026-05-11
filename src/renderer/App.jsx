@@ -174,6 +174,7 @@ function App() {
           bumpVersion={bumpVersion}
           onBumpVersionChange={setBumpVersion}
           licStatus={licStatus}
+          trialStatus={trialStatus}
           onBuyNow={() => setShowBuyModal(true)}
         />
       </ErrorBoundary>

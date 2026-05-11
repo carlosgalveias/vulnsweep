@@ -74,8 +74,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param {Array} strategies - Array of fix strategy objects
    * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
    */
-  applyFixes: (projectPath, strategies) =>
-    ipcRenderer.invoke('apply-fixes', projectPath, strategies),
+  applyFixes: (projectPath, strategies, bumpVersion) =>
+    ipcRenderer.invoke('apply-fixes', projectPath, strategies, bumpVersion),
 
   // ============================================
   // COMMERCIAL & LICENSING
