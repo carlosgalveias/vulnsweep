@@ -8,7 +8,12 @@ import { DEFAULT_COMMIT_MESSAGE } from '../constants.js';
  * @param {React.MutableRefObject} projectsRef - Ref to projects array
  * @returns {Object} Git operations state and methods
  */
-export default function useGitOperations(addLog, vulnerabilitiesRef, projectsRef) {
+export default function useGitOperations(
+  addLog,
+  vulnerabilitiesRef,
+  projectsRef,
+  onRepoCommitted = null
+) {
   const [isCommitting, setIsCommitting] = useState(false);
   const [allowReset, setAllowReset] = useState(true);
 
@@ -67,6 +72,10 @@ export default function useGitOperations(addLog, vulnerabilitiesRef, projectsRef
 
         if (pushResult.success) {
           addLog('success', `Successfully committed and pushed ${projectName}`);
+          // Clear dirty state for this repo now that changes are committed.
+          if (typeof onRepoCommitted === 'function') {
+            onRepoCommitted(projectPath);
+          }
         } else {
           addLog('error', `Failed to commit/push ${projectName}: ${pushResult.error}`);
         }
@@ -78,7 +87,7 @@ export default function useGitOperations(addLog, vulnerabilitiesRef, projectsRef
 
     setIsCommitting(false);
     addLog('success', 'Commit and push operations complete');
-  }, [addLog, vulnerabilitiesRef, projectsRef]);
+  }, [addLog, vulnerabilitiesRef, projectsRef, onRepoCommitted]);
 
   /**
    * Commit and push changes

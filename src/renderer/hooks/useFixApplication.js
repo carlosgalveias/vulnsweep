@@ -19,7 +19,8 @@ export default function useFixApplication(
   setVulnerabilities,
   projects,
   bumpVersion = true,
-  onTrialUpdated = null
+  onTrialUpdated = null,
+  onRepoDirtied = null
 ) {
   const [isApplying, setIsApplying] = useState(false);
   const [showHighRiskModal, setShowHighRiskModal] = useState(false);
@@ -88,6 +89,11 @@ export default function useFixApplication(
             addLog('warning', `${result.content.failed.length} fix(es) failed in ${projectName}`);
           }
 
+          // Mark this repository as dirty (has uncommitted changes).
+          if (typeof onRepoDirtied === 'function') {
+            onRepoDirtied(projectPath);
+          }
+
           // Notify caller to refresh trial status after a successful fix application.
           if (typeof onTrialUpdated === 'function') {
             onTrialUpdated();
@@ -131,6 +137,7 @@ export default function useFixApplication(
     projects,
     bumpVersion,
     onTrialUpdated,
+    onRepoDirtied,
   ]);
 
   /**

@@ -22,6 +22,30 @@ function App() {
   const [activeTab, setActiveTab] = useState('scanner');
   const [trialStatus, setTrialStatus] = useState(null);
 
+  // Tracks which repo paths have had fixes applied but not yet committed.
+  // Persists across re-scans so the commit button stays available.
+  const [dirtyRepos, setDirtyRepos] = useState(new Set());
+
+  const addDirtyRepo = useCallback((repoPath) => {
+    setDirtyRepos((prev) => {
+      const next = new Set(prev);
+      next.add(repoPath);
+      return next;
+    });
+  }, []);
+
+  const removeDirtyRepo = useCallback((repoPath) => {
+    setDirtyRepos((prev) => {
+      const next = new Set(prev);
+      next.delete(repoPath);
+      return next;
+    });
+  }, []);
+
+  const clearAllDirtyRepos = useCallback(() => {
+    setDirtyRepos(new Set());
+  }, []);
+
   // Initialize hooks - each hook called EXACTLY ONCE
   const { logs, addLog, clearLogs } = useLogConsole();
 
@@ -74,7 +98,8 @@ function App() {
   const { isCommitting, allowReset, handleAllowResetChange, commitAndPush } = useGitOperations(
     addLog,
     vulnerabilitiesRef,
-    projectsRef
+    projectsRef,
+    removeDirtyRepo
   );
 
   // Vulnerability scanner hook (uses allowReset from above, projectsRef)
@@ -84,6 +109,7 @@ function App() {
     selectedVulns,
     progress,
     isScanning,
+    hasScanned,
     scanProjects,
     toggleVulnerability,
     toggleAll,
@@ -92,7 +118,7 @@ function App() {
     showGitResetModal,
     confirmGitReset,
     cancelGitReset,
-  } = useVulnerabilityScanner(addLog, () => projectsRef.current, allowReset);
+  } = useVulnerabilityScanner(addLog, () => projectsRef.current, allowReset, clearAllDirtyRepos);
 
   // Wrapper for scan to count scans and prompt for license
   const handleScanAudit = async () => {
@@ -137,18 +163,17 @@ function App() {
     setVulnerabilities,
     projects,
     bumpVersion,
-    refreshTrialStatus
+    refreshTrialStatus,
+    addDirtyRepo
   );
 
   // Button states
   const buttonsState = {
     scanAudit: projects.length > 0 && !isScanning && !isApplying && !isCommitting,
     applyFixes: selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting,
-    commitPush:
-      vulnerabilities.some((v) => v.status === 'resolved') &&
-      !isCommitting &&
-      !isApplying &&
-      !isScanning,
+    // commitPush is driven by dirtyRepos so the button stays enabled after a re-scan
+    // that shows 0 vulnerabilities (fixes already applied, just need committing).
+    commitPush: dirtyRepos.size > 0 && !isCommitting && !isApplying && !isScanning,
   };
 
   // Derived trial footer values (safe fallbacks while status loads)
@@ -212,6 +237,7 @@ function App() {
                   onToggleAll={toggleAll}
                   isLoading={isScanning}
                   hasFolder={!!selectedFolder}
+                  hasScanned={hasScanned}
                 />
               </ErrorBoundary>
             </div>
@@ -226,7 +252,7 @@ function App() {
         {activeTab === 'statistics' && (
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary fallbackMessage="Failed to load statistics">
-              <StatisticsTab vulnerabilities={vulnerabilities} />
+              <StatisticsTab vulnerabilities={vulnerabilities} hasScanned={hasScanned} />
             </ErrorBoundary>
           </div>
         )}
