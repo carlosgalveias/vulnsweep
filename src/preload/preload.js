@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, shell } = require('electron');
 
 /**
  * VulnSweep IPC Bridge - Preload Script
@@ -102,6 +102,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openPaymentWindow: (isPromo) => ipcRenderer.invoke('open-payment-window', isPromo),
 
   // ============================================
+  // ENRICHMENT (F1)
+  // ============================================
+
+  /**
+   * Enrich an array of vulnerability objects with cross-source CVE data
+   * (OSV.dev, NVD API v2, GitHub Advisory Database).
+   * Progress events are streamed via onEnrichmentProgress().
+   *
+   * @param {Array} vulnerabilities - Array of vulnerability objects
+   * @returns {Promise<{ success: boolean, content?: Array, error?: string }>}
+   */
+  enrichVulnerabilities: (vulnerabilities) =>
+    ipcRenderer.invoke('enrich-vulnerabilities', vulnerabilities),
+
+  /**
+   * Retrieve current enrichment configuration / status from the main process.
+   * @returns {Promise<{ success: boolean, content?: Object }>}
+   */
+  getEnrichmentSettings: () => ipcRenderer.invoke('get-enrichment-settings'),
+
+  /**
+   * Subscribe to per-vulnerability enrichment progress events.
+   * @param {Function} callback - Called with { current, total, packageName }
+   * @returns {Function} Unsubscribe function
+   */
+  onEnrichmentProgress: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('enrichment-progress', subscription);
+    return () => ipcRenderer.removeListener('enrichment-progress', subscription);
+  },
+
+  // ============================================
   // LOGGING & EVENTS
   // ============================================
 
@@ -134,6 +166,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('analysis-progress', subscription);
     };
   },
+
+  // ============================================
+  // SHELL UTILITIES
+  // ============================================
+
+  /**
+   * Open a URL in the system default browser.
+   * @param {string} url - The URL to open externally
+   * @returns {Promise<void>}
+   */
+  openExternal: (url) => shell.openExternal(url),
 });
 
 // Expose app version metadata

@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
 const audit = require('./modules/audit');
+const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
@@ -557,6 +558,71 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
     sendLogMessage('error', `Failed to apply fixes: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+// ============================================
+// IPC HANDLERS - ENRICHMENT (F1)
+// ============================================
+
+/**
+ * Handler: Enrich an array of vulnerability objects with cross-source CVE data.
+ * Streams per-vulnerability progress events back to the renderer via
+ * 'enrichment-progress' push channel.
+ *
+ * Input:  { vulnerabilities: VulnObject[] }
+ * Output: { success: boolean, content?: VulnObject[], error?: string }
+ */
+ipcMain.handle('enrich-vulnerabilities', async (event, vulnerabilities) => {
+  try {
+    if (!Array.isArray(vulnerabilities) || vulnerabilities.length === 0) {
+      return { success: true, content: [] };
+    }
+
+    console.log(
+      `[IPC] enrich-vulnerabilities: enriching ${vulnerabilities.length} vulnerabilities`
+    );
+    sendLogMessage('info', `Enriching ${vulnerabilities.length} vulnerabilities with CVE data…`);
+
+    const total = vulnerabilities.length;
+
+    const enriched = await enrichVulnerabilities(
+      vulnerabilities,
+      (current, _total, packageName) => {
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('enrichment-progress', { current, total, packageName });
+        }
+      }
+    );
+
+    sendLogMessage(
+      'success',
+      `CVE enrichment complete: ${enriched.length} vulnerabilities enriched`
+    );
+    return { success: true, content: enriched };
+  } catch (err) {
+    console.error(`[IPC] enrich-vulnerabilities error: ${err.message}`);
+    sendLogMessage('error', `CVE enrichment failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current enrichment settings / status.
+ */
+ipcMain.handle('get-enrichment-settings', () => {
+  const { ENRICHMENT_CONFIG } = require('./config/constants');
+  return {
+    success: true,
+    content: {
+      osvApiUrl: ENRICHMENT_CONFIG.OSV_API_URL,
+      nvdApiUrl: ENRICHMENT_CONFIG.NVD_API_URL,
+      githubAdvisoryApiUrl: ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL,
+      nvdRateLimitMs: ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS,
+      nvdApiKeyConfigured: !!ENRICHMENT_CONFIG.NVD_API_KEY,
+      timeoutMs: ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+      cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
+    },
+  };
 });
 
 // ============================================

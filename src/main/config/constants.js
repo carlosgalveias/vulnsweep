@@ -173,6 +173,80 @@ const PAYPAL_CONFIG = {
 };
 
 // ============================================
+// ENRICHMENT CONFIGURATION
+// ============================================
+
+/**
+ * CVE enrichment configuration for cross-source vulnerability correlation.
+ * Covers OSV.dev, NVD API v2, and GitHub Advisory Database integrations.
+ * @namespace ENRICHMENT_CONFIG
+ */
+const ENRICHMENT_CONFIG = {
+  /**
+   * OSV.dev batch query endpoint
+   * @type {string}
+   */
+  OSV_API_URL: 'https://api.osv.dev/v1/query',
+
+  /**
+   * NVD API v2 CVE lookup endpoint
+   * @type {string}
+   */
+  NVD_API_URL: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
+
+  /**
+   * GitHub Advisory REST API base endpoint (no auth required for public data)
+   * @type {string}
+   */
+  GITHUB_ADVISORY_API_URL: 'https://api.github.com/advisories',
+
+  /**
+   * Minimum delay between consecutive NVD API calls (milliseconds).
+   * NVD free tier allows ~5 requests per 30 seconds without an API key.
+   * 6 seconds between calls keeps us safely under that limit.
+   * @type {number}
+   */
+  NVD_RATE_LIMIT_MS: 6000,
+
+  /**
+   * Optional NVD API key read from environment variable.
+   * When set, NVD allows 50 req/30s instead of 5 req/30s.
+   * @type {string|undefined}
+   */
+  get NVD_API_KEY() {
+    return process.env.NVD_API_KEY || undefined;
+  },
+
+  /**
+   * Per-request HTTP timeout for all enrichment API calls (milliseconds).
+   * @type {number}
+   */
+  ENRICHMENT_TIMEOUT_MS: 15000,
+
+  /**
+   * In-process enrichment cache TTL (milliseconds).
+   * Default: 30 minutes.
+   * @type {number}
+   */
+  ENRICHMENT_CACHE_TTL_MS: 30 * 60 * 1000,
+
+  /**
+   * Disk-based enrichment cache TTL (milliseconds).
+   * Longer TTL is appropriate for disk cache since CVE data rarely changes day-to-day.
+   * Default: 24 hours.
+   * @type {number}
+   */
+  DISK_CACHE_TTL_MS: 24 * 60 * 60 * 1000,
+
+  /**
+   * User-Agent header sent with all enrichment HTTP requests.
+   * GitHub API requires a non-empty User-Agent; NVD recommends one.
+   * @type {string}
+   */
+  USER_AGENT: 'VulnSweep/1.0 (https://github.com/vulnsweep)',
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -182,4 +256,5 @@ module.exports = {
   API_CONFIG,
   UI_CONFIG,
   PAYPAL_CONFIG,
+  ENRICHMENT_CONFIG,
 };

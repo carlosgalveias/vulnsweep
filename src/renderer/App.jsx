@@ -22,6 +22,14 @@ function App() {
   const [activeTab, setActiveTab] = useState('scanner');
   const [trialStatus, setTrialStatus] = useState(null);
 
+  // F1 — CVE enrichment state
+  const [isEnriching, setIsEnriching] = useState(false);
+  const [enrichmentProgress, setEnrichmentProgress] = useState({
+    current: 0,
+    total: 0,
+    packageName: '',
+  });
+
   // Tracks which repo paths have had fixes applied but not yet committed.
   // Persists across re-scans so the commit button stays available.
   const [dirtyRepos, setDirtyRepos] = useState(new Set());
@@ -147,6 +155,56 @@ function App() {
     vulnerabilitiesRef.current = vulnerabilities;
   }, [vulnerabilities]);
 
+  // F1 — Auto-trigger CVE enrichment after a scan completes with results.
+  // Enrichment is treated as a continuation of the scan phase:
+  // the Header progress indicator shows enrichment status until it finishes.
+  useEffect(() => {
+    if (!hasScanned || isScanning || vulnerabilities.length === 0 || isEnriching) return;
+    // Check if any vulnerabilities are still missing enrichment data
+    const needsEnrichment = vulnerabilities.some((v) => !v.enrichment);
+    if (!needsEnrichment) return;
+
+    let unsubscribe = null;
+
+    const runEnrichment = async () => {
+      setIsEnriching(true);
+      setEnrichmentProgress({ current: 0, total: vulnerabilities.length, packageName: '' });
+
+      // Subscribe to per-vuln progress events
+      unsubscribe = window.electronAPI.onEnrichmentProgress((data) => {
+        setEnrichmentProgress(data);
+      });
+
+      try {
+        const result = await window.electronAPI.enrichVulnerabilities(vulnerabilities);
+        if (result.success && Array.isArray(result.content)) {
+          setVulnerabilities(result.content);
+        }
+      } catch (err) {
+        console.error('CVE enrichment failed:', err);
+      } finally {
+        setIsEnriching(false);
+        setEnrichmentProgress({ current: 0, total: 0, packageName: '' });
+        if (unsubscribe) unsubscribe();
+      }
+    };
+
+    runEnrichment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasScanned, isScanning, vulnerabilities.length]);
+
+  // Derive a progress object that covers both scan and enrichment phases so the
+  // Header progress indicator never goes dark while enrichment is still running.
+  const combinedProgress = isEnriching
+    ? {
+        current: enrichmentProgress.current,
+        total: enrichmentProgress.total || vulnerabilities.length,
+        message: enrichmentProgress.packageName
+          ? `Enriching CVE data… (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length}) — ${enrichmentProgress.packageName}`
+          : `Enriching with NVD/OSV data… (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length})`,
+      }
+    : progress;
+
   // Fix application hook — passes refreshTrialStatus so the footer updates
   // immediately after each successful fix application.
   const {
@@ -167,13 +225,14 @@ function App() {
     addDirtyRepo
   );
 
-  // Button states
+  // Button states — enriching counts as a "busy" state that blocks scan/apply/commit
   const buttonsState = {
-    scanAudit: projects.length > 0 && !isScanning && !isApplying && !isCommitting,
-    applyFixes: selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting,
+    scanAudit: projects.length > 0 && !isScanning && !isApplying && !isCommitting && !isEnriching,
+    applyFixes:
+      selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
     // commitPush is driven by dirtyRepos so the button stays enabled after a re-scan
     // that shows 0 vulnerabilities (fixes already applied, just need committing).
-    commitPush: dirtyRepos.size > 0 && !isCommitting && !isApplying && !isScanning,
+    commitPush: dirtyRepos.size > 0 && !isCommitting && !isApplying && !isScanning && !isEnriching,
   };
 
   // Derived trial footer values (safe fallbacks while status loads)
@@ -189,7 +248,7 @@ function App() {
         <Header
           selectedFolder={selectedFolder}
           onBrowseFolder={browseFolder}
-          progress={progress}
+          progress={combinedProgress}
           onScanAudit={handleScanAudit}
           onApplyFixes={applyFixes}
           onCommitPush={commitAndPush}
@@ -238,6 +297,8 @@ function App() {
                   isLoading={isScanning}
                   hasFolder={!!selectedFolder}
                   hasScanned={hasScanned}
+                  isEnriching={isEnriching}
+                  enrichmentProgress={enrichmentProgress}
                 />
               </ErrorBoundary>
             </div>
