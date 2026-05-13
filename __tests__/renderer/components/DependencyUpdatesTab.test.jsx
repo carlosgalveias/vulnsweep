@@ -102,7 +102,7 @@ describe('apply done state', () => {
         onSelectionChange={noop}
       />
     );
-    expect(screen.getByText(/Committed:/)).toBeInTheDocument();
+    expect(screen.getByText(/Updates applied/)).toBeInTheDocument();
   });
   it('includes commit message text', () => {
     render(

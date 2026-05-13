@@ -31,6 +31,10 @@ function App() {
   const [depApplyStatus, setDepApplyStatus] = useState('idle');
   const [depApplyError, setDepApplyError] = useState(null);
   const [depCommitMessage, setDepCommitMessage] = useState(null);
+  // True after npm install succeeds — enables Commit & Push button for dep updates
+  const [depUpdatesDirty, setDepUpdatesDirty] = useState(false);
+  // Composite keys (repoPath:name) of packages that have been successfully applied
+  const [appliedDepPackages, setAppliedDepPackages] = useState(new Set());
 
   // F1 — CVE enrichment state
   const [isEnriching, setIsEnriching] = useState(false);
@@ -99,12 +103,12 @@ function App() {
   const [removePackageLock, setRemovePackageLock] = useState(false);
   const [removeOverrides, setRemoveOverrides] = useState(false);
 
-  const { isCommitting, allowReset, handleAllowResetChange, commitAndPush } = useGitOperations(
-    addLog,
-    vulnerabilitiesRef,
-    projectsRef,
-    removeDirtyRepo
-  );
+  const {
+    isCommitting,
+    allowReset,
+    handleAllowResetChange,
+    commitAndPush: commitAndPushVulns,
+  } = useGitOperations(addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo);
 
   const {
     vulnerabilities,
@@ -133,6 +137,43 @@ function App() {
     addLog,
     resetVulnerabilities
   );
+
+  // Commit & Push — handles both dep-updates dirty repos and vuln-fix dirty repos.
+  // MUST be declared after selectedFolder is available from useProjectDiscovery.
+  const commitAndPush = useCallback(async () => {
+    if (depUpdatesDirty && depCommitMessage) {
+      const repoPathsSet = new Set(
+        depUpdateCandidates.length > 0
+          ? depUpdateCandidates.map((r) => r.repoPath)
+          : [selectedFolder]
+      );
+      for (const repoPath of repoPathsSet) {
+        addLog('info', `Committing dep updates in ${repoPath}...`);
+        try {
+          const result = await window.electronAPI.commitAndPush(repoPath, {
+            message: depCommitMessage,
+            vulnerabilities: [],
+          });
+          if (result.success) {
+            addLog('success', `Dep updates committed in ${repoPath}`);
+          } else {
+            addLog('error', `Commit failed for ${repoPath}: ${result.error}`);
+          }
+        } catch (err) {
+          addLog('error', `Commit error for ${repoPath}: ${err.message}`);
+        }
+      }
+      setDepUpdatesDirty(false);
+    }
+    await commitAndPushVulns();
+  }, [
+    depUpdatesDirty,
+    depCommitMessage,
+    depUpdateCandidates,
+    selectedFolder,
+    addLog,
+    commitAndPushVulns,
+  ]);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -193,6 +234,25 @@ function App() {
     removeOverrides
   );
 
+  // Reset all dep-updates state when the selected folder changes — skip on initial mount.
+  const prevFolderRef = useRef(undefined);
+  useEffect(() => {
+    if (prevFolderRef.current === undefined) {
+      prevFolderRef.current = selectedFolder;
+      return;
+    }
+    if (prevFolderRef.current === selectedFolder) return;
+    prevFolderRef.current = selectedFolder;
+    setDepUpdateCandidates([]);
+    setSelectedDepUpdates(new Set());
+    setDepUpdatesDirty(false);
+    setAppliedDepPackages(new Set());
+    setDepScanError(null);
+    setDepApplyStatus('idle');
+    setDepApplyError(null);
+    setDepCommitMessage(null);
+  }, [selectedFolder]);
+
   const handleDepScan = async () => {
     if (!selectedFolder) return;
     setIsDepScanning(true);
@@ -200,10 +260,20 @@ function App() {
     setDepApplyStatus('idle');
     setDepApplyError(null);
     setDepCommitMessage(null);
-    setDepUpdateCandidates([]);
     setSelectedDepUpdates(new Set());
+    // When git reset is enabled, the repos are hard-reset — any previously applied
+    // (but uncommitted) changes are gone. Clear dirty state and applied tracking so the
+    // UI correctly reflects that there is nothing pending to commit.
+    if (allowReset) {
+      setDepUpdateCandidates([]);
+      setDepUpdatesDirty(false);
+      setAppliedDepPackages(new Set());
+    }
     try {
-      const r = await window.electronAPI.scanDepUpdates(selectedFolder);
+      const r = await window.electronAPI.scanDepUpdates(selectedFolder, allowReset, {
+        removeOverrides,
+        removePackageLock,
+      });
       if (r.success) {
         setDepUpdateCandidates(r.content);
       } else {
@@ -237,9 +307,16 @@ function App() {
         const msg = r.commitMessage || updates.map((u) => `${u.name}@${u.toVersion}`).join(', ');
         setDepCommitMessage(msg);
         setDepApplyStatus('done');
-        setDepUpdateCandidates([]);
+        // Mark applied packages so the Status column shows "Applied" — do NOT clear the table
+        setAppliedDepPackages((prev) => {
+          const next = new Set(prev);
+          updates.forEach((u) => next.add(`${u.repoPath}:${u.name}`));
+          return next;
+        });
         setSelectedDepUpdates(new Set());
-        await window.electronAPI.commitAndPush(selectedFolder, { message: `chore: update ${msg}` });
+        // Mark dirty so Commit & Push button becomes active.
+        // The user triggers the commit manually — we do NOT auto-commit here.
+        setDepUpdatesDirty(true);
       } else {
         setDepApplyError(r.error || 'Apply failed');
         setDepApplyStatus('error');
@@ -282,7 +359,12 @@ function App() {
     applyFixes: isDepUpdatesTab
       ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
       : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
-    commitPush: dirtyRepos.size > 0 && !isCommitting && !isApplying && !isScanning && !isEnriching,
+    commitPush:
+      (dirtyRepos.size > 0 || depUpdatesDirty) &&
+      !isCommitting &&
+      !isApplying &&
+      !isScanning &&
+      !isEnriching,
   };
 
   const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
@@ -368,20 +450,28 @@ function App() {
         )}
 
         {activeTab === 'dep-updates' && (
-          <div className="flex-1 overflow-hidden">
-            <ErrorBoundary fallbackMessage="Failed to load dependency updates">
-              <DependencyUpdatesTab
-                candidates={depUpdateCandidates}
-                isScanning={isDepScanning}
-                scanError={depScanError}
-                selectedPackages={selectedDepUpdates}
-                onSelectionChange={setSelectedDepUpdates}
-                applyStatus={depApplyStatus}
-                applyError={depApplyError}
-                commitMessage={depCommitMessage}
-              />
-            </ErrorBoundary>
-          </div>
+          <>
+            <div className="h-[60%] overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load dependency updates">
+                <DependencyUpdatesTab
+                  candidates={depUpdateCandidates}
+                  isScanning={isDepScanning}
+                  scanError={depScanError}
+                  selectedPackages={selectedDepUpdates}
+                  onSelectionChange={setSelectedDepUpdates}
+                  applyStatus={depApplyStatus}
+                  applyError={depApplyError}
+                  commitMessage={depCommitMessage}
+                  appliedPackages={appliedDepPackages}
+                />
+              </ErrorBoundary>
+            </div>
+            <div className="h-[40%] overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load log console">
+                <LogConsole logs={logs} onClear={clearLogs} />
+              </ErrorBoundary>
+            </div>
+          </>
         )}
         {isUnlicensed && (
           <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">

@@ -648,9 +648,12 @@ ipcMain.handle('get-enrichment-settings', () => {
  * Input:  projectPath: string
  * Output: { success: boolean, content?: UpdateCandidate[], error?: string }
  */
-ipcMain.handle('scan-dep-updates', async (event, projectPath) => {
+ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false, options = {}) => {
+  const { removeOverrides = false, removePackageLock = false } = options;
   try {
-    console.log(`[IPC] scan-dep-updates: ${projectPath}`);
+    console.log(
+      `[IPC] scan-dep-updates: ${projectPath}, allowReset: ${allowReset}, removeOverrides: ${removeOverrides}, removePackageLock: ${removePackageLock}`
+    );
     sendLogMessage('info', `Scanning dependency updates for ${path.basename(projectPath)}...`);
 
     const sanitized = sanitizePath(projectPath);
@@ -667,6 +670,41 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath) => {
         });
       }
     };
+
+    // Mirror audit scan: run git prepare (reset+pull+removeOverrides+removePackageLock)
+    // per repo whenever any prep option is active.
+    if (allowReset || removeOverrides || removePackageLock) {
+      const fs = require('fs');
+      const path_ = require('path');
+      let repos = [];
+      try {
+        const entries = await fs.promises.readdir(sanitized, { withFileTypes: true });
+        const dirs = entries.filter((e) => e.isDirectory());
+        for (const d of dirs) {
+          const rp = path_.join(sanitized, d.name);
+          try {
+            await fs.promises.access(path_.join(rp, 'package.json'));
+            repos.push(rp);
+          } catch {
+            /* skip */
+          }
+        }
+        if (repos.length === 0) repos = [sanitized]; // single-repo fallback
+      } catch {
+        repos = [sanitized];
+      }
+      for (const repoPath of repos) {
+        sendLogMessage('info', `Preparing repository: ${path.basename(repoPath)}...`);
+        try {
+          await git.prepareRepository(repoPath, allowReset, { removeOverrides, removePackageLock });
+        } catch (prepErr) {
+          sendLogMessage(
+            'warn',
+            `Git prepare failed for ${path.basename(repoPath)}: ${prepErr.message}`
+          );
+        }
+      }
+    }
 
     const result = await scanDependencyUpdates(sanitized, progressCb);
 
@@ -716,8 +754,7 @@ ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
       return { success: false, error: result.error };
     }
 
-    const msgs = result.content.commitMessages || [];
-    const commitMessage = msgs.join(' | ') || 'updates applied';
+    const commitMessage = result.content.commitMessage || 'updates applied';
     sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
     return { success: true, commitMessage };
   } catch (error) {

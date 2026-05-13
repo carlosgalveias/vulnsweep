@@ -6,16 +6,17 @@ jest.mock('fs', () => {
     constants: { R_OK: 4 },
   };
 });
+// npm now uses exec (shell-based), git still uses execFile
 jest.mock('child_process', () => {
-  return { execFile: jest.fn() };
+  return { exec: jest.fn(), execFile: jest.fn() };
 });
 jest.mock('../../../../src/main/utils/registry-cache', () => {
   return jest.fn().mockImplementation(() => {
     return { getAllVersions: mockGAV };
   });
 });
+const cp = require('child_process');
 const fs = require('fs');
-const ef = require('child_process').execFile;
 const S = require('../../../../src/main/modules/dep-updates/dep-updates-scanner');
 
 function pkg(deps, dev) {
@@ -30,11 +31,12 @@ function nmv(v) {
 function MC(ok, d) {
   mockGAV.mockResolvedValue(ok ? { success: true, content: d } : { success: false, error: 'x' });
 }
+// ME sets up exec (npm) mock to succeed or fail
 function ME(fail) {
-  ef.mockImplementation((c, a, o, cb) => {
-    if (typeof o === 'function') cb = o;
+  cp.exec.mockImplementation((cmd, opts, cb) => {
+    if (typeof opts === 'function') cb = opts;
     if (fail) cb(new Error('fail'));
-    else cb(null, { stdout: '', stderr: '' });
+    else cb(null, '', '');
   });
 }
 function dirEntry(name) {
@@ -172,6 +174,7 @@ describe('applyUpdates', () => {
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/No updates/);
   });
+
   it('error when not array', async () => {
     const r = await S.applyUpdates('/f', null);
     expect(r.success).toBe(false);
@@ -182,25 +185,28 @@ describe('applyUpdates', () => {
     const r = await S.applyUpdates('/root', [
       { name: 'lodash', toVersion: '5.0.0', repoPath: '/root/repo1' },
     ]);
-    expect(
-      ef.mock.calls.some((c) => {
-        return c[0] === 'npm' && c[2] && c[2].cwd === '/root/repo1';
-      })
-    ).toBe(true);
     expect(r.success).toBe(true);
+    // exec is called with the npm install command and the repoPath as cwd
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall).toBeTruthy();
+    const optsArg = execCall[1];
+    expect(optsArg && optsArg.cwd).toBe('/root/repo1');
   });
 
   it('falls back to projectPath when update has no repoPath', async () => {
     ME(false);
     await S.applyUpdates('/fallback', [{ name: 'lodash', toVersion: '5.0.0' }]);
-    expect(
-      ef.mock.calls.some((c) => {
-        return c[0] === 'npm' && c[2] && c[2].cwd === '/fallback';
-      })
-    ).toBe(true);
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall).toBeTruthy();
+    const optsArg = execCall[1];
+    expect(optsArg && optsArg.cwd).toBe('/fallback');
   });
 
-  it('groups updates per repo and runs one commit per repo', async () => {
+  it('groups updates per repo and runs one npm install per repo (no git)', async () => {
     ME(false);
     const r = await S.applyUpdates('/root', [
       { name: 'a', toVersion: '2.0.0', repoPath: '/root/repo1' },
@@ -208,53 +214,50 @@ describe('applyUpdates', () => {
       { name: 'c', toVersion: '4.0.0', repoPath: '/root/repo2' },
     ]);
     expect(r.success).toBe(true);
-    const commitCalls = ef.mock.calls.filter((c) => {
-      return c[0] === 'git' && c[1][0] === 'commit';
-    });
-    expect(commitCalls).toHaveLength(2);
+    // Two exec calls — one per repo
+    const npmCalls = cp.exec.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(npmCalls).toHaveLength(2);
+    // No git via execFile — git is handled by Commit & Push separately
+    const gitCalls = cp.execFile.mock.calls.filter((c) => c[0] === 'git');
+    expect(gitCalls).toHaveLength(0);
   });
 
-  it('returns commitMessages array on success', async () => {
+  it('returns commitMessage string on success', async () => {
     ME(false);
     const r = await S.applyUpdates('/root', [
       { name: 'lo', toVersion: '5.0.0', repoPath: '/root/r1' },
     ]);
     expect(r.success).toBe(true);
-    expect(Array.isArray(r.content.commitMessages)).toBe(true);
-    expect(r.content.commitMessages[0]).toMatch(/chore: update/);
+    expect(typeof r.content.commitMessage).toBe('string');
+    expect(r.content.commitMessage).toMatch(/chore: update/);
   });
 
   it('returns error when npm install fails', async () => {
-    ef.mockImplementation((c, a, o, cb) => {
-      if (typeof o === 'function') cb = o;
-      if (c === 'npm') cb(new Error('npm fail'));
-      else cb(null, { stdout: '', stderr: '' });
+    cp.exec.mockImplementation((cmd, opts, cb) => {
+      if (typeof opts === 'function') cb = opts;
+      cb(new Error('npm fail'));
     });
     const r = await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/npm install failed/);
   });
 
-  it('returns error when git add fails', async () => {
-    ef.mockImplementation((c, a, o, cb) => {
-      if (typeof o === 'function') cb = o;
-      if (c === 'npm') cb(null, { stdout: '', stderr: '' });
-      else if (a[0] === 'add') cb(new Error('git add fail'));
-      else cb(null, { stdout: '', stderr: '' });
-    });
-    const r = await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/git add failed/);
+  it('does not call git — commit is user-triggered via Commit & Push', async () => {
+    ME(false);
+    await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
+    const gitCalls = cp.execFile.mock.calls.filter((c) => c[0] === 'git');
+    expect(gitCalls).toHaveLength(0);
   });
 
-  it('returns error when git commit fails', async () => {
-    ef.mockImplementation((c, a, o, cb) => {
-      if (typeof o === 'function') cb = o;
-      if (c === 'npm' || a[0] === 'add') cb(null, { stdout: '', stderr: '' });
-      else cb(new Error('git commit fail'));
+  it('npm install failure returns error immediately', async () => {
+    cp.exec.mockImplementation((cmd, opts, cb) => {
+      if (typeof opts === 'function') cb = opts;
+      cb(new Error('npm fail'));
     });
     const r = await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/git commit failed/);
+    expect(r.error).toMatch(/npm install failed/);
   });
 });

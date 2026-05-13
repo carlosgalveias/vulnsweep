@@ -23,7 +23,7 @@
  * @module modules/dep-updates/dep-updates-scanner
  */
 
-const { execFile } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
@@ -38,8 +38,8 @@ const {
   computeRiskLevel,
 } = require('./version-comparator');
 
-/** Promisified execFile for async child process execution. Use execFile (not exec) to avoid shell injection. */
-const execFileAsync = promisify(execFile);
+/** Promisified exec for npm commands — uses the shell, which is required on Windows for npm (a .cmd script). */
+const execAsync = promisify(exec);
 
 /**
  * Module-level RegistryCache singleton (default 5-minute TTL).
@@ -318,19 +318,21 @@ async function scanDependencyUpdates(projectPath, progressCallback) {
 /**
  * Apply selected dependency updates across one or more repos.
  *
- * Groups updates by repoPath so exactly one `npm install` and one git commit
- * runs per repo. The git commit message lists only that repo's updated packages.
+ * Runs `npm install --save <pkg>@<version>` in the correct repo subdirectory
+ * for each update. Does NOT perform any git operations — the user triggers
+ * Commit & Push separately via the existing app flow, using the returned
+ * commitMessage as the pre-filled commit message.
  *
  * @param {string}      projectPath - Root folder path (used as fallback repoPath).
  * @param {ApplyUpdate[]} updates   - Updates to apply; each must have repoPath.
- * @returns {Promise<{success: boolean, content?: {commitMessages: string[]}, error?: string}>}
+ * @returns {Promise<{success: boolean, content?: {commitMessage: string}, error?: string}>}
  */
 async function applyUpdates(projectPath, updates) {
   if (!Array.isArray(updates) || updates.length === 0) {
     return createError('No updates provided');
   }
 
-  // Group updates by repoPath — one npm install + one git commit per repo
+  // Group updates by repoPath — one npm install per repo
   const byRepo = new Map();
   for (const update of updates) {
     const rp = update.repoPath || projectPath;
@@ -338,38 +340,32 @@ async function applyUpdates(projectPath, updates) {
     byRepo.get(rp).push(update);
   }
 
-  const commitMessages = [];
+  const allUpdatedLabels = [];
 
   for (const [repoPath, repoUpdates] of byRepo) {
-    const pkgArgs = repoUpdates.map((u) => `${u.name}@${u.toVersion}`);
+    // Build "npm install --save pkg@version ..." as a shell command string.
+    // exec() uses the shell by default, which is required on Windows where npm
+    // is a .cmd script. Package names and semver versions are shell-safe characters.
+    const pkgList = repoUpdates.map((u) => `${u.name}@${u.toVersion}`).join(' ');
+    const npmCmd = `npm install --save ${pkgList}`;
 
     try {
-      await execFileAsync('npm', ['install', '--save', ...pkgArgs], { cwd: repoPath });
+      await execAsync(npmCmd, { cwd: repoPath, encoding: 'utf8' });
     } catch (err) {
       return createError(`npm install failed: ${err.message}`);
     }
 
-    let commitMessage = `chore: update ${repoUpdates.map((u) => `${u.name}@${u.toVersion}`).join(', ')}`;
-    if (commitMessage.length > GIT_CONFIG.MESSAGE_MAX_LENGTH) {
-      commitMessage = commitMessage.substring(0, GIT_CONFIG.MESSAGE_MAX_LENGTH);
+    for (const u of repoUpdates) {
+      allUpdatedLabels.push(`${u.name}@${u.toVersion}`);
     }
-
-    try {
-      await execFileAsync('git', ['add', 'package.json', 'package-lock.json'], { cwd: repoPath });
-    } catch (err) {
-      return createError(`git add failed: ${err.message}`);
-    }
-
-    try {
-      await execFileAsync('git', ['commit', '-m', commitMessage], { cwd: repoPath });
-    } catch (err) {
-      return createError(`git commit failed: ${err.message}`);
-    }
-
-    commitMessages.push(commitMessage);
   }
 
-  return createSuccess({ commitMessages });
+  let commitMessage = `chore: update ${allUpdatedLabels.join(', ')}`;
+  if (commitMessage.length > GIT_CONFIG.MESSAGE_MAX_LENGTH) {
+    commitMessage = commitMessage.substring(0, GIT_CONFIG.MESSAGE_MAX_LENGTH);
+  }
+
+  return createSuccess({ commitMessage });
 }
 
 module.exports = { scanDependencyUpdates, applyUpdates };

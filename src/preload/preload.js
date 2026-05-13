@@ -144,7 +144,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param {string} projectPath - Absolute path to the project directory
    * @returns {Promise<{success: boolean, content?: UpdateCandidate[], error?: string}>}
    */
-  scanDepUpdates: (projectPath) => ipcRenderer.invoke('scan-dep-updates', projectPath),
+  scanDepUpdates: (projectPath, allowReset = false, options = {}) =>
+    ipcRenderer.invoke('scan-dep-updates', projectPath, allowReset, options),
 
   /**
    * Applies selected dependency updates via npm install and commits locally.
