@@ -765,6 +765,128 @@ ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
 });
 
 // ============================================
+// IPC HANDLERS - LICENSE SCAN & SBOM (F8/F9)
+// ============================================
+
+ipcMain.handle('license:scan', async (event, projectPath) => {
+  try {
+    console.log(`[IPC] license:scan: ${projectPath}`);
+    sendLogMessage('info', `Scanning licenses for ${path.basename(projectPath)}...`);
+
+    const sanitized = sanitizePath(projectPath);
+    const { scanLicenses } = require('./modules/license-scanner');
+    const result = await scanLicenses(sanitized);
+
+    sendLogMessage('success', `License scan complete: ${result.stats.total} packages found`);
+    return { success: true, content: result };
+  } catch (err) {
+    console.error(`[IPC] license:scan error: ${err.message}`);
+    sendLogMessage('error', `License scan failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sbom:get-save-path', async (event, { format }) => {
+  try {
+    const EXT = { cyclonedx: 'json', spdx: 'json', csv: 'csv' };
+    const LABEL = { cyclonedx: 'CycloneDX JSON', spdx: 'SPDX JSON', csv: 'CSV' };
+    const ext = EXT[format] || 'json';
+    const label = LABEL[format] || 'SBOM';
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save SBOM File',
+      defaultPath: `sbom.${ext}`,
+      filters: [
+        { name: label, extensions: [ext] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    return { filePath: result.filePath || null, canceled: result.canceled };
+  } catch (err) {
+    console.error(`[IPC] sbom:get-save-path error: ${err.message}`);
+    return { filePath: null, canceled: true, error: err.message };
+  }
+});
+
+/**
+ * Derive a human-readable document name from an array of scanned project paths.
+ *
+ * Rules:
+ *   - 0 paths  → 'scan'
+ *   - 1 path   → basename of that path (preserves existing single-repo behaviour)
+ *   - N paths  → basename of the deepest common ancestor directory, or
+ *                'multi-repo-scan' when paths share no common ancestor segment
+ *
+ * @param {string[]} paths - Absolute project paths
+ * @returns {string}
+ */
+function deriveDocumentName(paths) {
+  if (!paths || paths.length === 0) return 'scan';
+  if (paths.length === 1) return path.basename(paths[0]);
+
+  const parts = paths.map((p) => p.split(path.sep));
+  const minLen = Math.min(...parts.map((p) => p.length));
+  const common = [];
+  for (let i = 0; i < minLen; i++) {
+    if (parts.every((p) => p[i] === parts[0][i])) {
+      common.push(parts[0][i]);
+    } else {
+      break;
+    }
+  }
+  return common.length > 0 ? common[common.length - 1] : 'multi-repo-scan';
+}
+
+ipcMain.handle('sbom:export', async (event, { licenseResult, format, outputPath }) => {
+  try {
+    // Validate outputPath is an absolute path (provided by OS dialog, not user input)
+    if (!outputPath || typeof outputPath !== 'string' || !path.isAbsolute(outputPath)) {
+      return { success: false, error: 'Invalid output path' };
+    }
+
+    console.log(`[IPC] sbom:export format=${format} path=${outputPath}`);
+    sendLogMessage('info', `Exporting SBOM (${format}) to ${path.basename(outputPath)}...`);
+
+    const { generateSbom } = require('./modules/sbom-generator');
+
+    // Derive a document name that correctly represents all scanned repositories.
+    // licenseResult.projectPaths (added in the renderer merge step) contains every
+    // path that contributed to this merged result. For a single-repo scan it falls
+    // back to the legacy licenseResult.projectPath so behaviour is unchanged.
+    const allPaths = licenseResult.projectPaths || [licenseResult.projectPath];
+    const documentName = deriveDocumentName(allPaths);
+
+    // Read the version from the first project's package.json (best-effort).
+    let projectVersion = '0.0.0';
+    try {
+      const pkgJson = JSON.parse(
+        require('fs').readFileSync(path.join(licenseResult.projectPath, 'package.json'), 'utf8')
+      );
+      projectVersion = pkgJson.version || '0.0.0';
+    } catch {
+      /* use default version */
+    }
+
+    const projectMeta = {
+      name: documentName,
+      version: projectVersion,
+      toolVersion: app.getVersion(),
+    };
+
+    const content = generateSbom(licenseResult, format, projectMeta);
+    await require('fs').promises.writeFile(outputPath, content, 'utf8');
+
+    sendLogMessage('success', `SBOM exported: ${path.basename(outputPath)}`);
+    return { success: true };
+  } catch (err) {
+    console.error(`[IPC] sbom:export error: ${err.message}`);
+    sendLogMessage('error', `SBOM export failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
 // IPC HANDLERS - TRIAL
 // ============================================
 

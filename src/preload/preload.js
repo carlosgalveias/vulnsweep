@@ -168,6 +168,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ============================================
+  // LICENSE SCAN & SBOM (F8/F9)
+  // ============================================
+
+  /**
+   * Scan all packages in a project for license information.
+   * No paywall — available to all users.
+   * @param {string} projectPath - Absolute path to the project directory
+   * @returns {Promise<{ success: boolean, content?: LicenseScanResult, error?: string }>}
+   */
+  scanLicenses: (projectPath) => ipcRenderer.invoke('license:scan', projectPath),
+
+  /**
+   * Show a native save-file dialog for the chosen SBOM format.
+   * @param {{ format: 'cyclonedx'|'spdx'|'csv' }} options
+   * @returns {Promise<{ filePath: string|null, canceled: boolean, error?: string }>}
+   */
+  sbomGetSavePath: (options) => ipcRenderer.invoke('sbom:get-save-path', options),
+
+  /**
+   * Generate SBOM content and write it to outputPath.
+   * @param {{ licenseResult: LicenseScanResult, format: string, outputPath: string }} params
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  sbomExport: (params) => ipcRenderer.invoke('sbom:export', params),
+
+  // ============================================
   // LOGGING & EVENTS
   // ============================================
 

@@ -8,6 +8,7 @@ import BuyModal from './components/BuyModal';
 import VulnerabilityGrid from './components/VulnerabilityGrid';
 import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
+import LicensesTab from './components/LicensesTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
@@ -22,6 +23,11 @@ function App() {
   const [installInfo, setInstallInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
   const [trialStatus, setTrialStatus] = useState(null);
+
+  // F8/F9 — License scan state
+  const [licenseResult, setLicenseResult] = useState(null);
+  const [isLicenseScanning, setIsLicenseScanning] = useState(false);
+  const [licenseScanError, setLicenseScanError] = useState(null);
 
   // F13 — Dependency Updates state
   const [depUpdateCandidates, setDepUpdateCandidates] = useState([]);
@@ -251,7 +257,88 @@ function App() {
     setDepApplyStatus('idle');
     setDepApplyError(null);
     setDepCommitMessage(null);
+    setLicenseResult(null);
+    setIsLicenseScanning(false);
+    setLicenseScanError(null);
   }, [selectedFolder]);
+
+  /**
+   * Run license scan across all discovered project paths (same scope as audit scan).
+   * Auto-called after audit scan completes. Accepts array of absolute project paths.
+   * @param {string[]} projectPaths
+   */
+  const handleLicenseScan = useCallback(async (projectPaths) => {
+    if (!projectPaths || projectPaths.length === 0) return;
+    setIsLicenseScanning(true);
+    setLicenseScanError(null);
+    try {
+      const results = await Promise.all(
+        projectPaths.map((p) => window.electronAPI.scanLicenses(p))
+      );
+      const successful = results.filter((r) => r.success).map((r) => r.content);
+      if (successful.length === 0) {
+        const firstErr = results.find((r) => !r.success);
+        setLicenseScanError(firstErr?.error || 'License scan failed for all projects');
+        return;
+      }
+      const seenPkgs = new Set();
+      const mergedEntries = [];
+      for (const res of successful) {
+        for (const entry of res.entries) {
+          const key = `${entry.name}@${entry.version}`;
+          if (!seenPkgs.has(key)) {
+            seenPkgs.add(key);
+            mergedEntries.push(entry);
+          }
+        }
+      }
+      const mergedByLicense = {};
+      for (const res of successful) {
+        for (const [licId, count] of Object.entries(res.byLicense || {})) {
+          mergedByLicense[licId] = (mergedByLicense[licId] || 0) + count;
+        }
+      }
+      const mergedStats = successful.reduce(
+        (acc, res) => ({
+          total: acc.total + (res.stats?.total ?? 0),
+          safe: acc.safe + (res.stats?.safe ?? 0),
+          warning: acc.warning + (res.stats?.warning ?? 0),
+          dangerous: acc.dangerous + (res.stats?.dangerous ?? 0),
+          unknown: acc.unknown + (res.stats?.unknown ?? 0),
+        }),
+        { total: 0, safe: 0, warning: 0, dangerous: 0, unknown: 0 }
+      );
+      setLicenseResult({
+        projectPath: projectPaths[0],
+        projectName: successful[0].projectName,
+        projectPaths,
+        scannedAt: new Date().toISOString(),
+        entries: mergedEntries,
+        byLicense: mergedByLicense,
+        stats: mergedStats,
+      });
+    } catch (err) {
+      setLicenseScanError(err.message);
+    } finally {
+      setIsLicenseScanning(false);
+    }
+  }, []);
+
+  // Track project paths in a ref so the auto-trigger useEffect can access them
+  // without adding projects as a dependency (avoids re-running on re-renders).
+  const projectPathsRef = useRef([]);
+  useEffect(() => {
+    projectPathsRef.current = projects.map((p) => p.path);
+  }, [projects]);
+
+  // Auto-trigger license scan after every completed audit scan.
+  useEffect(() => {
+    if (!hasScanned || isScanning) return;
+    const paths = projectPathsRef.current;
+    if (paths.length === 0) return;
+    handleLicenseScan(paths);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasScanned, isScanning]);
 
   const handleDepScan = async () => {
     if (!selectedFolder) return;
@@ -349,6 +436,7 @@ function App() {
   };
 
   const isDepUpdatesTab = activeTab === 'dep-updates';
+  const isLicensesTab = activeTab === 'licenses';
   const scanButtonLabel = isDepUpdatesTab ? 'Scan for Updates' : 'Scan & Audit';
   const applyButtonLabel = isDepUpdatesTab ? 'Apply Updates' : 'Apply Selected Fixes';
 
@@ -356,9 +444,11 @@ function App() {
     scanAudit: isDepUpdatesTab
       ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
       : projects.length > 0 && !isScanning && !isApplying && !isCommitting && !isEnriching,
-    applyFixes: isDepUpdatesTab
-      ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
-      : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
+    applyFixes: isLicensesTab
+      ? false
+      : isDepUpdatesTab
+        ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
+        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
     commitPush:
       (dirtyRepos.size > 0 || depUpdatesDirty) &&
       !isCommitting &&
@@ -404,6 +494,7 @@ function App() {
           { id: 'scanner', label: 'Scanner' },
           { id: 'statistics', label: 'Statistics' },
           { id: 'dep-updates', label: 'Dep Updates' },
+          { id: 'licenses', label: 'Licenses' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -472,6 +563,18 @@ function App() {
               </ErrorBoundary>
             </div>
           </>
+        )}
+        {activeTab === 'licenses' && (
+          <div className="flex-1 overflow-hidden">
+            <ErrorBoundary fallbackMessage="Failed to load licenses">
+              <LicensesTab
+                licenseResult={licenseResult}
+                isScanning={isScanning || isLicenseScanning}
+                scanError={licenseScanError}
+                projectPath={selectedFolder}
+              />
+            </ErrorBoundary>
+          </div>
         )}
         {isUnlicensed && (
           <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
