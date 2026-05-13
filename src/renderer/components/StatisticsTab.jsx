@@ -8,6 +8,25 @@ const normalizeSeverity = (s) => {
   return lower === 'moderate' ? 'medium' : lower;
 };
 
+// Severity tier rank: higher number = more severe
+const SEVERITY_TIER = { critical: 5, high: 4, medium: 3, moderate: 3, low: 2, info: 1 };
+
+/**
+ * Returns the effective severity for a vulnerability, preferring
+ * enrichment.mergedSeverity if it is strictly higher than vuln.severity.
+ * Treats "moderate" and "medium" as equivalent (both rank 3).
+ */
+function getEffectiveSeverity(vuln) {
+  const base = normalizeSeverity(vuln.severity);
+  const merged = vuln.enrichment?.mergedSeverity
+    ? normalizeSeverity(vuln.enrichment.mergedSeverity)
+    : null;
+  if (merged && (SEVERITY_TIER[merged] ?? 0) > (SEVERITY_TIER[base] ?? 0)) {
+    return merged;
+  }
+  return base;
+}
+
 const SEVERITY_CONFIG = {
   critical: { color: '#dc2626', label: 'Critical' },
   high: { color: '#ea580c', label: 'High' },
@@ -22,7 +41,7 @@ const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info', 'unknown'];
 function calculateGrade(vulns) {
   const counts = { critical: 0, high: 0, medium: 0, low: 0 };
   vulns.forEach((v) => {
-    const s = normalizeSeverity(v.severity);
+    const s = getEffectiveSeverity(v);
     if (s in counts) counts[s]++;
   });
   if (counts.critical > 0) return 'F';
@@ -88,10 +107,37 @@ function CustomTooltip({ active, payload }) {
 CustomTooltip.propTypes = { active: PropTypes.bool, payload: PropTypes.array };
 CustomTooltip.defaultProps = { active: false, payload: [] };
 
-async function exportToPdf(total, pieData, repoRows, cveRows) {
+/** Capitalises first letter; returns em-dash for falsy input. */
+function capitalize(str) {
+  if (!str) return '—';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+/**
+ * Builds a plain-text Sources string for a PDF cell (no HTML).
+ * Each confirmed source appears on its own line with its URL.
+ */
+function buildSourcesText(enrichment) {
+  if (!enrichment || !enrichment.sources) return '—';
+  const parts = [];
+  const { osv, nvd, github } = enrichment.sources;
+  if (osv && osv.found) {
+    parts.push(osv.url ? `OSV: ${osv.url}` : 'OSV');
+  }
+  if (nvd && nvd.found) {
+    parts.push(nvd.url ? `NVD: ${nvd.url}` : 'NVD');
+  }
+  if (github && github.found) {
+    parts.push(github.url ? `GitHub Advisory: ${github.url}` : 'GitHub Advisory');
+  }
+  return parts.length > 0 ? parts.join('\n') : '—';
+}
+
+async function exportToPdf(total, pieData, repoRows, cveRows, allVulns) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  // Landscape so the Cross-Source correlation table fits on A4
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const now = new Date();
   const dateLabel = now.toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -157,8 +203,89 @@ async function exportToPdf(total, pieData, repoRows, cveRows) {
     ]),
     styles: { fontSize: 7, cellPadding: 2 },
     headStyles: { fillColor: [31, 41, 55] },
-    columnStyles: { 5: { cellWidth: 50 } },
+    columnStyles: { 5: { cellWidth: 60 } },
   });
+
+  const enrichedVulns = (allVulns || []).filter(
+    (v) => v.enrichment && (v.enrichment.status === 'enriched' || v.enrichment.status === 'partial')
+  );
+  const enrichedCount = enrichedVulns.length;
+  const discrepancyCount = enrichedVulns.filter(
+    (v) => v.enrichment.severityDiscrepancy === true
+  ).length;
+  const effectiveCritical = (allVulns || []).filter(
+    (v) => getEffectiveSeverity(v) === 'critical'
+  ).length;
+  const effectiveHigh = (allVulns || []).filter((v) => getEffectiveSeverity(v) === 'high').length;
+
+  const y3 = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(10);
+  doc.setTextColor(30, 30, 30);
+  doc.text('Cross-Source CVE Correlation', 14, y3);
+
+  autoTable(doc, {
+    startY: y3 + 3,
+    head: [['Metric', 'Value']],
+    body: [
+      ['Enriched Vulnerabilities', String(enrichedCount)],
+      ['Severity Disagreements', String(discrepancyCount)],
+      ['Critical (effective)', String(effectiveCritical)],
+      ['High (effective)', String(effectiveHigh)],
+    ],
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [31, 41, 55] },
+    columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 30 } },
+  });
+
+  if (enrichedVulns.length > 0) {
+    const y4 = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text('Correlation Details', 14, y4);
+
+    const correlationBody = enrichedVulns.map((v) => {
+      const npmSev = capitalize(v.severity);
+      const effSev = getEffectiveSeverity(v);
+      const isUpgraded = effSev !== normalizeSeverity(v.severity);
+      const effSevLabel = isUpgraded ? `${capitalize(effSev)} ▲` : capitalize(effSev);
+      const sourcesText = buildSourcesText(v.enrichment);
+      const aliases =
+        v.enrichment.allAliases && v.enrichment.allAliases.length > 0
+          ? v.enrichment.allAliases.join(', ')
+          : '—';
+      const discrepancy = v.enrichment.severityDiscrepancy
+        ? v.enrichment.discrepancyDetails || 'Severity mismatch'
+        : '—';
+      return [v.name || v.package || '—', npmSev, effSevLabel, sourcesText, aliases, discrepancy];
+    });
+
+    autoTable(doc, {
+      startY: y4 + 3,
+      head: [
+        ['Package', 'npm Severity', 'Effective Severity', 'Sources', 'Aliases', 'Discrepancy'],
+      ],
+      body: correlationBody,
+      styles: { fontSize: 6.5, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { fillColor: [31, 41, 55] },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 90 },
+        4: { cellWidth: 45 },
+        5: { cellWidth: 50 },
+      },
+      didParseCell(data) {
+        if (data.column.index === 5 && data.section === 'body') {
+          const cellText = data.cell.raw;
+          if (cellText && cellText !== '—') {
+            data.cell.styles.fillColor = [255, 243, 205];
+            data.cell.styles.textColor = [120, 80, 0];
+          }
+        }
+      },
+    });
+  }
   doc.save(fileName);
 }
 
@@ -168,7 +295,7 @@ function StatisticsTab({ vulnerabilities, hasScanned }) {
   const pieData = useMemo(() => {
     const counts = {};
     vulnerabilities.forEach((v) => {
-      const s = normalizeSeverity(v.severity);
+      const s = getEffectiveSeverity(v);
       const bucket = s in SEVERITY_CONFIG ? s : 'unknown';
       counts[bucket] = (counts[bucket] || 0) + 1;
     });
@@ -189,7 +316,7 @@ function StatisticsTab({ vulnerabilities, hasScanned }) {
       .map(([projectName, vulns]) => {
         const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         vulns.forEach((v) => {
-          const s = normalizeSeverity(v.severity);
+          const s = getEffectiveSeverity(v);
           if (s in counts) counts[s]++;
           else counts.info++;
         });
@@ -208,7 +335,7 @@ function StatisticsTab({ vulnerabilities, hasScanned }) {
         projectName: v.projectName,
         cweId: v.cwe?.[0] ?? '—',
         package: v.package,
-        severity: normalizeSeverity(v.severity),
+        severity: getEffectiveSeverity(v),
         title: v.title || '',
         url: v.url || '',
         installedVersion: v.installedVersion || '',
@@ -219,12 +346,11 @@ function StatisticsTab({ vulnerabilities, hasScanned }) {
         return (o[a.severity] ?? 6) - (o[b.severity] ?? 6);
       });
   }, [vulnerabilities]);
-
   const handleExportPdf = useCallback(() => {
-    exportToPdf(total, pieData, repoRows, cveRows).catch((err) =>
+    exportToPdf(total, pieData, repoRows, cveRows, vulnerabilities).catch((err) =>
       console.error('PDF export failed:', err)
     );
-  }, [total, pieData, repoRows, cveRows]);
+  }, [total, pieData, repoRows, cveRows, vulnerabilities]);
 
   if (!hasScanned) {
     return (

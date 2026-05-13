@@ -1,0 +1,44 @@
+{
+  "title": "CISA Known Exploited Vulnerabilities Catalog",
+  "catalogVersion": "2024.01.01",
+  "dateReleased": "2024-01-01T00:00:00Z",
+  "count": 3,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2021-44228",
+      "vendorProject": "Apache",
+      "product": "Log4j2",
+      "vulnerabilityName": "Apache Log4j2 Remote Code Execution Vulnerability",
+      "dateAdded": "2021-12-10",
+      "shortDescription": "Apache Log4j2 contains a remote code execution vulnerability.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2021-12-24",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": ""
+    },
+    {
+      "cveID": "CVE-2021-23337",
+      "vendorProject": "Lodash",
+      "product": "Lodash",
+      "vulnerabilityName": "Lodash Command Injection Vulnerability",
+      "dateAdded": "2022-03-03",
+      "shortDescription": "Lodash contains a command injection vulnerability.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-03-24",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": ""
+    },
+    {
+      "cveID": "CVE-2019-11358",
+      "vendorProject": "jQuery",
+      "product": "jQuery",
+      "vulnerabilityName": "jQuery Prototype Pollution Vulnerability",
+      "dateAdded": "2022-03-03",
+      "shortDescription": "jQuery contains a prototype pollution vulnerability.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2022-03-24",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": ""
+    }
+  ]
+}

@@ -7,6 +7,8 @@
  */
 
 const { exec, spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { promisify } = require('util');
 const { GIT_CONFIG, API_CONFIG } = require('../config/constants');
 const { createSuccess, createError } = require('../utils/result');
@@ -428,27 +430,27 @@ async function pushChanges(projectPath) {
  * @param {boolean} allowReset - Whether to perform hard reset (respects UI toggle)
  * @returns {Object} Result with success, branch, and logs array
  */
-async function prepareRepository(projectPath, allowReset = true) {
+async function prepareRepository(projectPath, allowReset = true, options = {}) {
+  const { removeOverrides = false, removePackageLock = false } = options;
   console.log(`[Git] Preparing repository: ${projectPath}`);
   console.log(`[Git] Allow reset: ${allowReset}`);
+  console.log(`[Git] removeOverrides: ${removeOverrides}, removePackageLock: ${removePackageLock}`);
 
   const logs = [];
-  let currentBranch = '';
+  let currentBranch = null;
 
-  // Get current branch
+  // Always get current branch and pull — skip only the destructive hard reset when allowReset=false
   const branchResult = await getCurrentBranch(projectPath);
   logs.push({
     operation: 'getCurrentBranch',
     success: branchResult.success,
     output: branchResult.success ? branchResult.content : branchResult.error,
   });
-
   if (!branchResult.success) {
-    return createError('Failed to get current branch', { branch: '', logs });
+    return createError('Failed to get current branch', { branch: null, logs });
   }
   currentBranch = branchResult.content;
 
-  // Perform hard reset if allowed
   if (allowReset) {
     const resetResult = await resetHard(projectPath);
     logs.push({
@@ -458,13 +460,13 @@ async function prepareRepository(projectPath, allowReset = true) {
         ? resetResult.content.stdout || resetResult.content.stderr
         : resetResult.error,
     });
-
     if (!resetResult.success) {
       return createError('Failed to reset repository', { branch: currentBranch, logs });
     }
+  } else {
+    console.log('[git] Git reset disabled - skipping hard reset');
   }
 
-  // Pull latest changes
   const pullResult = await pullOrigin(projectPath, currentBranch);
   logs.push({
     operation: 'pullOrigin',
@@ -473,9 +475,66 @@ async function prepareRepository(projectPath, allowReset = true) {
       ? pullResult.content.stdout || pullResult.content.stderr
       : pullResult.error,
   });
-
   if (!pullResult.success) {
     return createError('Failed to pull from origin', { branch: currentBranch, logs });
+  }
+
+  let needsNpmInstall = false;
+  if (removeOverrides) {
+    const pkgPath = path.join(projectPath, 'package.json');
+    try {
+      console.log('[git] Removing overrides/resolutions from package.json');
+      const raw = await fs.promises.readFile(pkgPath, 'utf8');
+      const pkg = JSON.parse(raw);
+      let changed = false;
+      for (const k of ['overrides', 'pnpmOverrides', 'resolutions']) {
+        if (Object.prototype.hasOwnProperty.call(pkg, k)) {
+          delete pkg[k];
+          changed = true;
+        }
+      }
+      if (changed) {
+        await fs.promises.writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
+      }
+      logs.push({ operation: 'removeOverrides', success: true, output: 'done' });
+      needsNpmInstall = true;
+    } catch (err) {
+      console.warn(`[git] Could not remove overrides: ${err.message}`);
+      logs.push({ operation: 'removeOverrides', success: false, output: err.message });
+    }
+  }
+
+  if (removePackageLock) {
+    try {
+      console.log('[git] Deleting package-lock.json');
+      await fs.promises.unlink(path.join(projectPath, 'package-lock.json'));
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.warn(`[git] unlink failed: ${err.message}`);
+    }
+    try {
+      console.log('[git] Deleting node_modules');
+      await fs.promises.rm(path.join(projectPath, 'node_modules'), {
+        recursive: true,
+        force: true,
+      });
+    } catch (err) {
+      console.warn(`[git] rm node_modules failed: ${err.message}`);
+    }
+    logs.push({ operation: 'removePackageLock', success: true, output: 'done' });
+    needsNpmInstall = true;
+  }
+
+  if (needsNpmInstall) {
+    console.log(`[git] Running npm install in ${projectPath}`);
+    try {
+      const _ea = require('util').promisify(require('child_process').exec);
+      await _ea('npm install', { cwd: projectPath, encoding: 'utf8' });
+      console.log('[git] npm install completed');
+      logs.push({ operation: 'npmInstall', success: true, output: 'done' });
+    } catch (err) {
+      console.warn(`[git] npm install failed: ${err.message}`);
+      logs.push({ operation: 'npmInstall', success: false, output: err.message });
+    }
   }
 
   return createSuccess({ branch: currentBranch, logs });

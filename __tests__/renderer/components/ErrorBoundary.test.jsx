@@ -6,6 +6,7 @@
 
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import PropTypes from 'prop-types';
 import ErrorBoundary from '../../../src/renderer/components/ErrorBoundary';
 
 // Component that throws an error for testing
@@ -14,6 +15,11 @@ const ThrowError = ({ shouldThrow = true, errorMessage = 'Test error' }) => {
     throw new Error(errorMessage);
   }
   return <div>No error</div>;
+};
+
+ThrowError.propTypes = {
+  shouldThrow: PropTypes.bool,
+  errorMessage: PropTypes.string,
 };
 
 // Component that doesn't throw an error

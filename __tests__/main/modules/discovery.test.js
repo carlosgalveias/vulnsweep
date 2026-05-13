@@ -7,8 +7,6 @@
  * still discovered; they may fail later at the npm audit stage).
  */
 
-const discovery = require('../../../src/main/modules/discovery');
-
 // Mock fs.promises
 jest.mock('fs', () => ({
   promises: {
@@ -23,6 +21,7 @@ jest.mock('fs', () => ({
 }));
 
 const fs = require('fs').promises;
+const discovery = require('../../../src/main/modules/discovery');
 
 describe('discovery module', () => {
   beforeEach(() => {

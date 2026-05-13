@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
 const audit = require('./modules/audit');
+const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
@@ -298,18 +299,23 @@ ipcMain.handle('discover-projects', async (event, basePath) => {
 // ============================================
 
 /**
- * Handler: Prepare repository (reset + pull)
+ * Handler: Prepare repository (reset + pull + optional cleanup)
  */
-ipcMain.handle('prepare-repository', async (event, projectPath, allowReset) => {
+ipcMain.handle('prepare-repository', async (event, projectPath, allowReset, options = {}) => {
   try {
-    console.log(`[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}`);
+    const { removePackageLock = false, removeOverrides = false } = options;
+    console.log(
+      `[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}, removePackageLock: ${removePackageLock}, removeOverrides: ${removeOverrides}`
+    );
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
 
-    // Prepare repository
-    const result = await git.prepareRepository(sanitized, allowReset);
-
+    // Prepare repository (reset -> pull -> removeOverrides -> removePackageLock+node_modules)
+    const result = await git.prepareRepository(sanitized, allowReset, {
+      removePackageLock,
+      removeOverrides,
+    });
     if (result.success) {
       sendLogMessage('success', `Repository prepared: ${path.basename(sanitized)}`);
     } else {
@@ -490,7 +496,14 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
  *   2. If unlicensed and trial exhausted (0 fixes remaining) → block with message.
  *   3. If unlicensed and trial not exhausted → allow, then increment fix counter.
  */
-ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion = true) => {
+ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {}) => {
+  // Support legacy callers that passed bumpVersion as a plain boolean
+  const bumpVersion =
+    typeof options === 'boolean'
+      ? options
+      : options && options.bumpVersion !== undefined
+        ? options.bumpVersion
+        : true;
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
@@ -555,6 +568,198 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
   } catch (error) {
     console.error(`[IPC] apply-fixes error: ${error.message}`);
     sendLogMessage('error', `Failed to apply fixes: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - ENRICHMENT (F1)
+// ============================================
+
+/**
+ * Handler: Enrich an array of vulnerability objects with cross-source CVE data.
+ * Streams per-vulnerability progress events back to the renderer via
+ * 'enrichment-progress' push channel.
+ *
+ * Input:  { vulnerabilities: VulnObject[] }
+ * Output: { success: boolean, content?: VulnObject[], error?: string }
+ */
+ipcMain.handle('enrich-vulnerabilities', async (event, vulnerabilities) => {
+  try {
+    if (!Array.isArray(vulnerabilities) || vulnerabilities.length === 0) {
+      return { success: true, content: [] };
+    }
+
+    console.log(
+      `[IPC] enrich-vulnerabilities: enriching ${vulnerabilities.length} vulnerabilities`
+    );
+    sendLogMessage('info', `Enriching ${vulnerabilities.length} vulnerabilities with CVE data…`);
+
+    const total = vulnerabilities.length;
+
+    const enriched = await enrichVulnerabilities(
+      vulnerabilities,
+      (current, _total, packageName) => {
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('enrichment-progress', { current, total, packageName });
+        }
+      }
+    );
+
+    sendLogMessage(
+      'success',
+      `CVE enrichment complete: ${enriched.length} vulnerabilities enriched`
+    );
+    return { success: true, content: enriched };
+  } catch (err) {
+    console.error(`[IPC] enrich-vulnerabilities error: ${err.message}`);
+    sendLogMessage('error', `CVE enrichment failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current enrichment settings / status.
+ */
+ipcMain.handle('get-enrichment-settings', () => {
+  const { ENRICHMENT_CONFIG } = require('./config/constants');
+  return {
+    success: true,
+    content: {
+      osvApiUrl: ENRICHMENT_CONFIG.OSV_API_URL,
+      nvdApiUrl: ENRICHMENT_CONFIG.NVD_API_URL,
+      githubAdvisoryApiUrl: ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL,
+      nvdRateLimitMs: ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS,
+      nvdApiKeyConfigured: !!ENRICHMENT_CONFIG.NVD_API_KEY,
+      timeoutMs: ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+      cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
+    },
+  };
+});
+
+// ============================================
+// IPC HANDLERS - DEPENDENCY UPDATES (F13)
+// ============================================
+
+/**
+ * Handler: Scan direct dependencies of a project for available updates.
+ * Streams per-package progress events via 'dep-update-progress' push channel.
+ *
+ * Input:  projectPath: string
+ * Output: { success: boolean, content?: UpdateCandidate[], error?: string }
+ */
+ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false, options = {}) => {
+  const { removeOverrides = false, removePackageLock = false } = options;
+  try {
+    console.log(
+      `[IPC] scan-dep-updates: ${projectPath}, allowReset: ${allowReset}, removeOverrides: ${removeOverrides}, removePackageLock: ${removePackageLock}`
+    );
+    sendLogMessage('info', `Scanning dependency updates for ${path.basename(projectPath)}...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    const { scanDependencyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const progressCb = ({ current, total, repoName, packageName }) => {
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('dep-update-progress', {
+          current,
+          total,
+          repoName,
+          packageName,
+        });
+      }
+    };
+
+    // Mirror audit scan: run git prepare (reset+pull+removeOverrides+removePackageLock)
+    // per repo whenever any prep option is active.
+    if (allowReset || removeOverrides || removePackageLock) {
+      const fs = require('fs');
+      const path_ = require('path');
+      let repos = [];
+      try {
+        const entries = await fs.promises.readdir(sanitized, { withFileTypes: true });
+        const dirs = entries.filter((e) => e.isDirectory());
+        for (const d of dirs) {
+          const rp = path_.join(sanitized, d.name);
+          try {
+            await fs.promises.access(path_.join(rp, 'package.json'));
+            repos.push(rp);
+          } catch {
+            /* skip */
+          }
+        }
+        if (repos.length === 0) repos = [sanitized]; // single-repo fallback
+      } catch {
+        repos = [sanitized];
+      }
+      for (const repoPath of repos) {
+        sendLogMessage('info', `Preparing repository: ${path.basename(repoPath)}...`);
+        try {
+          await git.prepareRepository(repoPath, allowReset, { removeOverrides, removePackageLock });
+        } catch (prepErr) {
+          sendLogMessage(
+            'warn',
+            `Git prepare failed for ${path.basename(repoPath)}: ${prepErr.message}`
+          );
+        }
+      }
+    }
+
+    const result = await scanDependencyUpdates(sanitized, progressCb);
+
+    if (!result.success) {
+      console.error(`[IPC] scan-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency scan failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const totalCandidates = result.content.reduce((sum, r) => sum + r.candidates.length, 0);
+    sendLogMessage(
+      'success',
+      `Found ${totalCandidates} packages with available updates across ${result.content.length} repo(s)`
+    );
+    return { success: true, content: result.content };
+  } catch (error) {
+    console.error(`[IPC] scan-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency scan failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Handler: Apply selected dependency updates via npm install and commit locally.
+ *
+ * Input:  projectPath: string, updates: ApplyUpdate[]
+ * Output: { success: boolean, commitMessage?: string, error?: string }
+ */
+ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
+  try {
+    console.log(`[IPC] apply-dep-updates: ${projectPath}, ${updates.length} updates`);
+    sendLogMessage('info', `Applying ${updates.length} dependency update(s)...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { success: false, error: 'No updates provided' };
+    }
+
+    const { applyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const result = await applyUpdates(sanitized, updates);
+
+    if (!result.success) {
+      console.error(`[IPC] apply-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency update failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const commitMessage = result.content.commitMessage || 'updates applied';
+    sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
+    return { success: true, commitMessage };
+  } catch (error) {
+    console.error(`[IPC] apply-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency update failed: ${error.message}`);
     return { success: false, error: error.message };
   }
 });
