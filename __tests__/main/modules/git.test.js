@@ -4,9 +4,6 @@
  * Tests Git operations including reset, pull, commit, and push
  */
 
-const { GIT_CONFIG } = require('../../../src/main/config/constants');
-const git = require('../../../src/main/modules/git');
-
 // Mock child_process
 jest.mock('child_process', () => ({
   exec: jest.fn(),
@@ -14,6 +11,8 @@ jest.mock('child_process', () => ({
 }));
 
 const { exec, spawn } = require('child_process');
+const { GIT_CONFIG } = require('../../../src/main/config/constants');
+const git = require('../../../src/main/modules/git');
 
 describe('git module', () => {
   beforeEach(() => {

@@ -36,8 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @param {boolean} allowReset - Whether to perform git reset --hard
    * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
    */
-  prepareRepository: (projectPath, allowReset) =>
-    ipcRenderer.invoke('prepare-repository', projectPath, allowReset),
+  prepareRepository: (projectPath, allowReset, options = {}) =>
+    ipcRenderer.invoke('prepare-repository', projectPath, allowReset, options),
 
   /**
    * Commits all changes and pushes to remote
@@ -72,10 +72,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * Applies fix strategies to a project
    * @param {string} projectPath - Project directory path
    * @param {Array} strategies - Array of fix strategy objects
+   * @param {Object} options - { bumpVersion, removePackageLock, removeOverrides }
    * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
    */
-  applyFixes: (projectPath, strategies, bumpVersion) =>
-    ipcRenderer.invoke('apply-fixes', projectPath, strategies, bumpVersion),
+  applyFixes: (projectPath, strategies, options) =>
+    ipcRenderer.invoke('apply-fixes', projectPath, strategies, options),
 
   // ============================================
   // COMMERCIAL & LICENSING
@@ -131,6 +132,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on('enrichment-progress', subscription);
     return () => ipcRenderer.removeListener('enrichment-progress', subscription);
+  },
+
+  // ============================================
+  // DEPENDENCY UPDATES (F13)
+  // ============================================
+
+  /**
+   * Scans direct dependencies of a project for available updates.
+   * Progress events streamed via onDepUpdateProgress().
+   * @param {string} projectPath - Absolute path to the project directory
+   * @returns {Promise<{success: boolean, content?: UpdateCandidate[], error?: string}>}
+   */
+  scanDepUpdates: (projectPath) => ipcRenderer.invoke('scan-dep-updates', projectPath),
+
+  /**
+   * Applies selected dependency updates via npm install and commits locally.
+   * @param {string} projectPath - Absolute path to the project directory
+   * @param {Array<{name:string, fromVersion:string, toVersion:string}>} updates
+   * @returns {Promise<{success: boolean, commitMessage?: string, error?: string}>}
+   */
+  applyDepUpdates: (projectPath, updates) =>
+    ipcRenderer.invoke('apply-dep-updates', projectPath, updates),
+
+  /**
+   * Subscribe to per-package dep update scan progress events.
+   * @param {Function} callback - Called with {current, total, packageName}
+   * @returns {Function} Unsubscribe function
+   */
+  onDepUpdateProgress: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('dep-update-progress', subscription);
+    return () => ipcRenderer.removeListener('dep-update-progress', subscription);
   },
 
   // ============================================

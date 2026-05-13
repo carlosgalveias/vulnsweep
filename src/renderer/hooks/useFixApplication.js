@@ -10,6 +10,9 @@ import { useState, useCallback } from 'react';
  * @param {boolean} bumpVersion - Whether to bump patch version when applying fixes
  * @param {Function|null} onTrialUpdated - Optional callback invoked after a successful fix
  *   application so the caller can refresh the trial status shown in the footer.
+ * @param {Function|null} onRepoDirtied - Optional callback when a repo gets dirty fixes applied.
+ * @param {boolean} removePackageLock - Whether to delete package-lock.json before applying fixes
+ * @param {boolean} removeOverrides - Whether to strip overrides/resolutions from package.json
  * @returns {Object} Fix application state and methods
  */
 export default function useFixApplication(
@@ -20,7 +23,9 @@ export default function useFixApplication(
   projects,
   bumpVersion = true,
   onTrialUpdated = null,
-  onRepoDirtied = null
+  onRepoDirtied = null,
+  removePackageLock = false,
+  removeOverrides = false
 ) {
   const [isApplying, setIsApplying] = useState(false);
   const [showHighRiskModal, setShowHighRiskModal] = useState(false);
@@ -71,7 +76,11 @@ export default function useFixApplication(
           continue;
         }
 
-        const result = await window.electronAPI.applyFixes(projectPath, strategies, bumpVersion);
+        const result = await window.electronAPI.applyFixes(projectPath, strategies, {
+          bumpVersion,
+          removePackageLock,
+          removeOverrides,
+        });
 
         if (result.success) {
           // Update status to 'resolved' for applied fixes
@@ -136,6 +145,8 @@ export default function useFixApplication(
     setVulnerabilities,
     projects,
     bumpVersion,
+    removePackageLock,
+    removeOverrides,
     onTrialUpdated,
     onRepoDirtied,
   ]);

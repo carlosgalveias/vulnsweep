@@ -299,18 +299,23 @@ ipcMain.handle('discover-projects', async (event, basePath) => {
 // ============================================
 
 /**
- * Handler: Prepare repository (reset + pull)
+ * Handler: Prepare repository (reset + pull + optional cleanup)
  */
-ipcMain.handle('prepare-repository', async (event, projectPath, allowReset) => {
+ipcMain.handle('prepare-repository', async (event, projectPath, allowReset, options = {}) => {
   try {
-    console.log(`[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}`);
+    const { removePackageLock = false, removeOverrides = false } = options;
+    console.log(
+      `[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}, removePackageLock: ${removePackageLock}, removeOverrides: ${removeOverrides}`
+    );
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
 
-    // Prepare repository
-    const result = await git.prepareRepository(sanitized, allowReset);
-
+    // Prepare repository (reset -> pull -> removeOverrides -> removePackageLock+node_modules)
+    const result = await git.prepareRepository(sanitized, allowReset, {
+      removePackageLock,
+      removeOverrides,
+    });
     if (result.success) {
       sendLogMessage('success', `Repository prepared: ${path.basename(sanitized)}`);
     } else {
@@ -491,7 +496,14 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
  *   2. If unlicensed and trial exhausted (0 fixes remaining) → block with message.
  *   3. If unlicensed and trial not exhausted → allow, then increment fix counter.
  */
-ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion = true) => {
+ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {}) => {
+  // Support legacy callers that passed bumpVersion as a plain boolean
+  const bumpVersion =
+    typeof options === 'boolean'
+      ? options
+      : options && options.bumpVersion !== undefined
+        ? options.bumpVersion
+        : true;
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
@@ -623,6 +635,96 @@ ipcMain.handle('get-enrichment-settings', () => {
       cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
     },
   };
+});
+
+// ============================================
+// IPC HANDLERS - DEPENDENCY UPDATES (F13)
+// ============================================
+
+/**
+ * Handler: Scan direct dependencies of a project for available updates.
+ * Streams per-package progress events via 'dep-update-progress' push channel.
+ *
+ * Input:  projectPath: string
+ * Output: { success: boolean, content?: UpdateCandidate[], error?: string }
+ */
+ipcMain.handle('scan-dep-updates', async (event, projectPath) => {
+  try {
+    console.log(`[IPC] scan-dep-updates: ${projectPath}`);
+    sendLogMessage('info', `Scanning dependency updates for ${path.basename(projectPath)}...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    const { scanDependencyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const progressCb = ({ current, total, repoName, packageName }) => {
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('dep-update-progress', {
+          current,
+          total,
+          repoName,
+          packageName,
+        });
+      }
+    };
+
+    const result = await scanDependencyUpdates(sanitized, progressCb);
+
+    if (!result.success) {
+      console.error(`[IPC] scan-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency scan failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const totalCandidates = result.content.reduce((sum, r) => sum + r.candidates.length, 0);
+    sendLogMessage(
+      'success',
+      `Found ${totalCandidates} packages with available updates across ${result.content.length} repo(s)`
+    );
+    return { success: true, content: result.content };
+  } catch (error) {
+    console.error(`[IPC] scan-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency scan failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Handler: Apply selected dependency updates via npm install and commit locally.
+ *
+ * Input:  projectPath: string, updates: ApplyUpdate[]
+ * Output: { success: boolean, commitMessage?: string, error?: string }
+ */
+ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
+  try {
+    console.log(`[IPC] apply-dep-updates: ${projectPath}, ${updates.length} updates`);
+    sendLogMessage('info', `Applying ${updates.length} dependency update(s)...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { success: false, error: 'No updates provided' };
+    }
+
+    const { applyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const result = await applyUpdates(sanitized, updates);
+
+    if (!result.success) {
+      console.error(`[IPC] apply-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency update failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const msgs = result.content.commitMessages || [];
+    const commitMessage = msgs.join(' | ') || 'updates applied';
+    sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
+    return { success: true, commitMessage };
+  } catch (error) {
+    console.error(`[IPC] apply-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency update failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
 });
 
 // ============================================

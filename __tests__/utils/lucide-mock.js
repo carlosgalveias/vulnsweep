@@ -9,6 +9,7 @@
  *   'lucide-react': '<rootDir>/__tests__/utils/lucide-mock.js'
  */
 
+const PropTypes = require('prop-types');
 const React = require('react');
 
 /**
@@ -28,6 +29,11 @@ const createIcon = (displayName) => {
       ...rest,
     });
   Icon.displayName = displayName;
+  Icon.propTypes = {
+    className: PropTypes.string,
+    size: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    strokeWidth: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  };
   return Icon;
 };
 

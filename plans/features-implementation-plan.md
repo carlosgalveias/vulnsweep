@@ -5,14 +5,14 @@
 | Feature                              | Status     | Completed  |
 | ------------------------------------ | ---------- | ---------- |
 | F1 — Cross-Source CVE Correlation    | ✅ Done    | 2026-05-11 |
-| F2 — Exploit Availability Flag       | ⬜ Pending | —          |
+| F2 — Exploit Availability Flag       | ✅ Done    | 2026-05-12 |
 | F3 — Malicious Package Detection     | ⬜ Pending | —          |
 | F4 — Lockfile Integrity Verification | ⬜ Pending | —          |
 | F8 — SBOM Generation                 | ⬜ Pending | —          |
 | F9 — License Compliance Scanning     | ⬜ Pending | —          |
 | F10 — Exportable Security Reports    | ⬜ Pending | —          |
 | F12 — CI/CD Headless CLI             | ⬜ Pending | —          |
-| F13 — Dependency Updates             | ⬜ Pending | —          |
+| F13 — Dependency Updates             | ✅ Done    | 2026-05-13 |
 
 ---
 
@@ -96,7 +96,33 @@ After `npm audit` runs, enrich each vulnerability by querying OSV.dev, NVD API v
 
 ---
 
-## F13 — Dependency Updates
+## F13 — Dependency Updates ✅ COMPLETED
+
+### Implementation Summary
+
+**Status**: ✅ COMPLETED — 2026-05-13
+
+**Files Created:**
+
+- [`src/main/modules/dep-updates/version-comparator.js`](src/main/modules/dep-updates/version-comparator.js) — Pure semver utility functions: `filterNewerVersions()`, `selectRecommendedVersion()`, `computeRiskLevel()`
+- [`src/main/modules/dep-updates/dep-updates-scanner.js`](src/main/modules/dep-updates/dep-updates-scanner.js) — Async scanner: `scanDependencyUpdates()`, `applyUpdates()`. Uses Node.js built-in `https` + existing `RegistryCache`, sequential registry fetches, `execFile` for npm installs + git commit
+- [`src/renderer/components/DependencyUpdatesTab.jsx`](src/renderer/components/DependencyUpdatesTab.jsx) — React component with scan/apply flow, progress tracking, results table with version dropdowns and risk badges
+- [`__tests__/main/modules/dep-updates/version-comparator.test.js`](__tests__/main/modules/dep-updates/version-comparator.test.js) — 29 passing tests
+- [`__tests__/main/modules/dep-updates/dep-updates-scanner.test.js`](__tests__/main/modules/dep-updates/dep-updates-scanner.test.js) — 22 passing tests
+- [`__tests__/renderer/components/DependencyUpdatesTab.test.jsx`](__tests__/renderer/components/DependencyUpdatesTab.test.jsx) — 29 passing tests
+
+**Files Modified:**
+
+- [`src/main/config/constants.js`](src/main/config/constants.js) — Added `DEP_UPDATES_CONFIG` with `REGISTRY_URL`, `MAX_VERSIONS_SHOWN: 50`, `FETCH_TIMEOUT_MS: 10000`
+- [`src/main/main.js`](src/main/main.js) — Added `scan-dep-updates` and `apply-dep-updates` IPC handlers
+- [`src/preload/preload.js`](src/preload/preload.js) — Exposed `scanDepUpdates`, `applyDepUpdates`, `onDepUpdateProgress` via `contextBridge`
+- [`src/renderer/App.jsx`](src/renderer/App.jsx) — Added `dep-updates` tab + `DependencyUpdatesTab` render block
+
+**Code Review:** APPROVED WITH NOTES (Code Pathologist). Fixed: 10 ESLint warnings (import order + string concatenation). Fixed: 6 stale test assertions in `App.test.jsx`. Non-blocking notes: `--save` flag redundant in modern npm; individual update object fields not validated in `applyUpdates()`.
+
+**Test results**: 80/80 tests passing across all 3 new test files
+
+---
 
 ### Goal
 

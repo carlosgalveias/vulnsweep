@@ -244,6 +244,51 @@ const ENRICHMENT_CONFIG = {
    * @type {string}
    */
   USER_AGENT: 'VulnSweep/1.0 (https://github.com/vulnsweep)',
+
+  /**
+   * CISA Known Exploited Vulnerabilities catalog static JSON feed.
+   * Cached to disk for DISK_CACHE_TTL_MS (24 h). Refreshed on first call after TTL expires.
+   * @type {string}
+   */
+  CISA_KEV_URL:
+    'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
+
+  /**
+   * EPSS v3 API base URL. Append ?cve=CVE-XXXX-XXXXX for per-CVE exploit probability queries.
+   * Returns epss score (0-1 float) and percentile (0-1 float).
+   * @type {string}
+   */
+  EPSS_API_URL: 'https://api.first.org/data/v1/epss',
+};
+
+// ============================================
+// DEPENDENCY UPDATES CONFIGURATION (F13)
+// ============================================
+
+/**
+ * Dependency updates feature configuration (F13).
+ * Controls npm registry access, version display limits, and HTTP timeouts.
+ * @namespace DEP_UPDATES_CONFIG
+ */
+const DEP_UPDATES_CONFIG = {
+  /**
+   * npm registry URL. GET <REGISTRY_URL>/<pkgName> returns metadata with `versions` object.
+   * @type {string}
+   */
+  REGISTRY_URL: 'https://registry.npmjs.org',
+
+  /**
+   * Max versions per package shown in UI dropdown. Newest N entries kept.
+   * Prevents the dropdown from having hundreds of entries for active packages like `typescript`.
+   * @type {number}
+   */
+  MAX_VERSIONS_SHOWN: 50,
+
+  /**
+   * Per-package HTTP timeout for registry fetches (ms).
+   * @type {number}
+   */
+  FETCH_TIMEOUT_MS: 10000,
 };
 
 // ============================================
@@ -257,4 +302,5 @@ module.exports = {
   UI_CONFIG,
   PAYPAL_CONFIG,
   ENRICHMENT_CONFIG,
+  DEP_UPDATES_CONFIG,
 };
