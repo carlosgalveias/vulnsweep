@@ -157,9 +157,12 @@ function App() {
   // MUST be declared after selectedFolder is available from useProjectDiscovery.
   const commitAndPush = useCallback(async () => {
     if (depUpdatesDirty && depCommitMessage) {
+      // Derive the set of repos to commit from appliedDepPackages (composite keys
+      // "repoPath:packageName"). Use lastIndexOf(':') to safely handle repo paths
+      // that themselves contain colons (e.g. Windows drive letters like C:\...).
       const repoPathsSet = new Set(
-        depUpdateCandidates.length > 0
-          ? depUpdateCandidates.map((r) => r.repoPath)
+        appliedDepPackages.size > 0
+          ? [...appliedDepPackages].map((key) => key.slice(0, key.lastIndexOf(':')))
           : [selectedFolder]
       );
       for (const repoPath of repoPathsSet) {
@@ -184,7 +187,7 @@ function App() {
   }, [
     depUpdatesDirty,
     depCommitMessage,
-    depUpdateCandidates,
+    appliedDepPackages,
     selectedFolder,
     addLog,
     commitAndPushVulns,
