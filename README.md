@@ -12,16 +12,17 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/carlosgalveias/vulnsweep-releases)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
-[![Free Features](https://img.shields.io/badge/core_features-FREE-22c55e?style=for-the-badge)](#-free-tier--whats-included-at-no-cost)
+[![Free Features](https://img.shields.io/badge/core_features-FREE-22c55e?style=for-the-badge)](#free-tier--whats-included-at-no-cost)
 [![License](https://img.shields.io/badge/license-Proprietary-ef4444?style=for-the-badge)](LICENSE.md)
+[![Status](https://img.shields.io/badge/status-Public_Beta-f59e0b?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
 
-[**⬇️ Download for Free**](https://github.com/carlosgalveias/vulnsweep-releases) · [**📸 See It In Action**](#-feature-showcase) · [**🚀 How It Works**](#-how-it-works-5-steps) · [**🆓 Free Tier**](#-free-tier--whats-included-at-no-cost)
+[**Download for Free**](https://github.com/carlosgalveias/vulnsweep-releases) · [**See It In Action**](#feature-showcase) · [**How It Works**](#how-it-works--6-steps) · [**Free Tier**](#free-tier--whats-included-at-no-cost)
 
 </div>
 
 ---
 
-## 🔥 Stop Auditing npm Vulnerabilities One Project at a Time
+## Stop Auditing npm Vulnerabilities One Project at a Time
 
 You manage 10, 20, maybe 50+ Node.js repositories. Every week, a new CVE drops. Every sprint, `npm audit` screams at you in CI. Your security backlog grows. You context-switch between repos, manually running `npm audit fix`, deciphering cryptic transient dependency chains, editing `package.json` overrides by hand, then committing and pushing to each repo — **one. at. a. time.**
 
@@ -121,17 +122,45 @@ Vulnerabilities are the visible threat. Outdated dependencies are the silent one
 
 ## Feature Showcase
 
-### Main Dashboard — Your Entire Security Posture at a Glance
+> **Six views. One tool. The entire npm security and compliance lifecycle — visualized.**
 
-![VulnSweep Main Dashboard — Bulk npm vulnerability scanner showing CVE grid, severity badges, risk ratings, exploit flags, and fix strategies across multiple Node.js repositories](screenshots/vulnsweep-dashboard.png)
+### 1 — Main Dashboard — Every CVE Across Every Repo, in One View
 
-_The VulnSweep vulnerability grid: multi-repo CVE intelligence enriched from NVD + OSV.dev + GitHub Advisory, exploit availability flags, intelligent fix strategies, risk classification, and one-click remediation — all in a single, information-dense view._
+![VulnSweep Main Dashboard — Bulk npm vulnerability scanner showing CVE grid, CRITICAL/HIGH/MODERATE severity badges, exploit availability flags, LOW RISK/HIGH RISK fix strategy classification, and one-click remediation across multiple Node.js repositories](screenshots/vulnsweep-dashboard.png)
 
-### Real-Time Scanning Progress — Watch Your Fleet Get Secured
+_The VulnSweep vulnerability grid: your entire Node.js fleet's CVE exposure — enriched from NVD + OSV.dev + GitHub Advisory, exploit availability flags, intelligent three-tier fix strategies, risk classification, and one-click remediation. This is what security at scale looks like._
 
-![VulnSweep Scanning Progress — Real-time progress bar showing parallel npm audit running across multiple Node.js projects simultaneously](screenshots/vulnsweep-progress.png)
+---
 
-_Parallel scanning across all discovered Node.js projects with real-time progress tracking and a structured log console._
+### 2 — Statistics Dashboard — Your Security Posture Quantified
+
+![VulnSweep Statistics Dashboard — Security posture overview with severity breakdown charts, per-repository A-F security grades, CVE count metrics, and PDF security report export button for Node.js teams](screenshots/vulnsweep-statistics.png)
+
+_The Statistics tab: severity breakdown charts, per-repository A–F security grades, enrichment summary metrics, and the one-click PDF export that generates the security report your CISO actually needs. Free. Always._
+
+---
+
+### 3 — License Compliance Dashboard — Know Your GPL Exposure Before Legal Does
+
+![VulnSweep License Compliance Dashboard — Transitive dependency license risk classification showing Safe/Warning/Dangerous/Unknown tiers, donut chart visualization, and at-risk library table with npm links for Node.js projects](screenshots/vulnsweep-licenses.png)
+
+_The Licenses tab: every transitive dependency across your fleet classified into Safe (MIT, Apache-2.0), Warning (LGPL), Dangerous (GPL, AGPL), or Unknown risk tiers — visualized as a donut chart with an at-risk libraries table and direct npm links. The legal exposure your enterprise deals depend on, surfaced automatically._
+
+---
+
+### 4 — Dependency Updates — Silence the Silent Technical Debt
+
+![VulnSweep Dependency Updates Dashboard — Direct dependency version scanner showing available updates with LOW RISK/HIGH RISK semantic versioning ratings, version selection dropdown, and one-click update application across multiple Node.js repositories](screenshots/vulnsweep-dep-updates.png)
+
+_The Dependency Updates tab: every direct dependency across your entire project fleet — showing current version, available updates, semantic version risk ratings (LOW/HIGH), and one-click update application with structured Git commits. Outdated dependencies are the vulnerabilities you haven't discovered yet._
+
+---
+
+### 5 — PDF Security Report — The Document Your CISO Demands, Generated in One Click
+
+![VulnSweep PDF Security Report Export — A4 landscape vulnerability report showing severity breakdown, repository A-F security grades, full CVE table with installed and patched versions, cross-source CVE correlation summary, and advisory URLs — generated free from the Statistics tab](screenshots/vulnerability_report.png)
+
+_The VulnSweep PDF Security Report: a dated A4 landscape document containing severity breakdown, per-repository A–F grades, the complete CVE table with installed versions, patched versions and advisory URLs, Cross-Source Correlation summary, and per-CVE enrichment details with GHSA aliases and discrepancy flags. The deliverable a compliance consultant would charge $500/hour to produce. Free. One click._
 
 ---
 
@@ -375,15 +404,19 @@ See [LICENSE.md](LICENSE.md) for full terms.
 
 This software is licensed, not sold. Unauthorized copying, distribution, modification, or reverse engineering of this software is strictly prohibited. A free tier is available with core features included at no cost. Unlimited fix-and-commit automation requires a commercial annual license.
 
+### Beta Status
+
+VulnSweep is currently in **public beta**. The current pricing and promotional tiers are available exclusively during this beta phase. When VulnSweep reaches general availability, pricing terms — including the early-adopter rate and the number of free fix-and-commit sessions — may change without prior notice. Users who adopt during the beta period lock in the most favorable terms available.
+
 ### Pricing
 
-| Tier                | Price                     | Availability                                    |
-| ------------------- | ------------------------- | ----------------------------------------------- |
-| **Early Adopter**   | EUR 9.99 / year / device  | First 30 days after install — time-limited      |
-| **Standard Annual** | EUR 29.99 / year / device | After 30-day early-adopter window closes        |
-| **Free Tier**       | Free forever              | Core scanning, CVE enrichment, SBOM, compliance |
+| Tier                   | Price                     | Availability                                    |
+| ---------------------- | ------------------------- | ----------------------------------------------- |
+| **Beta Early Adopter** | EUR 9.99 / year / device  | First 30 days after install — beta period only  |
+| **Standard Annual**    | EUR 29.99 / year / device | After 30-day early-adopter window closes        |
+| **Free Tier**          | Free forever              | Core scanning, CVE enrichment, SBOM, compliance |
 
-> The early-adopter window is device-specific and starts from your first install. It cannot be extended. The countdown is displayed in the About tab.
+> The early-adopter window is device-specific and starts from your first install. It cannot be extended. The countdown is displayed in the About tab. Both the early-adopter rate and the 10 free fix-and-commit sessions are beta-phase terms — they are not guaranteed to remain after general availability.
 
 ---
 

@@ -4,9 +4,10 @@
 
 ## The Only npm Security Platform That Does Everything. Free to Start.
 
+**Status:** Public Beta — pricing and free tier terms are active during the beta phase and may change at general availability.
 **Category:** DevSecOps Desktop Application — npm Security, License Compliance, SBOM Generation
-**Platform:** Windows (Electron) — macOS and Linux coming soon
-**Pricing:** Core features free. Fix-and-commit: 10 sessions free. Annual license: EUR 9.99/year (early adopter, first 30 days) / EUR 29.99/year (standard).
+**Platform:** Windows (Electron) — macOS and Linux are in development and not yet available.
+**Pricing:** Core features free. Fix-and-commit: 10 sessions free (beta term). Annual license: EUR 9.99/year (early adopter, first 30 days) / EUR 29.99/year (standard).
 **Download:** https://github.com/carlosgalveias/vulnsweep-releases
 
 ---
@@ -111,9 +112,9 @@ VulnSweep's most powerful features require zero payment:
 - License Backup and Restore — migrate your license to a new machine without rebuying
 - Analytics opt-out — GDPR-compliant anonymous usage data, disable anytime in the About tab
 
-**Fix-and-commit automation:** 10 complete fix+commit+push sessions free. Upgrade to an **annual license** for unlimited sessions — EUR 9.99/year (early adopter, first 30 days after install) or EUR 29.99/year standard. Each session covers every repository in your fleet simultaneously.
+**Fix-and-commit automation:** 10 complete fix+commit+push sessions free (beta-phase term). Upgrade to an **annual license** for unlimited sessions — EUR 9.99/year (early adopter, first 30 days after install) or EUR 29.99/year standard. Each session covers every repository in your fleet simultaneously.
 
-> **Early-adopter window:** The EUR 9.99/year price is available for the first 30 days after your initial install. The countdown is visible in the About tab. After 30 days the standard rate applies automatically — this cannot be extended.
+> **Beta notice:** VulnSweep is currently in public beta. The early-adopter pricing (EUR 9.99/year) and the 10 free fix-and-commit sessions are beta-phase terms. These terms are not guaranteed to remain after general availability. Users who adopt during the beta period secure the most favorable conditions. The 30-day early-adopter countdown is shown in the About tab and begins at first install.
 
 ---
 
@@ -125,6 +126,34 @@ After every scan, click Export PDF on the Statistics tab. VulnSweep generates vu
 
 After every scan, click Export PDF on the Statistics tab. VulnSweep generates a dated A4 landscape PDF named vulnsweep_vulnerability_report_YYYY-MM-DD.pdf containing: severity breakdown, per-repo A-F security grades, full CVE detail table with installed and patched versions and advisory URLs, Cross-Source CVE Correlation summary, and per-vulnerability enrichment details with source URLs, GHSA aliases, and severity discrepancy flags. Free. One click.
 
+## See It In Action — Six Views of the Complete Security Lifecycle
+
+### The Vulnerability Grid — Fleet-Wide CVE Intelligence in One View
+
+![VulnSweep Main Dashboard — Bulk npm vulnerability scanner with CVE grid, severity badges, exploit flags, risk classification, and one-click remediation across multiple Node.js repositories](../screenshots/vulnsweep-dashboard.png)
+
+### Real-Time Parallel Scanning — Every Repo, Simultaneously
+
+![VulnSweep Scanning Progress — Real-time parallel npm audit progress bar with live log console for Node.js project fleet](../screenshots/vulnsweep-progress.png)
+
+### Statistics Dashboard — Security Posture Quantified + PDF Export
+
+![VulnSweep Statistics Dashboard — Severity breakdown charts, per-repository A-F security grades, and one-click PDF security report export](../screenshots/vulnsweep-statistics.png)
+
+### License Compliance — Know Your GPL Exposure Before Legal Does
+
+![VulnSweep License Compliance Dashboard — Transitive dependency license risk tiers: Safe, Warning, Dangerous, Unknown with donut chart and at-risk library table](../screenshots/vulnsweep-licenses.png)
+
+### Dependency Updates — The Silence Before the Next CVE
+
+![VulnSweep Dependency Updates Dashboard — Direct dependency version scanner with LOW/HIGH risk ratings and one-click update application](../screenshots/vulnsweep-dep-updates.png)
+
+### PDF Security Report — One Click. CISO-Ready.
+
+![VulnSweep PDF Security Report — A4 landscape report with severity breakdown, repository A-F grades, CVE table with patched versions, cross-source correlation summary](../screenshots/vulnerability_report.png)
+
+---
+
 ## Technology Foundation
 
 Built on Electron 41, React, and TailwindCSS. 100% local execution. Zero cloud backend. Zero data transmission. CVE enrichment uses only public-domain intelligence APIs (NVD, OSV.dev, GitHub Advisory REST). Your source code never leaves your machine.
@@ -135,6 +164,6 @@ Built on Electron 41, React, and TailwindCSS. 100% local execution. Zero cloud b
 
 **https://github.com/carlosgalveias/vulnsweep-releases**
 
-Windows (NSIS installer) · macOS _(coming soon)_ · Linux _(coming soon)_
+Windows (NSIS installer) · macOS — in development, not yet available · Linux — in development, not yet available
 
 _VulnSweep — The npm security platform for teams who ship fast and refuse to compromise._
