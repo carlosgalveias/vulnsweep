@@ -6,10 +6,10 @@
  * Stores trial usage data (fixes consumed, first-use timestamp) in a
  * hard-to-guess OS-level location that survives application uninstall/reinstall.
  *
- * Storage paths (hidden, platform-specific):
- *   Windows  → %APPDATA%\Microsoft\CLR\mscoree\{hash}\.dat
- *   macOS    → ~/Library/Preferences/.com.apple.coreaudio.{hash}
- *   Linux    → ~/.config/fontconfig/.{hash}
+ * Storage paths (platform-specific, AV-safe, survive app uninstall):
+ *   Windows  → %PROGRAMDATA%\VulnSweep\{hash}
+ *   macOS    → ~/Library/Application Support/VulnSweep/{hash}.dat
+ *   Linux    → ~/.local/share/vulnsweep/{hash}.dat
  *
  * Where {hash} = first 8 hex chars of SHA-256(hostname + username).
  * This makes the path unique per machine but reproducible across reinstalls.
@@ -60,15 +60,20 @@ function _getTrialFilePath() {
   let dir, filename;
 
   if (process.platform === 'win32') {
-    const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-    dir = path.join(appdata, 'Microsoft', 'CLR', 'mscoree', hash);
-    filename = '.dat';
+    // %PROGRAMDATA% is machine-wide, hidden from normal users, survives per-user uninstall.
+    // Used by countless legitimate apps (Dropbox, Adobe, etc.). Does not trigger AV.
+    const programData = process.env.PROGRAMDATA || path.join('C:', 'ProgramData');
+    dir = path.join(programData, 'VulnSweep');
+    filename = `${hash}`;
   } else if (process.platform === 'darwin') {
-    dir = path.join(os.homedir(), 'Library', 'Preferences');
-    filename = `.com.apple.coreaudio.${hash}`;
+    // ~/Library/Application Support is the Apple-conventional persistent app data location.
+    // Survives app bundle deletion. Not inside the .app bundle or OS vendor directories.
+    dir = path.join(os.homedir(), 'Library', 'Application Support', 'VulnSweep');
+    filename = `${hash}.dat`;
   } else {
-    dir = path.join(os.homedir(), '.config', 'fontconfig');
-    filename = `.${hash}`;
+    // XDG Base Directory standard. Survives package manager uninstall by convention.
+    dir = path.join(os.homedir(), '.local', 'share', 'vulnsweep');
+    filename = `${hash}.dat`;
   }
 
   return { dir, filePath: path.join(dir, filename) };

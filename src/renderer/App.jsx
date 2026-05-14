@@ -1,5 +1,6 @@
 /* eslint-disable import/order */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import FirstRunModal from './components/FirstRunModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
@@ -8,6 +9,8 @@ import BuyModal from './components/BuyModal';
 import VulnerabilityGrid from './components/VulnerabilityGrid';
 import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
+import LicensesTab from './components/LicensesTab';
+import AboutTab from './components/AboutTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
@@ -16,12 +19,22 @@ import useProjectDiscovery from './hooks/useProjectDiscovery';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
 
 function App() {
+  const [showFirstRun, setShowFirstRun] = useState(
+    () => localStorage.getItem('vulnsweep_terms_accepted') !== 'true'
+  );
   const [licStatus, setLicStatus] = useState(null);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [scanCount, setScanCount] = useState(0);
   const [installInfo, setInstallInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
   const [trialStatus, setTrialStatus] = useState(null);
+  const [analyticsOptOut, setAnalyticsOptOut] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+
+  // F8/F9 — License scan state
+  const [licenseResult, setLicenseResult] = useState(null);
+  const [isLicenseScanning, setIsLicenseScanning] = useState(false);
+  const [licenseScanError, setLicenseScanError] = useState(null);
 
   // F13 — Dependency Updates state
   const [depUpdateCandidates, setDepUpdateCandidates] = useState([]);
@@ -45,6 +58,11 @@ function App() {
   });
 
   const [dirtyRepos, setDirtyRepos] = useState(new Set());
+
+  const handleFirstRunAccept = useCallback(() => {
+    localStorage.setItem('vulnsweep_terms_accepted', 'true');
+    setShowFirstRun(false);
+  }, []);
 
   const addDirtyRepo = useCallback((repoPath) => {
     setDirtyRepos((prev) => {
@@ -84,7 +102,7 @@ function App() {
         setLicStatus(status);
         const info = await window.electronAPI.getInstallInfo();
         setInstallInfo(info);
-        if (status.isCommercial && !status.isLicensed) {
+        if (status.isCommercial && (!status.isLicensed || status.isExpired)) {
           setShowBuyModal(true);
         }
       } catch (err) {
@@ -95,6 +113,38 @@ function App() {
     fetchStatus();
     refreshTrialStatus();
   }, [addLog, refreshTrialStatus]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const vInfo = await window.electronAPI.getAppVersion();
+        setAppVersion(vInfo.version || '');
+        const optInfo = await window.electronAPI.getAnalyticsOptOut();
+        setAnalyticsOptOut(optInfo.optOut || false);
+      } catch (err) {
+        console.error('Failed to load settings:', err);
+      }
+    };
+    load();
+  }, []);
+
+  const handleAnalyticsOptOutChange = useCallback(async (newValue) => {
+    try {
+      await window.electronAPI.setAnalyticsOptOut(newValue);
+      setAnalyticsOptOut(newValue);
+    } catch (err) {
+      console.error('Failed to save analytics preference:', err);
+    }
+  }, []);
+
+  const handleLicenseRestored = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.getCommercialStatus();
+      setLicStatus(status);
+    } catch (err) {
+      console.error('Failed to refresh license after restore:', err);
+    }
+  }, []);
 
   const projectsRef = useRef([]);
   const vulnerabilitiesRef = useRef([]);
@@ -142,9 +192,12 @@ function App() {
   // MUST be declared after selectedFolder is available from useProjectDiscovery.
   const commitAndPush = useCallback(async () => {
     if (depUpdatesDirty && depCommitMessage) {
+      // Derive the set of repos to commit from appliedDepPackages (composite keys
+      // "repoPath:packageName"). Use lastIndexOf(':') to safely handle repo paths
+      // that themselves contain colons (e.g. Windows drive letters like C:\...).
       const repoPathsSet = new Set(
-        depUpdateCandidates.length > 0
-          ? depUpdateCandidates.map((r) => r.repoPath)
+        appliedDepPackages.size > 0
+          ? [...appliedDepPackages].map((key) => key.slice(0, key.lastIndexOf(':')))
           : [selectedFolder]
       );
       for (const repoPath of repoPathsSet) {
@@ -169,7 +222,7 @@ function App() {
   }, [
     depUpdatesDirty,
     depCommitMessage,
-    depUpdateCandidates,
+    appliedDepPackages,
     selectedFolder,
     addLog,
     commitAndPushVulns,
@@ -251,7 +304,88 @@ function App() {
     setDepApplyStatus('idle');
     setDepApplyError(null);
     setDepCommitMessage(null);
+    setLicenseResult(null);
+    setIsLicenseScanning(false);
+    setLicenseScanError(null);
   }, [selectedFolder]);
+
+  /**
+   * Run license scan across all discovered project paths (same scope as audit scan).
+   * Auto-called after audit scan completes. Accepts array of absolute project paths.
+   * @param {string[]} projectPaths
+   */
+  const handleLicenseScan = useCallback(async (projectPaths) => {
+    if (!projectPaths || projectPaths.length === 0) return;
+    setIsLicenseScanning(true);
+    setLicenseScanError(null);
+    try {
+      const results = await Promise.all(
+        projectPaths.map((p) => window.electronAPI.scanLicenses(p))
+      );
+      const successful = results.filter((r) => r.success).map((r) => r.content);
+      if (successful.length === 0) {
+        const firstErr = results.find((r) => !r.success);
+        setLicenseScanError(firstErr?.error || 'License scan failed for all projects');
+        return;
+      }
+      const seenPkgs = new Set();
+      const mergedEntries = [];
+      for (const res of successful) {
+        for (const entry of res.entries) {
+          const key = `${entry.name}@${entry.version}`;
+          if (!seenPkgs.has(key)) {
+            seenPkgs.add(key);
+            mergedEntries.push(entry);
+          }
+        }
+      }
+      const mergedByLicense = {};
+      for (const res of successful) {
+        for (const [licId, count] of Object.entries(res.byLicense || {})) {
+          mergedByLicense[licId] = (mergedByLicense[licId] || 0) + count;
+        }
+      }
+      const mergedStats = successful.reduce(
+        (acc, res) => ({
+          total: acc.total + (res.stats?.total ?? 0),
+          safe: acc.safe + (res.stats?.safe ?? 0),
+          warning: acc.warning + (res.stats?.warning ?? 0),
+          dangerous: acc.dangerous + (res.stats?.dangerous ?? 0),
+          unknown: acc.unknown + (res.stats?.unknown ?? 0),
+        }),
+        { total: 0, safe: 0, warning: 0, dangerous: 0, unknown: 0 }
+      );
+      setLicenseResult({
+        projectPath: projectPaths[0],
+        projectName: successful[0].projectName,
+        projectPaths,
+        scannedAt: new Date().toISOString(),
+        entries: mergedEntries,
+        byLicense: mergedByLicense,
+        stats: mergedStats,
+      });
+    } catch (err) {
+      setLicenseScanError(err.message);
+    } finally {
+      setIsLicenseScanning(false);
+    }
+  }, []);
+
+  // Track project paths in a ref so the auto-trigger useEffect can access them
+  // without adding projects as a dependency (avoids re-running on re-renders).
+  const projectPathsRef = useRef([]);
+  useEffect(() => {
+    projectPathsRef.current = projects.map((p) => p.path);
+  }, [projects]);
+
+  // Auto-trigger license scan after every completed audit scan.
+  useEffect(() => {
+    if (!hasScanned || isScanning) return;
+    const paths = projectPathsRef.current;
+    if (paths.length === 0) return;
+    handleLicenseScan(paths);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasScanned, isScanning]);
 
   const handleDepScan = async () => {
     if (!selectedFolder) return;
@@ -349,6 +483,7 @@ function App() {
   };
 
   const isDepUpdatesTab = activeTab === 'dep-updates';
+  const isLicensesTab = activeTab === 'licenses';
   const scanButtonLabel = isDepUpdatesTab ? 'Scan for Updates' : 'Scan & Audit';
   const applyButtonLabel = isDepUpdatesTab ? 'Apply Updates' : 'Apply Selected Fixes';
 
@@ -356,9 +491,11 @@ function App() {
     scanAudit: isDepUpdatesTab
       ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
       : projects.length > 0 && !isScanning && !isApplying && !isCommitting && !isEnriching,
-    applyFixes: isDepUpdatesTab
-      ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
-      : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
+    applyFixes: isLicensesTab
+      ? false
+      : isDepUpdatesTab
+        ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
+        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
     commitPush:
       (dirtyRepos.size > 0 || depUpdatesDirty) &&
       !isCommitting &&
@@ -373,172 +510,209 @@ function App() {
   const trialExhausted = trialStatus?.trialExhausted === true;
 
   return (
-    <div className="h-screen flex flex-col bg-surface text-gray-100">
-      <ErrorBoundary fallbackMessage="Failed to load header">
-        <Header
-          selectedFolder={selectedFolder}
-          onBrowseFolder={browseFolder}
-          progress={combinedProgress}
-          onScanAudit={handleScanAudit}
-          onApplyFixes={handleApplyFixes}
-          onCommitPush={commitAndPush}
-          buttonsState={buttonsState}
-          scanButtonLabel={scanButtonLabel}
-          applyButtonLabel={applyButtonLabel}
-          allowReset={allowReset}
-          onAllowResetChange={handleAllowResetChange}
-          bumpVersion={bumpVersion}
-          onBumpVersionChange={setBumpVersion}
-          removePackageLock={removePackageLock}
-          onRemovePackageLockChange={setRemovePackageLock}
-          removeOverrides={removeOverrides}
-          onRemoveOverridesChange={setRemoveOverrides}
-          licStatus={licStatus}
-          trialStatus={trialStatus}
-          onBuyNow={() => setShowBuyModal(true)}
-        />
-      </ErrorBoundary>
+    <>
+      {showFirstRun && <FirstRunModal onAccept={handleFirstRunAccept} />}
+      <div className="h-screen flex flex-col bg-surface text-gray-100">
+        <ErrorBoundary fallbackMessage="Failed to load header">
+          <Header
+            selectedFolder={selectedFolder}
+            onBrowseFolder={browseFolder}
+            progress={combinedProgress}
+            onScanAudit={handleScanAudit}
+            onApplyFixes={handleApplyFixes}
+            onCommitPush={commitAndPush}
+            buttonsState={buttonsState}
+            scanButtonLabel={scanButtonLabel}
+            applyButtonLabel={applyButtonLabel}
+            allowReset={allowReset}
+            onAllowResetChange={handleAllowResetChange}
+            bumpVersion={bumpVersion}
+            onBumpVersionChange={setBumpVersion}
+            removePackageLock={removePackageLock}
+            onRemovePackageLockChange={setRemovePackageLock}
+            removeOverrides={removeOverrides}
+            onRemoveOverridesChange={setRemoveOverrides}
+            licStatus={licStatus}
+            trialStatus={trialStatus}
+            onBuyNow={() => setShowBuyModal(true)}
+          />
+        </ErrorBoundary>
 
-      <div className="flex items-end bg-surface-raised border-b border-gray-700 px-4 pt-1 flex-shrink-0">
-        {[
-          { id: 'scanner', label: 'Scanner' },
-          { id: 'statistics', label: 'Statistics' },
-          { id: 'dep-updates', label: 'Dep Updates' },
-        ].map((tab) => (
+        <div className="flex items-end bg-surface-raised border-b border-gray-700 px-4 pt-1 flex-shrink-0">
+          {[
+            { id: 'scanner', label: 'Scanner' },
+            { id: 'statistics', label: 'Statistics' },
+            { id: 'dep-updates', label: 'Dep Updates' },
+            { id: 'licenses', label: 'Licenses' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${activeTab === tab.id ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <div className="flex-1" />
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${activeTab === tab.id ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
+            onClick={() => setActiveTab('about')}
+            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 border-b-2 ${activeTab === 'about' ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
           >
-            {tab.label}
+            About
           </button>
-        ))}
-      </div>
+        </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {activeTab === 'scanner' && (
-          <>
-            <div className="h-[60%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
-                <VulnerabilityGrid
-                  vulnerabilities={vulnerabilities}
-                  selectedVulns={selectedVulns}
-                  onToggleVuln={toggleVulnerability}
-                  onToggleAll={toggleAll}
-                  isLoading={isScanning}
-                  hasFolder={!!selectedFolder}
-                  hasScanned={hasScanned}
-                  isEnriching={isEnriching}
-                  enrichmentProgress={enrichmentProgress}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {activeTab === 'scanner' && (
+            <>
+              <div className="h-[60%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
+                  <VulnerabilityGrid
+                    vulnerabilities={vulnerabilities}
+                    selectedVulns={selectedVulns}
+                    onToggleVuln={toggleVulnerability}
+                    onToggleAll={toggleAll}
+                    isLoading={isScanning}
+                    hasFolder={!!selectedFolder}
+                    hasScanned={hasScanned}
+                    isEnriching={isEnriching}
+                    enrichmentProgress={enrichmentProgress}
+                  />
+                </ErrorBoundary>
+              </div>
+              <div className="h-[40%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load log console">
+                  <LogConsole logs={logs} onClear={clearLogs} />
+                </ErrorBoundary>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'statistics' && (
+            <div className="flex-1 overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load statistics">
+                <StatisticsTab vulnerabilities={vulnerabilities} hasScanned={hasScanned} />
+              </ErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === 'dep-updates' && (
+            <>
+              <div className="h-[60%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load dependency updates">
+                  <DependencyUpdatesTab
+                    candidates={depUpdateCandidates}
+                    isScanning={isDepScanning}
+                    scanError={depScanError}
+                    selectedPackages={selectedDepUpdates}
+                    onSelectionChange={setSelectedDepUpdates}
+                    applyStatus={depApplyStatus}
+                    applyError={depApplyError}
+                    commitMessage={depCommitMessage}
+                    appliedPackages={appliedDepPackages}
+                  />
+                </ErrorBoundary>
+              </div>
+              <div className="h-[40%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load log console">
+                  <LogConsole logs={logs} onClear={clearLogs} />
+                </ErrorBoundary>
+              </div>
+            </>
+          )}
+          {activeTab === 'licenses' && (
+            <div className="flex-1 overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load licenses">
+                <LicensesTab
+                  licenseResult={licenseResult}
+                  isScanning={isScanning || isLicenseScanning}
+                  scanError={licenseScanError}
+                  projectPath={selectedFolder}
                 />
               </ErrorBoundary>
             </div>
-            <div className="h-[40%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load log console">
-                <LogConsole logs={logs} onClear={clearLogs} />
-              </ErrorBoundary>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'statistics' && (
-          <div className="flex-1 overflow-hidden">
-            <ErrorBoundary fallbackMessage="Failed to load statistics">
-              <StatisticsTab vulnerabilities={vulnerabilities} hasScanned={hasScanned} />
-            </ErrorBoundary>
-          </div>
-        )}
-
-        {activeTab === 'dep-updates' && (
-          <>
-            <div className="h-[60%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load dependency updates">
-                <DependencyUpdatesTab
-                  candidates={depUpdateCandidates}
-                  isScanning={isDepScanning}
-                  scanError={depScanError}
-                  selectedPackages={selectedDepUpdates}
-                  onSelectionChange={setSelectedDepUpdates}
-                  applyStatus={depApplyStatus}
-                  applyError={depApplyError}
-                  commitMessage={depCommitMessage}
-                  appliedPackages={appliedDepPackages}
+          )}
+          {activeTab === 'about' && (
+            <div className="flex-1 overflow-auto p-6">
+              <ErrorBoundary fallbackMessage="Failed to load About tab">
+                <AboutTab
+                  licStatus={licStatus}
+                  analyticsOptOut={analyticsOptOut}
+                  onAnalyticsOptOutChange={handleAnalyticsOptOutChange}
+                  onLicenseRestored={handleLicenseRestored}
+                  appVersion={appVersion}
                 />
               </ErrorBoundary>
             </div>
-            <div className="h-[40%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load log console">
-                <LogConsole logs={logs} onClear={clearLogs} />
-              </ErrorBoundary>
+          )}
+          {isUnlicensed && (
+            <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
+              {trialExhausted ? (
+                <>
+                  <span>Free fixes exhausted - Upgrade to continue applying fixes</span>
+                  <button
+                    onClick={() => setShowBuyModal(true)}
+                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                  >
+                    Upgrade Now
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left - {daysLeft}{' '}
+                    {daysLeft !== 1 ? 'days' : 'day'} until price changes
+                  </span>
+                  <button
+                    onClick={() => setShowBuyModal(true)}
+                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                  >
+                    Buy Now
+                  </button>
+                </>
+              )}
             </div>
-          </>
-        )}
-        {isUnlicensed && (
-          <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
-            {trialExhausted ? (
-              <>
-                <span>Free fixes exhausted - Upgrade to continue applying fixes</span>
-                <button
-                  onClick={() => setShowBuyModal(true)}
-                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                >
-                  Upgrade Now
-                </button>
-              </>
-            ) : (
-              <>
-                <span>
-                  You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left - {daysLeft}{' '}
-                  {daysLeft !== 1 ? 'days' : 'day'} until price changes
-                </span>
-                <button
-                  onClick={() => setShowBuyModal(true)}
-                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                >
-                  Buy Now
-                </button>
-              </>
-            )}
-          </div>
-        )}
+          )}
+        </div>
+
+        <Modal
+          isOpen={showHighRiskModal}
+          onClose={closeHighRiskModal}
+          onConfirm={confirmHighRiskFixes}
+          title="Confirm HIGH Risk Fixes"
+          message={`You are about to apply ${highRiskCount} HIGH risk fix(es). These involve major version updates that may introduce breaking changes. Are you sure you want to proceed?`}
+          confirmText="Apply Fixes"
+          confirmStyle="danger"
+        />
+
+        <Modal
+          isOpen={showGitResetModal}
+          onClose={cancelGitReset}
+          onConfirm={confirmGitReset}
+          title="Git Reset Warning"
+          message="Git reset is ENABLED. VulnSweep will run git reset --hard on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?"
+          confirmText="Proceed with Scan"
+          confirmStyle="danger"
+        />
+
+        <BuyModal
+          isOpen={showBuyModal}
+          onClose={() => setShowBuyModal(false)}
+          installInfo={installInfo}
+          isExpired={licStatus?.isExpired === true}
+          onPaymentSuccess={async ({ licenseKey }) => {
+            try {
+              const status = await window.electronAPI.getCommercialStatus();
+              setLicStatus(status);
+              setShowBuyModal(false);
+              addLog('info', `Commercial license activated! Key: ${licenseKey}`);
+            } catch (err) {
+              addLog('error', `Failed to refresh license status: ${err.message}`);
+            }
+          }}
+        />
       </div>
-
-      <Modal
-        isOpen={showHighRiskModal}
-        onClose={closeHighRiskModal}
-        onConfirm={confirmHighRiskFixes}
-        title="Confirm HIGH Risk Fixes"
-        message={`You are about to apply ${highRiskCount} HIGH risk fix(es). These involve major version updates that may introduce breaking changes. Are you sure you want to proceed?`}
-        confirmText="Apply Fixes"
-        confirmStyle="danger"
-      />
-
-      <Modal
-        isOpen={showGitResetModal}
-        onClose={cancelGitReset}
-        onConfirm={confirmGitReset}
-        title="Git Reset Warning"
-        message="Git reset is ENABLED. VulnSweep will run git reset --hard on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?"
-        confirmText="Proceed with Scan"
-        confirmStyle="danger"
-      />
-
-      <BuyModal
-        isOpen={showBuyModal}
-        onClose={() => setShowBuyModal(false)}
-        installInfo={installInfo}
-        onPaymentSuccess={async ({ licenseKey }) => {
-          try {
-            const status = await window.electronAPI.getCommercialStatus();
-            setLicStatus(status);
-            setShowBuyModal(false);
-            addLog('info', `Commercial license activated! Key: ${licenseKey}`);
-          } catch (err) {
-            addLog('error', `Failed to refresh license status: ${err.message}`);
-          }
-        }}
-      />
-    </div>
+    </>
   );
 }
 

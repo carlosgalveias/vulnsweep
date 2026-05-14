@@ -1,9 +1,87 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to VulnSweep will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.0] - 2026-05-14
+
+### Added
+
+#### Feature D — Usage Analytics ([`src/main/modules/analytics.js`](src/main/modules/analytics.js) NEW, [`src/main/main.js`](src/main/main.js) MODIFIED)
+
+- **New module** [`src/main/modules/analytics.js`](src/main/modules/analytics.js): anonymous usage analytics via **Aptabase** (EU free tier, GDPR-compliant)
+- App key: `A-EU-9601263447`; all events sent to Aptabase's EU endpoint — no personal data, no IP addresses, no repository contents transmitted
+- **Events tracked**: `app_initialized`, `repo_scanned`, `sbom_generated`, `dependency_updated`, `vulnerability_fixed`, `purchase_completed`
+- **Opt-out**: users can disable analytics at any time via the toggle in the **About** tab — preference persisted across sessions
+- Analytics initialisation is deferred until after `app.whenReady()` and the opt-out preference is read from [`secure-store`](src/main/utils/secure-store.js) before the first event fires
+
+#### Feature A — Annual / Yearly Pricing ([`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED, [`src/main/config/constants.js`](src/main/config/constants.js) MODIFIED)
+
+- **New pricing model** — annual per-device license replacing the previous session-count model:
+  - **Early-adopter price**: €9.99 / year / device — available for the first 30 days after initial install
+  - **Standard price**: €29.99 / year / device — active after the 30-day early-adopter window closes
+- `LICENSE_CONFIG` constants object added to [`constants.js`](src/main/config/constants.js): `EARLY_ADOPTER_PRICE`, `STANDARD_PRICE`, `EARLY_ADOPTER_WINDOW_DAYS`
+- [`getActivePrice()`](src/main/modules/license.js) helper returns the correct price tier based on the install timestamp stored in the secure store
+- [`checkLicense()`](src/main/modules/license.js) extended with **expiry logic**: license payload now embeds an `expiresAt` epoch timestamp; expired licenses return `{ isLicensed: false, isExpired: true }` and trigger the renewal UI path
+- **Backward compatibility**: legacy licenses without `expiresAt` are treated as perpetual (non-expiring) to avoid breaking existing activations
+- Renewal countdown (days remaining) computed in [`license.js`](src/main/modules/license.js) and surfaced to the renderer via the `get-commercial-status` IPC handler
+
+#### Feature B — About Tab ([`src/renderer/components/AboutTab.jsx`](src/renderer/components/AboutTab.jsx) NEW, [`src/main/main.js`](src/main/main.js) MODIFIED, [`src/preload/preload.js`](src/preload/preload.js) MODIFIED)
+
+- **New component** [`src/renderer/components/AboutTab.jsx`](src/renderer/components/AboutTab.jsx): right-aligned navigation tab visible at all times
+- **Displays**: app name and version, license status (Licensed / Expired / Trial), serial number (masked), and renewal/expiry date with countdown
+- **Links**: Privacy Policy ([`PRIVACY_POLICY.md`](PRIVACY_POLICY.md)) and Disclaimer ([`DISCLAIMER.md`](DISCLAIMER.md)) opened via `open-local-doc` IPC handler; GitHub Issues link: https://github.com/carlosgalveias/vulnsweep-releases/issues
+- **Analytics opt-out toggle**: reads and writes the opt-out preference via [`analytics.js`](src/main/modules/analytics.js)
+- **License Backup** button (visible when licensed) and **License Restore** button (always visible) — see Feature C
+- New IPC handlers added to [`main.js`](src/main/main.js):
+  - `get-app-version` — returns `app.getVersion()` from Electron
+  - `open-local-doc` — resolves the document path relative to `__dirname` and opens it with `shell.openPath()`
+
+#### Feature C — License Backup / Restore ([`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED, [`src/main/main.js`](src/main/main.js) MODIFIED)
+
+- **Backup** (`backupLicense()`): reads all four license keys (`i`, `p`, `k`, `v`) from the secure store plus the `.vsweep` marker file birthtime, serialises to JSON, compresses with gzip, XOR-obfuscates the buffer, prepends a 4-byte magic header (`VSWB`), and writes the result as a single `.vsbak` file chosen by the user via `dialog.showSaveDialog`
+- **Restore** (`restoreVsweepFileWithBirthtime()`): reverses the process — strips the magic header, XOR-decodes, decompresses, validates the JSON schema, re-writes all four store keys, then recreates the `.vsweep` marker file with the **exact original creation timestamp** preserved via a PowerShell `EncodedCommand` that sets both `CreationTime` and `LastWriteTime` on Windows; on macOS/Linux the file is written and a best-effort `touch -t` is applied
+- **C-1 safeguard**: Backup button only shown when the app is in a licensed state
+- **C-2 safeguard**: Restore dialog warns the user that any existing license on the current machine will be overwritten; requires explicit confirmation before proceeding
+- New IPC handlers: `backup-license`, `restore-license`
+
+### Changed
+
+#### Pricing Model
+
+- Pricing has **changed from session-count to annual subscription**. The commercial annual license tier unlocks unlimited fix-and-commit sessions with an annual renewal cycle.
+- **Early-adopter pricing (€9.99/year)** is available only within the first 30 days after install. After 30 days the standard rate (€29.99/year) applies automatically. This window is device-specific and cannot be extended.
+- Free tier fix-and-commit sessions (10 sessions) remain unchanged for unlicensed users.
+
+### Technical Details
+
+#### Files Added (2)
+
+1. [`src/main/modules/analytics.js`](src/main/modules/analytics.js) — Aptabase analytics module with GDPR-compliant opt-out support
+2. [`src/renderer/components/AboutTab.jsx`](src/renderer/components/AboutTab.jsx) — About tab UI component
+
+#### Files Modified (5)
+
+1. [`src/main/modules/license.js`](src/main/modules/license.js) — annual expiry logic, `getActivePrice()`, backup/restore functions, `checkLicense()` expiry path
+2. [`src/main/config/constants.js`](src/main/config/constants.js) — `LICENSE_CONFIG` pricing constants
+3. [`src/main/main.js`](src/main/main.js) - analytics initialisation, `get-app-version` / `open-local-doc` / `backup-license` / `restore-license` IPC handlers
+4. [`src/preload/preload.js`](src/preload/preload.js) - new IPC channels exposed via `contextBridge`
+5. [`src/renderer/App.jsx`](src/renderer/App.jsx) - About tab integration
+
+### Notes
+
+This release completes Sprint 2. VulnSweep now ships with anonymous GDPR-compliant analytics (opt-out in About tab), an annual licensing model with early-adopter pricing, a dedicated About tab surfacing license status and renewal information, and a cryptographically-sound License Backup/Restore system that preserves the exact filesystem timestamp used by the license validation engine - enabling seamless license migration to a reformatted or new machine.
+
+**Upgrade Considerations:**
+
+- Existing users will see the new About tab immediately on upgrade - no action required
+- Analytics are enabled by default on first launch; users may opt out at any time in the About tab
+- Existing perpetual/legacy licenses (without expiresAt) continue to work without interruption
+- Early-adopter pricing (EUR 9.99/year) is time-limited to 30 days from initial install; the countdown is shown in the About tab
+
+---
 
 ## [1.7.0] - 2026-05-07
 
@@ -11,31 +89,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Windows Registry Data Not Migrated
 
-Previous releases stored license data in the Windows Registry via REG.exe shell calls. This release removes all Registry-based storage. **Existing Windows installations will lose stored license data on upgrade** — the app will behave as a fresh install (no stored license key, install date reset). Users with active commercial licenses must re-activate after upgrading. There is no automatic migration path.
+Previous releases stored license data in the Windows Registry via REG.exe shell calls. This release removes all Registry-based storage. **Existing Windows installations will lose stored license data on upgrade** ÔÇö the app will behave as a fresh install (no stored license key, install date reset). Users with active commercial licenses must re-activate after upgrading. There is no automatic migration path.
 
 ### Added
 
-#### Phase 1 — Cross-Platform Encrypted Storage ([`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) NEW, [`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
+#### Phase 1 ÔÇö Cross-Platform Encrypted Storage ([`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) NEW, [`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
 
 - **New module** [`src/main/utils/secure-store.js`](src/main/utils/secure-store.js): cross-platform encrypted key-value store replacing all Windows-only REG.exe shell calls in `license.js`
 - Uses `secure-ls` with AES encoding backed by a JSON file (`store.dat` in Electron `userData` directory)
 - Encryption key derived from the first non-loopback MAC address via `crypto.createHash('sha256')`; falls back to a static seed if no physical adapter is found
-- Exports: `storeGet(key)`, `storeSet(key, value)`, `storeRemove(key)`, `storeGetAll()` — all synchronous
+- Exports: `storeGet(key)`, `storeSet(key, value)`, `storeRemove(key)`, `storeGetAll()` ÔÇö all synchronous
 - Lazy initialisation with `_initFailed` guard: set permanently **only** on `MODULE_NOT_FOUND`; transient I/O errors allow retry on next call
 - Falls back to `~/.vsweep-store/store.dat` if Electron is not yet ready; upgrades to Electron `userData` once `app.ready` fires
 - In [`license.js`](src/main/modules/license.js): removed `setRegistryValue()` / `getRegistryValue()` entirely; all 8 Registry call sites replaced with `storeGet` / `storeSet`
 
-#### Phase 2 — Cross-Platform `.vsweep` Date Control File ([`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
+#### Phase 2 ÔÇö Cross-Platform `.vsweep` Date Control File ([`src/main/modules/license.js`](src/main/modules/license.js) MODIFIED)
 
 - [`getVsweepFilePath()`](src/main/modules/license.js) now returns OS-specific camouflaged paths:
   - **Windows**: `%USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\.vsweep`
   - **macOS**: `~/Library/Caches/com.apple.helpd/.vsweep`
   - **Linux**: `~/.local/share/recently-used.xbel.d/.vsweep`
   - **Other**: `~/.config/.vsweep`
-- Extracted [`ensureVsweepDir(filePath)`](src/main/modules/license.js) as a separate function — called only from write paths (activateLicense, generateLicense), never from read-only paths
+- Extracted [`ensureVsweepDir(filePath)`](src/main/modules/license.js) as a separate function ÔÇö called only from write paths (activateLicense, generateLicense), never from read-only paths
 - `getVsweepFilePath()` is now a **pure function** (no filesystem I/O)
 
-#### Phase 3 — Multi-Platform Electron Builder Config ([`package.json`](package.json) MODIFIED, [`build/entitlements.mac.plist`](build/entitlements.mac.plist) NEW)
+#### Phase 3 ÔÇö Multi-Platform Electron Builder Config ([`package.json`](package.json) MODIFIED, [`build/entitlements.mac.plist`](build/entitlements.mac.plist) NEW)
 
 - `mac` build block: `dmg` + `zip` targets for `x64` + `arm64`, `hardenedRuntime: true`, entitlements configured
 - `linux` build block: `AppImage` (x64 + arm64), `deb` (x64), `rpm` (x64) targets; maintainer / synopsis / description fields populated
@@ -44,13 +122,13 @@ Previous releases stored license data in the Windows Registry via REG.exe shell 
 - Icon fields: `mac.icon` points to `assets/icon.icns` (must be generated from `assets/logo.png`); `win.icon` points to `assets/icon.ico` (must be generated); Linux uses `assets/logo.png` directly
 - See [`BUILDING.md`](BUILDING.md) for icon generation instructions
 
-#### Phase 4 — Integration Fixes ([`src/main/main.js`](src/main/main.js) MODIFIED)
+#### Phase 4 ÔÇö Integration Fixes ([`src/main/main.js`](src/main/main.js) MODIFIED)
 
 - [`storeGet`](src/main/utils/secure-store.js) imported at the top of [`main.js`](src/main/main.js)
 - Store pre-warm: `storeGet('_init')` called immediately after `app.whenReady()` resolves, binding the store to the correct Electron `userData` path before any license IPC handler runs
 - IPC handlers hardened with try/catch and safe non-leaking fallbacks:
   - `get-commercial-status`: fails closed to `{ isCommercial: false, isLicensed: false }`
-  - `activate-license`: returns `{ success: false, error: 'License activation failed. Please try again.' }` — no internal path or key data forwarded to renderer
+  - `activate-license`: returns `{ success: false, error: 'License activation failed. Please try again.' }` ÔÇö no internal path or key data forwarded to renderer
   - `get-install-info`: returns `license.getPromoDefaults()` on error
 
 ### Build
@@ -68,30 +146,30 @@ Previous releases stored license data in the Windows Registry via REG.exe shell 
 
 ### Dependencies
 
-- Added **`secure-ls`** (`^2.0.0`) to `dependencies` — AES-encrypted file-backed store powering `secure-store.js`
+- Added **`secure-ls`** (`^2.0.0`) to `dependencies` ÔÇö AES-encrypted file-backed store powering `secure-store.js`
 
 ### Technical Details
 
 #### Files Added (2)
 
-1. [`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) — new cross-platform encrypted key-value store module
-2. [`build/entitlements.mac.plist`](build/entitlements.mac.plist) — macOS hardened runtime entitlements file
+1. [`src/main/utils/secure-store.js`](src/main/utils/secure-store.js) ÔÇö new cross-platform encrypted key-value store module
+2. [`build/entitlements.mac.plist`](build/entitlements.mac.plist) ÔÇö macOS hardened runtime entitlements file
 
 #### Files Modified (3)
 
-1. [`src/main/modules/license.js`](src/main/modules/license.js) — all Registry calls removed; storeGet/storeSet substituted at all 8 sites; getVsweepFilePath made pure; ensureVsweepDir extracted; cross-platform .vsweep paths implemented
-2. [`package.json`](package.json) — mac/linux/dmg build blocks added; 6 new build scripts; secure-ls added to dependencies
-3. [`src/main/main.js`](src/main/main.js) — storeGet import added; store pre-warm call added; IPC handlers wrapped in try/catch with safe fallbacks
+1. [`src/main/modules/license.js`](src/main/modules/license.js) ÔÇö all Registry calls removed; storeGet/storeSet substituted at all 8 sites; getVsweepFilePath made pure; ensureVsweepDir extracted; cross-platform .vsweep paths implemented
+2. [`package.json`](package.json) ÔÇö mac/linux/dmg build blocks added; 6 new build scripts; secure-ls added to dependencies
+3. [`src/main/main.js`](src/main/main.js) ÔÇö storeGet import added; store pre-warm call added; IPC handlers wrapped in try/catch with safe fallbacks
 
 ### Notes
 
-This release completes the cross-platform migration (Phases 1–4). VulnSweep now builds and runs on Windows, macOS, and Linux. The AES-encrypted `store.dat` format is identical across all platforms.
+This release completes the cross-platform migration (Phases 1ÔÇô4). VulnSweep now builds and runs on Windows, macOS, and Linux. The AES-encrypted `store.dat` format is identical across all platforms.
 
 **Upgrade Considerations:**
 
-- **Breaking**: Windows users with existing installs will lose stored license data — a re-activation flow will occur on first launch
-- macOS and Linux builds require icon assets to be generated before building — see [`BUILDING.md`](BUILDING.md)
-- `build:mac` and `build:mac:com` must be run on a macOS host or a macOS CI runner — cross-compilation from Windows/Linux is not supported
+- **Breaking**: Windows users with existing installs will lose stored license data ÔÇö a re-activation flow will occur on first launch
+- macOS and Linux builds require icon assets to be generated before building ÔÇö see [`BUILDING.md`](BUILDING.md)
+- `build:mac` and `build:mac:com` must be run on a macOS host or a macOS CI runner ÔÇö cross-compilation from Windows/Linux is not supported
 - Run `npm install` after pulling this
 
 ---
@@ -100,38 +178,38 @@ This release completes the cross-platform migration (Phases 1–4). VulnSweep no
 
 ### Added
 
-#### Task 6.2 — Dynamic Skeleton Loading ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+#### Task 6.2 ÔÇö Dynamic Skeleton Loading ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
 
 - Replaced static skeleton row count with a `ResizeObserver`-based dynamic calculation driven by the container's actual height at runtime
-- Row count formula: `Math.min(20, Math.max(3, Math.floor((containerHeight - 36) / 32)))` — clamps between 3 and 20 rows, accounting for the 36 px header and 32 px row height
+- Row count formula: `Math.min(20, Math.max(3, Math.floor((containerHeight - 36) / 32)))` ÔÇö clamps between 3 and 20 rows, accounting for the 36 px header and 32 px row height
 - Initial fallback height: `window.innerHeight * 0.6`, mirroring the grid's layout proportion before the first `ResizeObserver` callback fires
 - Added `ResizeObserver: 'readonly'` to browser globals in [`eslint.config.js`](eslint.config.js) to silence the no-undef lint error
 
-#### Task 6.4 — Column Header Tooltips ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+#### Task 6.4 ÔÇö Column Header Tooltips ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
 
-- Added [`<InfoTooltip>`](src/renderer/components/InfoTooltip.jsx) to 4 column headers using the existing component — no new npm package required:
-  - **Severity** — explains CVSS score scale and severity hierarchy (critical → info)
-  - **Status** — explains all 5 lifecycle values: `FIXED`, `PENDING`, `APPLYING`, `FAILED`, `SKIPPED`
-  - **Risk Level** — explains contextual risk vs generic severity and the LOW / HIGH distinction
-  - **Dependency Type** — explains the direct vs transitive dependency relationship
+- Added [`<InfoTooltip>`](src/renderer/components/InfoTooltip.jsx) to 4 column headers using the existing component ÔÇö no new npm package required:
+  - **Severity** ÔÇö explains CVSS score scale and severity hierarchy (critical ÔåÆ info)
+  - **Status** ÔÇö explains all 5 lifecycle values: `FIXED`, `PENDING`, `APPLYING`, `FAILED`, `SKIPPED`
+  - **Risk Level** ÔÇö explains contextual risk vs generic severity and the LOW / HIGH distinction
+  - **Dependency Type** ÔÇö explains the direct vs transitive dependency relationship
 
-#### Task 6.5 — Rich Empty States ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+#### Task 6.5 ÔÇö Rich Empty States ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
 
 - Replaced 3 minimal placeholder empty states with rich, icon-illustrated, actionable states:
-  - **No project selected** (trigger: `!hasFolder`) — `FolderOpen` icon (48 px, `text-text-muted`) + "No project selected" heading + "Browse for a folder containing a package.json to get started." subtitle
-  - **No vulnerabilities found** (trigger: `hasFolder && results.length === 0 && !searchTerm`) — `ShieldCheck` icon (48 px, `text-status-fixed`) + "No vulnerabilities found" heading + "Your project dependencies are clean." subtitle
-  - **No filter results** (trigger: `hasFolder && results.length === 0 && searchTerm`) — `SearchX` icon (40 px, `text-text-muted`) + "No results match your filter" heading + "Try adjusting your search or filter criteria." subtitle
+  - **No project selected** (trigger: `!hasFolder`) ÔÇö `FolderOpen` icon (48 px, `text-text-muted`) + "No project selected" heading + "Browse for a folder containing a package.json to get started." subtitle
+  - **No vulnerabilities found** (trigger: `hasFolder && results.length === 0 && !searchTerm`) ÔÇö `ShieldCheck` icon (48 px, `text-status-fixed`) + "No vulnerabilities found" heading + "Your project dependencies are clean." subtitle
+  - **No filter results** (trigger: `hasFolder && results.length === 0 && searchTerm`) ÔÇö `SearchX` icon (40 px, `text-text-muted`) + "No results match your filter" heading + "Try adjusting your search or filter criteria." subtitle
 
 ### Changed
 
-#### Task 6.1 — React Performance Optimisations
+#### Task 6.1 ÔÇö React Performance Optimisations
 
 - Wrapped [`Badge`](src/renderer/components/Badge.jsx), [`Spinner`](src/renderer/components/Spinner.jsx), [`InfoTooltip`](src/renderer/components/InfoTooltip.jsx), and [`Modal`](src/renderer/components/Modal.jsx) with `memo()` (named import from `react`) to prevent unnecessary re-renders when parent state changes do not affect these components
 - Added `useMemo` to [`src/renderer/App.jsx`](src/renderer/App.jsx) wrapping the `buttonsState` object (dependencies: `projects.length`, `isScanning`, `isApplying`, `isCommitting`, `selectedVulns.size`, `vulnerabilities`) to prevent [`<Header>`](src/renderer/components/Header.jsx) re-renders when button state is unchanged
 - Added `useCallback` wrapping `handleSort` and `useMemo` wrapping `selectableVulns` in [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx)
-- All 5 custom hooks already had `useCallback` applied correctly — no changes needed: [`useLogConsole.js`](src/renderer/hooks/useLogConsole.js), [`useProjectDiscovery.js`](src/renderer/hooks/useProjectDiscovery.js), [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js), [`useFixApplication.js`](src/renderer/hooks/useFixApplication.js), [`useGitOperations.js`](src/renderer/hooks/useGitOperations.js)
+- All 5 custom hooks already had `useCallback` applied correctly ÔÇö no changes needed: [`useLogConsole.js`](src/renderer/hooks/useLogConsole.js), [`useProjectDiscovery.js`](src/renderer/hooks/useProjectDiscovery.js), [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js), [`useFixApplication.js`](src/renderer/hooks/useFixApplication.js), [`useGitOperations.js`](src/renderer/hooks/useGitOperations.js)
 
-#### Task 6.3 — Table Column Order ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
+#### Task 6.3 ÔÇö Table Column Order ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx))
 
 - Reordered all 12 columns across `<thead>`, `<tbody>` data rows, and skeleton rows for improved information hierarchy:
   - **Old order**: `Checkbox | Project Name | Severity | Package | Installed | Vulnerable Range | Fixed | Dep Type | Resolves | CVEs | Risk | Status`
@@ -141,7 +219,7 @@ This release completes the cross-platform migration (Phases 1–4). VulnSweep no
 
 ### Fixed
 
-#### Task 6.5 — Test Suite Corrections ([`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx))
+#### Task 6.5 ÔÇö Test Suite Corrections ([`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx))
 
 - Updated 6 pre-existing `toHaveBeenCalledTimes` assertions that were incorrectly counting React Strict Mode double-invocations; assertions now reflect the true single-call expectation
 
@@ -149,19 +227,19 @@ This release completes the cross-platform migration (Phases 1–4). VulnSweep no
 
 #### Files Modified (8)
 
-1. [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx) — dynamic skeleton rows, column reorder, header tooltips, rich empty states, `useCallback`/`useMemo` optimisations
-2. [`src/renderer/App.jsx`](src/renderer/App.jsx) — `useMemo` on `buttonsState`
-3. [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx) — wrapped with `memo()`
-4. [`src/renderer/components/Spinner.jsx`](src/renderer/components/Spinner.jsx) — wrapped with `memo()`
-5. [`src/renderer/components/InfoTooltip.jsx`](src/renderer/components/InfoTooltip.jsx) — wrapped with `memo()`
-6. [`src/renderer/components/Modal.jsx`](src/renderer/components/Modal.jsx) — wrapped with `memo()`
-7. [`eslint.config.js`](eslint.config.js) — `ResizeObserver: 'readonly'` added to browser globals
-8. [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx) — 6 `toHaveBeenCalledTimes` assertions corrected
+1. [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx) ÔÇö dynamic skeleton rows, column reorder, header tooltips, rich empty states, `useCallback`/`useMemo` optimisations
+2. [`src/renderer/App.jsx`](src/renderer/App.jsx) ÔÇö `useMemo` on `buttonsState`
+3. [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx) ÔÇö wrapped with `memo()`
+4. [`src/renderer/components/Spinner.jsx`](src/renderer/components/Spinner.jsx) ÔÇö wrapped with `memo()`
+5. [`src/renderer/components/InfoTooltip.jsx`](src/renderer/components/InfoTooltip.jsx) ÔÇö wrapped with `memo()`
+6. [`src/renderer/components/Modal.jsx`](src/renderer/components/Modal.jsx) ÔÇö wrapped with `memo()`
+7. [`eslint.config.js`](eslint.config.js) ÔÇö `ResizeObserver: 'readonly'` added to browser globals
+8. [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx) ÔÇö 6 `toHaveBeenCalledTimes` assertions corrected
 
 #### Testing & Validation
 
-- ✅ **241/241 tests passing** across 10 test suites — no regressions introduced
-- ✅ **0 ESLint errors** across all modified files
+- Ô£à **241/241 tests passing** across 10 test suites ÔÇö no regressions introduced
+- Ô£à **0 ESLint errors** across all modified files
 
 ### Notes
 
@@ -179,31 +257,31 @@ This release completes Phase 6 (Final Polish & Optimization) of VERSION_1_PLAN. 
 
 ### Added
 
-#### Task 5.1 — Design System ([`tailwind.config.js`](tailwind.config.js))
+#### Task 5.1 ÔÇö Design System ([`tailwind.config.js`](tailwind.config.js))
 
 - Extended Tailwind configuration with a full semantic design token system
-- **[`surface.*`](tailwind.config.js) tokens** — `DEFAULT` (#111827), `raised` (#1f2937), `overlay` (#374151), `sunken` (#000000), `mid` (#252f3f)
-- **[`brand.*`](tailwind.config.js) tokens** — `DEFAULT` (#2563eb), `muted` (#3b82f6), `subtle` (#60a5fa)
-- **[`severity.*`](tailwind.config.js) tokens** — `critical` (#dc2626), `high` (#ea580c), `medium` (#eab308), `low` (#2563eb), `info` (#4b5563)
-- **[`status.*`](tailwind.config.js) tokens** — `fixed` (#16a34a), `applying` (#2563eb), `pending` (#4b5563), `failed` (#dc2626), `skipped` (#374151)
-- **[`accent.*`](tailwind.config.js) tokens** — `DEFAULT` (#2dd4bf), `subtle` (#5eead4)
-- **[`warn.*`](tailwind.config.js) tokens** — `DEFAULT` (#facc15), `strong` (#f59e0b), `bg` (#78350f), `text` (#fcd34d), `border` (#92400e)
-- **[`text.*`](tailwind.config.js) tokens** — `primary` (#f3f4f6), `secondary` (#e5e7eb), `muted` (#9ca3af), `faint` (#6b7280), `disabled` (#4b5563), `inverse` (#111827)
-- **[`border.*`](tailwind.config.js) tokens** — `DEFAULT` (#374151), `muted` (#4b5563), `strong` (#1f2937)
-- **[`dep.*`](tailwind.config.js) tokens** — `direct.bg` (#1e40af), `direct.text` (#dbeafe), `transitive.bg` (#6b21a8), `transitive.text` (#f3e8ff)
-- **Compact typography scale** — `app-2xs` through `app-xl` custom font-size steps
-- **Border-radius tokens** — `app-sm`, `app-md`, `app-lg`, `app-full`
+- **[`surface.*`](tailwind.config.js) tokens** ÔÇö `DEFAULT` (#111827), `raised` (#1f2937), `overlay` (#374151), `sunken` (#000000), `mid` (#252f3f)
+- **[`brand.*`](tailwind.config.js) tokens** ÔÇö `DEFAULT` (#2563eb), `muted` (#3b82f6), `subtle` (#60a5fa)
+- **[`severity.*`](tailwind.config.js) tokens** ÔÇö `critical` (#dc2626), `high` (#ea580c), `medium` (#eab308), `low` (#2563eb), `info` (#4b5563)
+- **[`status.*`](tailwind.config.js) tokens** ÔÇö `fixed` (#16a34a), `applying` (#2563eb), `pending` (#4b5563), `failed` (#dc2626), `skipped` (#374151)
+- **[`accent.*`](tailwind.config.js) tokens** ÔÇö `DEFAULT` (#2dd4bf), `subtle` (#5eead4)
+- **[`warn.*`](tailwind.config.js) tokens** ÔÇö `DEFAULT` (#facc15), `strong` (#f59e0b), `bg` (#78350f), `text` (#fcd34d), `border` (#92400e)
+- **[`text.*`](tailwind.config.js) tokens** ÔÇö `primary` (#f3f4f6), `secondary` (#e5e7eb), `muted` (#9ca3af), `faint` (#6b7280), `disabled` (#4b5563), `inverse` (#111827)
+- **[`border.*`](tailwind.config.js) tokens** ÔÇö `DEFAULT` (#374151), `muted` (#4b5563), `strong` (#1f2937)
+- **[`dep.*`](tailwind.config.js) tokens** ÔÇö `direct.bg` (#1e40af), `direct.text` (#dbeafe), `transitive.bg` (#6b21a8), `transitive.text` (#f3e8ff)
+- **Compact typography scale** ÔÇö `app-2xs` through `app-xl` custom font-size steps
+- **Border-radius tokens** ÔÇö `app-sm`, `app-md`, `app-lg`, `app-full`
 
-#### Task 5.2 — Reusable Badge Component ([`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx))
+#### Task 5.2 ÔÇö Reusable Badge Component ([`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx))
 
-- **New component** — `<Badge>` replaces all ad-hoc inline badge helpers throughout the codebase
+- **New component** ÔÇö `<Badge>` replaces all ad-hoc inline badge helpers throughout the codebase
 - Supports 4 variants: `severity`, `status`, `risk`, `promoted`
-- Case-insensitive value matching with alias support (`moderate` → `medium`, `resolved` → `fixed`)
+- Case-insensitive value matching with alias support (`moderate` ÔåÆ `medium`, `resolved` ÔåÆ `fixed`)
 - All colours reference semantic design tokens defined in Task 5.1
 - Full PropTypes validation declared
 - Removed inline `getSeverityBadge()`, `getRiskBadge()`, and `getStatusBadge()` helpers from [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx); replaced with `<Badge>`
 
-#### Task 5.3 — Semantic Background Colour Standardisation
+#### Task 5.3 ÔÇö Semantic Background Colour Standardisation
 
 - Replaced all arbitrary `bg-gray-*` / `bg-black` classes with `bg-surface-*` / `bg-brand-*` tokens across 6 files:
   - [`src/renderer/App.jsx`](src/renderer/App.jsx)
@@ -212,30 +290,30 @@ This release completes Phase 6 (Final Polish & Optimization) of VERSION_1_PLAN. 
   - [`src/renderer/components/LogConsole.jsx`](src/renderer/components/LogConsole.jsx)
   - [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx)
   - [`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx)
-- **Eliminated `bg-gray-850`** — a non-existent Tailwind class that silently produced no background colour; replaced with `bg-surface-mid` in the Modal footer and alternating grid rows
+- **Eliminated `bg-gray-850`** ÔÇö a non-existent Tailwind class that silently produced no background colour; replaced with `bg-surface-mid` in the Modal footer and alternating grid rows
 
 ### Fixed
 
-#### Task 5.4 — WCAG AA Colour Contrast
+#### Task 5.4 ÔÇö WCAG AA Colour Contrast
 
 - **Dependency-type badges** ([`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx)):
   - `direct` badge: contrast raised from ~3.5:1 (FAIL) to ~5.2:1 (PASS) via `dep.direct.*` tokens
   - `transitive` badge: contrast raised from ~3.5:1 (FAIL) to ~5.8:1 (PASS) via `dep.transitive.*` tokens
-- **Disabled button text** ([`src/renderer/components/Header.jsx`](src/renderer/components/Header.jsx)): `text-gray-500` (~1.9:1) → `text-text-muted` (~3.0:1, satisfies WCAG 1.4.11 for UI components)
-- **Timestamp text** ([`src/renderer/components/LogConsole.jsx`](src/renderer/components/LogConsole.jsx)): `text-gray-500` (~3.4:1) → `text-text-muted` (~5.9:1 on black surface)
-- **Stack trace text** ([`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx)): `text-gray-500` → `text-text-muted` on black surface
-- Verified all log-level colours, badge text colours, and surface text colours achieve ≥ 4.5:1 contrast ratio
+- **Disabled button text** ([`src/renderer/components/Header.jsx`](src/renderer/components/Header.jsx)): `text-gray-500` (~1.9:1) ÔåÆ `text-text-muted` (~3.0:1, satisfies WCAG 1.4.11 for UI components)
+- **Timestamp text** ([`src/renderer/components/LogConsole.jsx`](src/renderer/components/LogConsole.jsx)): `text-gray-500` (~3.4:1) ÔåÆ `text-text-muted` (~5.9:1 on black surface)
+- **Stack trace text** ([`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx)): `text-gray-500` ÔåÆ `text-text-muted` on black surface
+- Verified all log-level colours, badge text colours, and surface text colours achieve ÔëÑ 4.5:1 contrast ratio
 
 ### Changed
 
-#### Task 5.5 — Icon System with lucide-react
+#### Task 5.5 ÔÇö Icon System with lucide-react
 
 - Installed `lucide-react` as a production dependency
 - Added semantic icons to [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx):
   - **Severity icons**: `ShieldAlert` (critical), `AlertTriangle` (high), `AlertCircle` (medium), `Info` (low/info), `Minus` (unknown)
   - **Status icons**: `CheckCircle` (fixed), `Loader` with CSS spin animation (applying), `Clock` (pending), `XCircle` (failed), `MinusCircle` (skipped)
   - **Risk icons**: `TrendingUp` (high risk), `TrendingDown` (low risk)
-- Replaced ⚠️ emoji in [`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx) with `AlertTriangle` icon from lucide-react
+- Replaced ÔÜá´©Å emoji in [`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx) with `AlertTriangle` icon from lucide-react
 - Added `lucide-react` module name mapper to [`jest.config.js`](jest.config.js) and created [`__tests__/utils/lucide-mock.js`](__tests__/utils/lucide-mock.js) for test environment compatibility
 - Updated test assertions in [`__tests__/renderer/components/ErrorBoundary.test.jsx`](__tests__/renderer/components/ErrorBoundary.test.jsx), [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx), and [`__tests__/renderer/components/Modal.test.jsx`](__tests__/renderer/components/Modal.test.jsx) to match Phase 5 markup changes
 
@@ -243,26 +321,26 @@ This release completes Phase 6 (Final Polish & Optimization) of VERSION_1_PLAN. 
 
 #### Files Added (2)
 
-1. [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx) — new reusable badge component with icon support
-2. [`__tests__/utils/lucide-mock.js`](__tests__/utils/lucide-mock.js) — Jest module mock for lucide-react icons
+1. [`src/renderer/components/Badge.jsx`](src/renderer/components/Badge.jsx) ÔÇö new reusable badge component with icon support
+2. [`__tests__/utils/lucide-mock.js`](__tests__/utils/lucide-mock.js) ÔÇö Jest module mock for lucide-react icons
 
 #### Files Modified (9)
 
-1. [`tailwind.config.js`](tailwind.config.js) — full semantic design token system
-2. [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx) — badge helpers removed, `<Badge>` integrated, semantic tokens applied
-3. [`src/renderer/App.jsx`](src/renderer/App.jsx) — semantic background tokens
-4. [`src/renderer/components/Header.jsx`](src/renderer/components/Header.jsx) — semantic tokens, disabled-state contrast fix
-5. [`src/renderer/components/Modal.jsx`](src/renderer/components/Modal.jsx) — semantic tokens, `bg-gray-850` eliminated
-6. [`src/renderer/components/LogConsole.jsx`](src/renderer/components/LogConsole.jsx) — semantic tokens, timestamp contrast fix
-7. [`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx) — semantic tokens, emoji replaced with `AlertTriangle`
-8. [`jest.config.js`](jest.config.js) — `lucide-react` module name mapper added
-9. [`__tests__/renderer/components/ErrorBoundary.test.jsx`](__tests__/renderer/components/ErrorBoundary.test.jsx), [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx), [`__tests__/renderer/components/Modal.test.jsx`](__tests__/renderer/components/Modal.test.jsx) — assertions updated for Phase 5 markup
+1. [`tailwind.config.js`](tailwind.config.js) ÔÇö full semantic design token system
+2. [`src/renderer/components/VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx) ÔÇö badge helpers removed, `<Badge>` integrated, semantic tokens applied
+3. [`src/renderer/App.jsx`](src/renderer/App.jsx) ÔÇö semantic background tokens
+4. [`src/renderer/components/Header.jsx`](src/renderer/components/Header.jsx) ÔÇö semantic tokens, disabled-state contrast fix
+5. [`src/renderer/components/Modal.jsx`](src/renderer/components/Modal.jsx) ÔÇö semantic tokens, `bg-gray-850` eliminated
+6. [`src/renderer/components/LogConsole.jsx`](src/renderer/components/LogConsole.jsx) ÔÇö semantic tokens, timestamp contrast fix
+7. [`src/renderer/components/ErrorBoundary.jsx`](src/renderer/components/ErrorBoundary.jsx) ÔÇö semantic tokens, emoji replaced with `AlertTriangle`
+8. [`jest.config.js`](jest.config.js) ÔÇö `lucide-react` module name mapper added
+9. [`__tests__/renderer/components/ErrorBoundary.test.jsx`](__tests__/renderer/components/ErrorBoundary.test.jsx), [`__tests__/renderer/App.test.jsx`](__tests__/renderer/App.test.jsx), [`__tests__/renderer/components/Modal.test.jsx`](__tests__/renderer/components/Modal.test.jsx) ÔÇö assertions updated for Phase 5 markup
 
 #### Testing & Validation
 
-- ✅ **241/241 tests passing** across 10 test suites (74 new tests added since Phase 4)
-- ✅ **0 ESLint errors** across all modified files
-- ✅ All severity, status, and risk badge colours verified at ≥ 4.5:1 WCAG AA contrast ratio
+- Ô£à **241/241 tests passing** across 10 test suites (74 new tests added since Phase 4)
+- Ô£à **0 ESLint errors** across all modified files
+- Ô£à All severity, status, and risk badge colours verified at ÔëÑ 4.5:1 WCAG AA contrast ratio
 
 ### Notes
 
@@ -272,7 +350,7 @@ This release completes Phase 5 (Design System & Polish) of VERSION_1_PLAN. Every
 
 - No breaking changes to application functionality or IPC contracts
 - The `bg-gray-850` class was a silent no-op in previous releases; its replacement with `bg-surface-mid` visually restores the intended background on Modal footers and alternating grid rows
-- `lucide-react` is a new production dependency — run `npm install` after pulling this release
+- `lucide-react` is a new production dependency ÔÇö run `npm install` after pulling this release
 
 ---
 
@@ -527,10 +605,10 @@ This release completes Phase 5 (Design System & Polish) of VERSION_1_PLAN. Every
 
 #### Testing & Validation
 
-- ✅ **167/167 tests passed** - All automated tests continue to pass
-- ✅ **0 linting errors** - Clean code with no ESLint warnings
-- ✅ **Vite build successful** - Production build completes without errors
-- ✅ **No regressions** - All existing functionality preserved and working
+- Ô£à **167/167 tests passed** - All automated tests continue to pass
+- Ô£à **0 linting errors** - Clean code with no ESLint warnings
+- Ô£à **Vite build successful** - Production build completes without errors
+- Ô£à **No regressions** - All existing functionality preserved and working
 
 ### Notes
 
@@ -552,14 +630,14 @@ VulnSweep 1.0.0 is the first production-ready release, designed to automate npm 
 
 **Key Highlights:**
 
-- ✅ Fully functional Electron desktop application
-- ✅ Intelligent fix strategy determination
-- ✅ Risk-aware vulnerability remediation
-- ✅ Bulk git operations with safety controls
-- ✅ Comprehensive user interface
-- ✅ Real-time progress tracking
-- ✅ Production-ready codebase
-- ✅ Complete documentation
+- Ô£à Fully functional Electron desktop application
+- Ô£à Intelligent fix strategy determination
+- Ô£à Risk-aware vulnerability remediation
+- Ô£à Bulk git operations with safety controls
+- Ô£à Comprehensive user interface
+- Ô£à Real-time progress tracking
+- Ô£à Production-ready codebase
+- Ô£à Complete documentation
 
 **Target Users:**
 

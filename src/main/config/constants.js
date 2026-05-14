@@ -262,6 +262,40 @@ const ENRICHMENT_CONFIG = {
 };
 
 // ============================================
+// LICENSE CONFIGURATION
+// ============================================
+
+/**
+ * License pricing and duration constants for Feature A (Yearly Pricing).
+ * @namespace LICENSE_CONFIG
+ */
+const LICENSE_CONFIG = {
+  /**
+   * Promotional price in EUR, active within the first PROMO_DAYS days of install.
+   * @type {number}
+   */
+  PROMO_PRICE_EUR: 9.99,
+
+  /**
+   * Full price in EUR, active after the PROMO_DAYS window expires.
+   * @type {number}
+   */
+  FULL_PRICE_EUR: 29.99,
+
+  /**
+   * Number of days from install during which the promo price is active.
+   * @type {number}
+   */
+  PROMO_DAYS: 30,
+
+  /**
+   * Duration of a purchased license in days (365 = 1 year / annual license).
+   * @type {number}
+   */
+  LICENSE_DURATION_DAYS: 365,
+};
+
+// ============================================
 // DEPENDENCY UPDATES CONFIGURATION (F13)
 // ============================================
 
@@ -303,4 +337,5 @@ module.exports = {
   PAYPAL_CONFIG,
   ENRICHMENT_CONFIG,
   DEP_UPDATES_CONFIG,
+  LICENSE_CONFIG,
 };

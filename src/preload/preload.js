@@ -95,12 +95,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTrialStatus: () => ipcRenderer.invoke('get-trial-status'),
 
   /**
+   * Increments the trial fix counter by one for the current user-initiated
+   * "Apply Fixes" operation. No-op for licensed users (skipped server-side).
+   * @returns {Promise<{ success: boolean, fixesConsumed?: number, skipped?: boolean, error?: string }>}
+   */
+  incrementTrialFix: () => ipcRenderer.invoke('increment-trial-fix'),
+
+  /**
    * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
    * Resolves when the user completes payment (success URL detected) or closes
    * the window without paying.
    * @returns {Promise<{ ok: true, key: string } | { ok: false, cancelled?: true, error?: string }>}
    */
   openPaymentWindow: (isPromo) => ipcRenderer.invoke('open-payment-window', isPromo),
+
+  /**
+   * Returns the active purchase price based on installation date.
+   * Promo price applies within the first PROMO_DAYS days; full price after that.
+   * @returns {Promise<{ price: number, isPromo: boolean, promoEndsAt: string|null }>}
+   */
+  getActivePrice: () => ipcRenderer.invoke('get-active-price'),
 
   // ============================================
   // ENRICHMENT (F1)
@@ -168,6 +182,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ============================================
+  // LICENSE SCAN & SBOM (F8/F9)
+  // ============================================
+
+  /**
+   * Scan all packages in a project for license information.
+   * No paywall — available to all users.
+   * @param {string} projectPath - Absolute path to the project directory
+   * @returns {Promise<{ success: boolean, content?: LicenseScanResult, error?: string }>}
+   */
+  scanLicenses: (projectPath) => ipcRenderer.invoke('license:scan', projectPath),
+
+  /**
+   * Show a native save-file dialog for the chosen SBOM format.
+   * @param {{ format: 'cyclonedx'|'spdx'|'csv' }} options
+   * @returns {Promise<{ filePath: string|null, canceled: boolean, error?: string }>}
+   */
+  sbomGetSavePath: (options) => ipcRenderer.invoke('sbom:get-save-path', options),
+
+  /**
+   * Generate SBOM content and write it to outputPath.
+   * @param {{ licenseResult: LicenseScanResult, format: string, outputPath: string }} params
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  sbomExport: (params) => ipcRenderer.invoke('sbom:export', params),
+
+  // ============================================
   // LOGGING & EVENTS
   // ============================================
 
@@ -211,6 +251,54 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns {Promise<void>}
    */
   openExternal: (url) => shell.openExternal(url),
+
+  // ============================================
+  // ANALYTICS OPT-OUT (D)
+  // ============================================
+
+  /**
+   * Set the analytics opt-out preference.
+   * @param {boolean} value - true to opt out, false to opt in
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  setAnalyticsOptOut: (value) => ipcRenderer.invoke('set-analytics-opt-out', value),
+
+  /**
+   * Get the current analytics opt-out preference.
+   * @returns {Promise<{ optOut: boolean }>}
+   */
+  getAnalyticsOptOut: () => ipcRenderer.invoke('get-analytics-opt-out'),
+
+  // ============================================
+  // APP INFO & DOCS (B)
+  // ============================================
+
+  /**
+   * Returns the application version and name from the main process.
+   * @returns {Promise<{ version: string, name: string }>}
+   */
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  /**
+   * Opens a local documentation file in the system default application.
+   * Only 'PRIVACY_POLICY.md' and 'DISCLAIMER.md' are permitted.
+   * @param {string} filename - Allowed document filename
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  openLocalDoc: (filename) => ipcRenderer.invoke('open-local-doc', filename),
+
+  /**
+   * Opens a save dialog and writes a license backup (.vsbak) file.
+   * Only available when a valid license is active.
+   * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+   */
+  licenseBackup: () => ipcRenderer.invoke('license-backup'),
+
+  /**
+   * Opens an open dialog to select a .vsbak backup file and restores the license.
+   * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+   */
+  licenseRestore: () => ipcRenderer.invoke('license-restore'),
 });
 
 // Expose app version metadata

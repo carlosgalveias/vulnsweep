@@ -1,9 +1,9 @@
 /* eslint-disable react/prop-types */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Spinner from './Spinner';
 
 /**
- * BuyModal — PayPal "Success URL" payment flow.
+ * BuyModal — PayPal "Success URL" payment flow with dynamic yearly pricing.
  *
  * Clicking "Pay with PayPal" delegates to the main process via
  * window.electronAPI.openPaymentWindow(), which opens a managed BrowserWindow
@@ -16,24 +16,72 @@ import Spinner from './Spinner';
  *   onClose           {function}  — called when the modal should close
  *   onPaymentSuccess  {function}  — called with { licenseKey } on successful payment
  *   installInfo       {object}    — { isPromo, price, daysRemaining } from getInstallInfo()
+ *   isExpired         {boolean}   — true when the user has an expired annual license
  */
-const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo }) => {
+const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = false }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  /**
+   * Dynamic price state fetched from the main process via getActivePrice().
+   * Falls back to promo defaults so the UI is never blank while the IPC call
+   * is in-flight or if it fails.
+   * @type {{ price: number, isPromo: boolean, promoEndsAt: string|null }}
+   */
+  const [priceInfo, setPriceInfo] = useState({ price: 9.99, isPromo: true, promoEndsAt: null });
+
+  // Fetch live pricing from the main process each time the modal is opened.
+  // This ensures the displayed price is always correct even after the promo
+  // window expires between app launches without re-mounting App.
+  useEffect(() => {
+    if (!isOpen) return;
+    window.electronAPI
+      .getActivePrice()
+      .then((info) => {
+        if (info) setPriceInfo(info);
+      })
+      .catch(() => {
+        // Silently fall back to the default promo price already in state.
+      });
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  const isPromo = installInfo?.isPromo ?? true;
-  const price = installInfo?.price ?? '9.00';
-  const fullPrice = '30.00';
-  const daysRemaining = installInfo?.daysRemaining ?? 30;
+  const { price, isPromo, promoEndsAt } = priceInfo;
+  const displayPrice = typeof price === 'number' ? price.toFixed(2) : String(price);
+
+  // The full (non-promo) price shown as the "after-promotion" reference.
+  // Prefer live data from installInfo; fall back to the known constant.
+  const fullPriceDisplay =
+    installInfo?.price && !installInfo?.isPromo ? Number(installInfo.price).toFixed(2) : '29.99';
+
+  /**
+   * Format a UTC ISO date string to a locale-aware, human-readable date.
+   * Returns null if the input is falsy or unparseable.
+   * @param {string|null} isoDate
+   * @returns {string|null}
+   */
+  function formatPromoEnd(isoDate) {
+    if (!isoDate) return null;
+    try {
+      return new Date(isoDate).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  const promoEndFormatted = formatPromoEnd(promoEndsAt);
 
   const handlePayWithPayPal = async () => {
     setLoading(true);
     setErrorMsg('');
 
     try {
-      const result = await window.electronAPI.openPaymentWindow(installInfo?.isPromo ?? true);
+      const result = await window.electronAPI.openPaymentWindow(isPromo);
 
       if (result?.ok === true) {
         // Payment confirmed — notify parent and close modal
@@ -57,39 +105,63 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo }) => {
         {/* Header */}
         <div className="p-6 border-b border-gray-700">
           <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
-            <span>🚀</span> Upgrade to Full Version
+            {isExpired ? (
+              <>
+                <span>🔄</span> Renew Your Annual License
+              </>
+            ) : (
+              <>
+                <span>🔓</span> Upgrade to Full Version
+              </>
+            )}
           </h2>
         </div>
 
         {/* Body */}
         <div className="p-6 flex-1 space-y-4">
+          {/* Expired license notice */}
+          {isExpired && (
+            <div className="rounded-md bg-amber-900 bg-opacity-50 border border-amber-700 px-4 py-3 text-sm text-amber-200">
+              ⚠️ Your annual license has expired. Renew now to continue applying fixes and accessing
+              all features.
+            </div>
+          )}
+
           {/* Promo / regular price copy */}
           {isPromo ? (
             <div>
               <p className="text-gray-300 mb-1">
-                🔥 <strong className="text-amber-400">Limited-time offer!</strong> Get the full
-                version for only <strong className="text-green-400">{price}€</strong> — one-time
-                purchase, lifetime updates.
+                🔥 <strong className="text-amber-400">Early adopter price!</strong> Get an annual
+                license for only <strong className="text-green-400">€{displayPrice}/year</strong> —
+                limited time offer.
               </p>
               <p className="text-xs text-amber-300">
-                Promotion ends in{' '}
-                <strong>
-                  {daysRemaining} day{daysRemaining !== 1 ? 's' : ''}
-                </strong>
-                . Price rises to <strong>{fullPrice}€</strong> after the promotion.
+                {promoEndFormatted ? (
+                  <>
+                    Offer ends on <strong>{promoEndFormatted}</strong>. Price rises to{' '}
+                    <strong>€{fullPriceDisplay}/year</strong> after that.
+                  </>
+                ) : (
+                  <>
+                    Limited time offer. Price rises to <strong>€{fullPriceDisplay}/year</strong>{' '}
+                    after the promotion.
+                  </>
+                )}
               </p>
             </div>
           ) : (
             <p className="text-gray-300">
-              Get the full version for <strong className="text-green-400">{price}€</strong> —
-              one-time purchase, lifetime updates.
+              Get an annual license for{' '}
+              <strong className="text-green-400">€{displayPrice}/year</strong> — renews annually,
+              includes all features and future updates.
             </p>
           )}
 
           {/* Feature description */}
           <p className="text-sm text-gray-400">
-            <strong className="text-gray-200">VulnSweep Commercial License</strong> — unlocks fix
-            application, git commit/push, and all future features. Permanently bound to this device.
+            <strong className="text-gray-200">VulnSweep Annual License</strong> — unlocks fix
+            application, git commit/push, and all future features. Bound to this device for 365
+            days.
           </p>
 
           {/* Error message */}
@@ -113,7 +185,7 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo }) => {
             ) : (
               <>
                 <span>💳</span>
-                <span>Pay {price}€ with PayPal</span>
+                <span>Pay €{displayPrice}/year with PayPal</span>
               </>
             )}
           </button>
