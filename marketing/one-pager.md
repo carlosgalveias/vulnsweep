@@ -6,7 +6,7 @@
 
 **Category:** DevSecOps Desktop Application — npm Security, License Compliance, SBOM Generation
 **Platform:** Windows (Electron) — macOS and Linux coming soon
-**Pricing:** Core features free. Fix-and-commit: 10 sessions free.
+**Pricing:** Core features free. Fix-and-commit: 10 sessions free. Annual license: EUR 9.99/year (early adopter, first 30 days) / EUR 29.99/year (standard).
 **Download:** https://github.com/carlosgalveias/vulnsweep-releases
 
 ---
@@ -53,18 +53,21 @@ FIX     ->  One-click patch, structured commit, auto-push to remote
 
 ## Feature Snapshot
 
-| Capability                       | Status | Free             |
-| -------------------------------- | ------ | ---------------- |
-| Bulk parallel scanning           | Live   | Yes              |
-| Cross-source CVE correlation     | Live   | Yes              |
-| Exploit availability flag        | Live   | Yes              |
-| SBOM export (CycloneDX/SPDX/CSV) | Live   | Yes              |
-| License compliance scanning      | Live   | Yes              |
-| Dependency updates dashboard     | Live   | Yes              |
-| PDF Security Report Export       | Live   | Yes              |
-| Automated fix + Git commit/push  | Live   | 10 free sessions |
-| Repository security grading      | Live   | Yes              |
-| Statistics and charts dashboard  | Live   | Yes              |
+| Capability                       | Status | Free / Licensed                                  |
+| -------------------------------- | ------ | ------------------------------------------------ |
+| Bulk parallel scanning           | Live   | Free                                             |
+| Cross-source CVE correlation     | Live   | Free                                             |
+| Exploit availability flag        | Live   | Free                                             |
+| SBOM export (CycloneDX/SPDX/CSV) | Live   | Free                                             |
+| License compliance scanning      | Live   | Free                                             |
+| Dependency updates dashboard     | Live   | Free                                             |
+| PDF Security Report Export       | Live   | Free                                             |
+| Automated fix + Git commit/push  | Live   | 10 free sessions / Unlimited with annual license |
+| Repository security grading      | Live   | Free                                             |
+| Statistics and charts dashboard  | Live   | Free                                             |
+| About tab + license management   | Live   | Free                                             |
+| License Backup / Restore         | Live   | Free (when licensed)                             |
+| Anonymous analytics opt-out      | Live   | Free                                             |
 
 ---
 
@@ -104,8 +107,13 @@ VulnSweep's most powerful features require zero payment:
 - SBOM export in three formats
 - License compliance scanning and risk dashboard
 - Dependency updates tracking
+- About tab: license status, renewal date, Privacy Policy / Disclaimer links
+- License Backup and Restore — migrate your license to a new machine without rebuying
+- Analytics opt-out — GDPR-compliant anonymous usage data, disable anytime in the About tab
 
-**Fix-and-commit automation:** 10 complete fix+commit+push sessions free — each session can patch every repository in your fleet simultaneously.
+**Fix-and-commit automation:** 10 complete fix+commit+push sessions free. Upgrade to an **annual license** for unlimited sessions — EUR 9.99/year (early adopter, first 30 days after install) or EUR 29.99/year standard. Each session covers every repository in your fleet simultaneously.
+
+> **Early-adopter window:** The EUR 9.99/year price is available for the first 30 days after your initial install. The countdown is visible in the About tab. After 30 days the standard rate applies automatically — this cannot be extended.
 
 ---
 

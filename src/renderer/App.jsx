@@ -10,6 +10,7 @@ import VulnerabilityGrid from './components/VulnerabilityGrid';
 import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
 import LicensesTab from './components/LicensesTab';
+import AboutTab from './components/AboutTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
@@ -27,6 +28,8 @@ function App() {
   const [installInfo, setInstallInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
   const [trialStatus, setTrialStatus] = useState(null);
+  const [analyticsOptOut, setAnalyticsOptOut] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
 
   // F8/F9 — License scan state
   const [licenseResult, setLicenseResult] = useState(null);
@@ -99,7 +102,7 @@ function App() {
         setLicStatus(status);
         const info = await window.electronAPI.getInstallInfo();
         setInstallInfo(info);
-        if (status.isCommercial && !status.isLicensed) {
+        if (status.isCommercial && (!status.isLicensed || status.isExpired)) {
           setShowBuyModal(true);
         }
       } catch (err) {
@@ -110,6 +113,38 @@ function App() {
     fetchStatus();
     refreshTrialStatus();
   }, [addLog, refreshTrialStatus]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const vInfo = await window.electronAPI.getAppVersion();
+        setAppVersion(vInfo.version || '');
+        const optInfo = await window.electronAPI.getAnalyticsOptOut();
+        setAnalyticsOptOut(optInfo.optOut || false);
+      } catch (err) {
+        console.error('Failed to load settings:', err);
+      }
+    };
+    load();
+  }, []);
+
+  const handleAnalyticsOptOutChange = useCallback(async (newValue) => {
+    try {
+      await window.electronAPI.setAnalyticsOptOut(newValue);
+      setAnalyticsOptOut(newValue);
+    } catch (err) {
+      console.error('Failed to save analytics preference:', err);
+    }
+  }, []);
+
+  const handleLicenseRestored = useCallback(async () => {
+    try {
+      const status = await window.electronAPI.getCommercialStatus();
+      setLicStatus(status);
+    } catch (err) {
+      console.error('Failed to refresh license after restore:', err);
+    }
+  }, []);
 
   const projectsRef = useRef([]);
   const vulnerabilitiesRef = useRef([]);
@@ -518,6 +553,13 @@ function App() {
               {tab.label}
             </button>
           ))}
+          <div className="flex-1" />
+          <button
+            onClick={() => setActiveTab('about')}
+            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 border-b-2 ${activeTab === 'about' ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
+          >
+            About
+          </button>
         </div>
 
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -590,6 +632,19 @@ function App() {
               </ErrorBoundary>
             </div>
           )}
+          {activeTab === 'about' && (
+            <div className="flex-1 overflow-auto p-6">
+              <ErrorBoundary fallbackMessage="Failed to load About tab">
+                <AboutTab
+                  licStatus={licStatus}
+                  analyticsOptOut={analyticsOptOut}
+                  onAnalyticsOptOutChange={handleAnalyticsOptOutChange}
+                  onLicenseRestored={handleLicenseRestored}
+                  appVersion={appVersion}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
           {isUnlicensed && (
             <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
               {trialExhausted ? (
@@ -644,6 +699,7 @@ function App() {
           isOpen={showBuyModal}
           onClose={() => setShowBuyModal(false)}
           installInfo={installInfo}
+          isExpired={licStatus?.isExpired === true}
           onPaymentSuccess={async ({ licenseKey }) => {
             try {
               const status = await window.electronAPI.getCommercialStatus();

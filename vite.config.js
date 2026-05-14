@@ -52,8 +52,8 @@ export default defineConfig({
     // Output directory relative to project root
     outDir: path.join(__dirname, 'dist-renderer'),
     emptyOutDir: true,
-    // Disable sourcemaps in production for obfuscation
-    sourcemap: true,
+    // Disable sourcemaps in production to prevent source code exposure
+    sourcemap: false,
     // Enable minification with terser for better obfuscation
     minify: 'terser',
     terserOptions: {

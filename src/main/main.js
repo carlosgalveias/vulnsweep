@@ -1,6 +1,6 @@
 /* eslint-disable import/order */
 const path = require('path');
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
@@ -9,13 +9,20 @@ const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
+const analytics = require('./modules/analytics');
+// Initialize Aptabase analytics synchronously here — BEFORE app.whenReady().
+// The SDK's initialize() checks app.isReady() and silently disables tracking if
+// called after the app is already ready. Calling it here satisfies that contract.
+// Events queued via trackEvent() before the SDK's internal async setup finishes
+// are buffered by the SDK and flushed automatically once setup completes.
+analytics.init();
 const isDevelopment = process.env.NODE_ENV === 'development';
 if (!isDevelopment) {
   Menu.setApplicationMenu(null);
 }
 // Imported at top level — pre-warm call happens inside app.whenReady() after
 // app.getPath('userData') is available, ensuring the correct store path is used.
-const { storeGet } = require('./utils/secure-store');
+const { storeGet, storeSet } = require('./utils/secure-store');
 const trialStore = require('./utils/trial-store');
 
 // Keep a global reference of the window objects to avoid garbage collection
@@ -186,28 +193,10 @@ function createWindow() {
     },
   });
 
-  // Allow PayPal's payment popup (window.open) to share the same session.
-  // Without this, the popup gets an isolated session and the buyer's access
-  // token is lost when it closes, causing the "token not present" capture error.
+  // All window.open calls from the renderer are denied or redirected to the system browser.
+  // Payment is handled via a dedicated managed BrowserWindow (open-payment-window IPC handler)
+  // with its own isolated session — no popup sharing is needed.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const isPayPal =
-      url.includes('paypal.com') ||
-      url.includes('paypalobjects.com') ||
-      url.startsWith('about:blank');
-    if (isPayPal) {
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: {
-          webPreferences: {
-            partition: SESSION_PARTITION,
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-          },
-        },
-      };
-    }
-    // All other external links open in system browser
     require('electron').shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -479,6 +468,10 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
 
     sendLogMessage('success', `Batch analysis complete: ${results.length} projects analyzed`);
 
+    analytics.trackEvent('repository_scanned', {
+      repoCount: results.length,
+      totalVulnerabilities: results.reduce((s, r) => s + (r.content?.summary?.total || 0), 0),
+    });
     return { success: true, content: results };
   } catch (error) {
     console.error(`[IPC] analyze-projects error: ${error.message}`);
@@ -557,6 +550,10 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
       `Fixes applied: ${result.content?.applied?.length || 0} changes, ${result.content?.resolved?.length || 0} resolved`
     );
 
+    const _sevs = (strategies || []).map((s) => (s.severity || 'unknown').toLowerCase());
+    const _sevOrder = ['critical', 'high', 'moderate', 'low', 'unknown'];
+    const _topSev = _sevOrder.find((s) => _sevs.includes(s)) || 'unknown';
+    analytics.trackEvent('vulnerability_fixed', { severity: _topSev, fixCount: strategies.length });
     return { success: true, content: result.content };
   } catch (error) {
     console.error(`[IPC] apply-fixes error: ${error.message}`);
@@ -749,6 +746,7 @@ ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
 
     const commitMessage = result.content.commitMessage || 'updates applied';
     sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
+    analytics.trackEvent('dependency_updated', { updateCount: updates.length });
     return { success: true, commitMessage };
   } catch (error) {
     console.error(`[IPC] apply-dep-updates error: ${error.message}`);
@@ -871,6 +869,7 @@ ipcMain.handle('sbom:export', async (event, { licenseResult, format, outputPath 
     await require('fs').promises.writeFile(outputPath, content, 'utf8');
 
     sendLogMessage('success', `SBOM exported: ${path.basename(outputPath)}`);
+    analytics.trackEvent('sbom_generated', { format });
     return { success: true };
   } catch (err) {
     console.error(`[IPC] sbom:export error: ${err.message}`);
@@ -919,6 +918,27 @@ ipcMain.handle('get-trial-status', async () => {
 });
 
 // ============================================
+// IPC HANDLERS - ANALYTICS (D)
+// ============================================
+
+ipcMain.handle('set-analytics-opt-out', (_event, value) => {
+  try {
+    storeSet('ao', value ? '1' : null);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-analytics-opt-out', () => {
+  try {
+    return { optOut: storeGet('ao') === '1' };
+  } catch {
+    return { optOut: false };
+  }
+});
+
+// ============================================
 // IPC HANDLERS - LICENSE
 // ============================================
 
@@ -955,6 +975,21 @@ ipcMain.handle('get-install-info', () => {
 });
 
 /**
+ * Handler: Return active purchase price (promo vs full) and promo end date.
+ * Used by BuyModal to display dynamic pricing without hardcoded constants.
+ * @returns {{ price: number, isPromo: boolean, promoEndsAt: string|null }}
+ */
+ipcMain.handle('get-active-price', async () => {
+  try {
+    return license.getActivePrice();
+  } catch (err) {
+    console.error('[IPC] get-active-price error:', err.message);
+    const { LICENSE_CONFIG } = require('./config/constants');
+    return { price: LICENSE_CONFIG.PROMO_PRICE_EUR, isPromo: true, promoEndsAt: null };
+  }
+});
+
+/**
  * Handler: Open a payment BrowserWindow pointing at the PayPal payment link.
  * Monitors navigation events; when the success URL is detected the window is
  * closed, generateLicense() is called, and the result is returned to the renderer.
@@ -975,6 +1010,9 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // Isolated session — completely separate from the main app session.
+        // The permissive PayPal-scoped CSP is applied to this partition only.
+        partition: 'payment-isolated',
       },
     });
 
@@ -1017,6 +1055,9 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
       }
 
       const result = await license.generateLicense();
+      if (result.ok) {
+        analytics.trackEvent('paypal_purchase_success');
+      }
       resolve(result);
     }
 
@@ -1035,6 +1076,84 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
 });
 
 // ============================================
+// IPC HANDLERS - APP INFO (B)
+// ============================================
+
+/**
+ * Handler: Return app version and name.
+ * Used by the About tab to display the current application version.
+ * @returns {{ version: string, name: string }}
+ */
+ipcMain.handle('get-app-version', () => ({
+  version: app.getVersion(),
+  name: app.getName(),
+}));
+
+/**
+ * Handler: Open a local documentation file in the system default application.
+ * Only PRIVACY_POLICY.md and DISCLAIMER.md are permitted — all other filenames
+ * are rejected with an error to prevent path traversal.
+ * @param {string} filename - One of the allowed document filenames
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+const ALLOWED_DOCS = ['PRIVACY_POLICY.md', 'DISCLAIMER.md'];
+ipcMain.handle('open-local-doc', async (_event, filename) => {
+  if (!ALLOWED_DOCS.includes(filename)) {
+    return { success: false, error: 'Document not allowed' };
+  }
+  try {
+    const docPath = path.join(app.getAppPath(), filename);
+    await shell.openPath(docPath);
+    return { success: true };
+  } catch (err) {
+    console.error(`[IPC] open-local-doc error: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Create a license backup file (.vsbak) via save dialog.
+ * Only available when a valid license is active — returns error if not licensed.
+ * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+ */
+ipcMain.handle('license-backup', async () => {
+  try {
+    const licCheck = await license.checkLicense();
+    if (!licCheck.isLicensed) return { success: false, error: 'No valid license to backup' };
+    const saveResult = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save License Backup',
+      defaultPath: 'vulnsweep-license.vsbak',
+      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true };
+    return await license.createLicenseBackup(saveResult.filePath);
+  } catch (err) {
+    console.error('[IPC] license-backup error:', err.message);
+    return { success: false, error: 'Backup failed. Please try again.' };
+  }
+});
+
+/**
+ * Handler: Restore a license from a .vsbak backup file via open dialog.
+ * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+ */
+ipcMain.handle('license-restore', async () => {
+  try {
+    const openResult = await dialog.showOpenDialog(mainWindow, {
+      title: 'Restore License Backup',
+      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
+      properties: ['openFile'],
+    });
+    if (openResult.canceled || openResult.filePaths.length === 0)
+      return { success: false, cancelled: true };
+    return await license.restoreLicenseBackup(openResult.filePaths[0]);
+  } catch (err) {
+    console.error('[IPC] license-restore error:', err.message);
+    return { success: false, error: 'Restore failed. Please try again.' };
+  }
+});
+
+// ============================================
 // APP LIFECYCLE
 // ============================================
 
@@ -1046,33 +1165,59 @@ app.whenReady().then(() => {
   // than the ~/.vsweep-store fallback that would be used if called before app.ready.
   storeGet('_init'); // triggers lazy initialization while app is ready
 
+  // analytics.init() is called at module top-level (before app.whenReady()) — see top of file.
+  analytics.trackEvent('app_initialized');
+
   const { session } = require('electron');
 
-  // Apply permissive CSP to the named session used by the main window and PayPal popups.
-  // Using a named partition ensures the CSP applies to all windows sharing that session.
+  // CSP for the main application window and splash screen.
+  // In production: strict policy — no external resources, no inline scripts, no network.
+  // In development: relaxed policy to allow Vite HMR inline preamble and WebSocket.
   const mainSession = session.fromPartition('persist:vulnsweep');
-
-  // Strip "Electron/x.x.x" and the app name from the user agent.
-  // PayPal's SDK detects "Electron" in the UA and sets disableSetCookie=true,
-  // which breaks the buyer access token flow — the token is passed via cookies
-  // from the login popup back to the parent window. Without cookies, capture fails.
-  // Presenting as a standard Chrome browser makes PayPal use its normal cookie auth.
-  const chromeUA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.188 Safari/537.36';
-  mainSession.setUserAgent(chromeUA);
-
   mainSession.webRequest.onHeadersReceived((details, callback) => {
-    const csp = [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://* http://* blob:",
-      "style-src 'self' 'unsafe-inline' https://* http://*",
-      "img-src 'self' data: https: blob:",
-      "connect-src 'self' https://* http://*",
-      "frame-src 'self' https://* http://*",
-      "font-src 'self' data: https://* http://*",
-      'worker-src blob:',
-    ].join('; ');
+    const csp = isDevelopment
+      ? [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob: data:",
+          "font-src 'self'",
+          "connect-src 'self' ws://localhost:* http://localhost:*",
+          "frame-src 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+        ].join('; ')
+      : [
+          "default-src 'none'",
+          "script-src 'self'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob:",
+          "font-src 'self'",
+          "connect-src 'none'",
+          "frame-src 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+        ].join('; ');
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
 
+  // Permissive CSP scoped to PayPal origins for the isolated payment window only.
+  const paymentSession = session.fromPartition('payment-isolated');
+  paymentSession.webRequest.onHeadersReceived((details, callback) => {
+    const csp = [
+      "default-src 'self' https://www.paypal.com https://www.paypalobjects.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.paypal.com https://www.paypalobjects.com",
+      "style-src 'self' 'unsafe-inline' https://www.paypal.com https://www.paypalobjects.com",
+      "img-src 'self' data: https:",
+      "connect-src 'self' https://www.paypal.com https://www.paypalobjects.com https://api.paypal.com",
+      'frame-src https://www.paypal.com',
+      "font-src 'self' data: https://www.paypalobjects.com",
+    ].join('; ');
     callback({
       responseHeaders: {
         ...details.responseHeaders,

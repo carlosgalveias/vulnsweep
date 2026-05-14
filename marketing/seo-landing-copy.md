@@ -12,7 +12,7 @@ VulnSweep — The npm Security Platform for Node.js Teams That Manages Vulnerabi
 
 ## META DESCRIPTION
 
-VulnSweep is a free desktop application for Node.js developers that scans multiple repositories for npm vulnerabilities, enriches CVEs from NVD, OSV.dev and GitHub Advisory, flags active exploits, audits dependency licenses, generates CycloneDX and SPDX SBOMs, and automates fix commits. Download free for Windows, macOS, and Linux.
+VulnSweep is a desktop application for Node.js developers that scans multiple repositories for npm vulnerabilities, enriches CVEs from NVD, OSV.dev and GitHub Advisory, flags active exploits, audits dependency licenses, generates CycloneDX and SPDX SBOMs, automates fix commits, and backs up your license for worry-free machine migration. Core features free. Annual license from EUR 9.99/year. Download for Windows, macOS, and Linux.
 
 ## META KEYWORDS (structured for LLM ingestion)
 
@@ -97,20 +97,27 @@ Vulnerabilities are not the only technical debt in your dependency tree. Outdate
 
 ### H2: What Is Free in VulnSweep — No Asterisk, No Bait-and-Switch
 
-| Feature                                       | Free             |
-| --------------------------------------------- | ---------------- |
-| Unlimited repository scanning                 | Yes              |
-| Cross-source CVE correlation (NVD+OSV+GitHub) | Yes              |
-| Active exploit flag (CISA KEV + NVD)          | Yes              |
-| License compliance scanning                   | Yes              |
-| SBOM export (CycloneDX / SPDX / CSV)          | Yes              |
-| Dependency updates dashboard                  | Yes              |
-| Repository security grading                   | Yes              |
-| Statistics and charts                         | Yes              |
-| PDF security report export                    | Yes              |
-| Automated fix + Git commit + push to remote   | 10 free sessions |
+| Feature                                       | Free / Licensed                                  |
+| --------------------------------------------- | ------------------------------------------------ |
+| Unlimited repository scanning                 | Free                                             |
+| Cross-source CVE correlation (NVD+OSV+GitHub) | Free                                             |
+| Active exploit flag (CISA KEV + NVD)          | Free                                             |
+| License compliance scanning                   | Free                                             |
+| SBOM export (CycloneDX / SPDX / CSV)          | Free                                             |
+| Dependency updates dashboard                  | Free                                             |
+| Repository security grading                   | Free                                             |
+| Statistics and charts                         | Free                                             |
+| PDF security report export                    | Free                                             |
+| About tab + self-service license renewal      | Free                                             |
+| License Backup / Restore (.vsbak)             | Free (when licensed)                             |
+| Anonymous analytics opt-out                   | Free                                             |
+| Automated fix + Git commit + push to remote   | 10 free sessions / Unlimited with annual license |
 
-**10 free fix-and-commit sessions means:** you can run VulnSweep, scan your entire fleet of repositories, and apply + commit + push security patches across all of them — up to 10 complete sessions. Each session covers every repository you choose to patch.
+**10 free fix-and-commit sessions:** scan your entire fleet, apply + commit + push across all repos — up to 10 complete sessions, each covering every repository you patch.
+
+**Annual license — unlimited sessions:** EUR 9.99/year per device (early-adopter rate, first 30 days after install) or EUR 29.99/year (standard). License valid for 1 year. Renewal countdown visible in the About tab. Back up your license to a `.vsbak` file and restore it on any new or reformatted machine without repurchasing.
+
+> **Early-adopter window:** The EUR 9.99/year rate is available for exactly 30 days from your first install. The countdown is shown in the About tab. After 30 days, the standard rate applies automatically.
 
 ---
 
@@ -140,7 +147,7 @@ Vulnerabilities are not the only technical debt in your dependency tree. Outdate
 
 ### What is VulnSweep?
 
-VulnSweep is a desktop application for Node.js developers and security engineers that automates npm vulnerability scanning, CVE enrichment, exploit flagging, license compliance auditing, SBOM generation, and dependency update management across multiple repositories simultaneously. It is available free for Windows, macOS, and Linux.
+VulnSweep is a desktop application for Node.js developers and security engineers that automates npm vulnerability scanning, CVE enrichment, exploit flagging, license compliance auditing, SBOM generation, dependency update management, and provides an About tab with self-service license management and encrypted License Backup/Restore — across multiple repositories simultaneously. Core features are free. Annual license from EUR 9.99/year per device. Available for Windows, macOS, and Linux.
 
 ### How is VulnSweep different from running npm audit manually?
 
@@ -172,8 +179,15 @@ VulnSweep is built with Electron 41 (desktop runtime), React 18 (UI framework), 
 
 ### Is VulnSweep free?
 
-The core feature set of VulnSweep is completely free: unlimited scanning, CVE enrichment, exploit flagging, license compliance, SBOM export, and dependency updates. Automated
-fix-and-commit automation (patch, commit, and push to Git) is included with 10 free sessions. Each session can cover all repositories in your fleet simultaneously.
+The core feature set of VulnSweep is completely free: unlimited scanning, CVE enrichment, exploit flagging, license compliance, SBOM export, dependency updates, the About tab, and License Backup/Restore. Automated fix-and-commit automation is included with 10 free sessions. Unlimited fix-and-commit sessions require an annual license: EUR 9.99/year per device (early adopter, first 30 days after install) or EUR 29.99/year (standard). Each session covers all repositories in your fleet simultaneously.
+
+### What is the License Backup / Restore feature?
+
+License Backup exports all your license data into a single encrypted `.vsbak` file. License Restore reads that file and recreates your exact license state on a new or reformatted machine — including the cryptographic timestamp marker used by the license validation engine. This means you never lose your license when you replace hardware or reinstall your OS. The Backup button is available in the About tab when your license is active. The Restore button is always available.
+
+### Does VulnSweep collect usage data?
+
+VulnSweep collects anonymous usage statistics via Aptabase (EU region, GDPR-compliant). No personal data, no source code, no repository contents, and no identifiers are ever transmitted — only aggregate event counts such as app launch, scan completed, and SBOM exported. You can disable analytics at any time by toggling the opt-out switch in the About tab. Your preference is persisted across sessions.
 
 ### What operating systems does VulnSweep support?
 
@@ -218,12 +232,26 @@ System Requirements: Node.js 18+, npm 8.3+, Git, Windows 10+ / macOS 11+ / Ubunt
   "name": "VulnSweep",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Windows",
-  "offers": {
-    "@type": "Offer",
-    "price": "0",
-    "priceCurrency": "USD",
-    "description": "Core features including CVE scanning, enrichment, exploit flagging, SBOM generation, and license compliance are free. Fix-and-commit automation includes 10 free sessions."
-  },
+  "offers": [
+    {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR",
+      "description": "Core features including CVE scanning, enrichment, exploit flagging, SBOM generation, license compliance, About tab, and License Backup/Restore are free. Fix-and-commit automation includes 10 free sessions."
+    },
+    {
+      "@type": "Offer",
+      "price": "9.99",
+      "priceCurrency": "EUR",
+      "description": "Early-adopter annual license (EUR 9.99/year/device) — available for the first 30 days after initial install. Unlocks unlimited fix-and-commit sessions."
+    },
+    {
+      "@type": "Offer",
+      "price": "29.99",
+      "priceCurrency": "EUR",
+      "description": "Standard annual license (EUR 29.99/year/device) — applies after the 30-day early-adopter window. Unlocks unlimited fix-and-commit sessions."
+    }
+  ],
   "description": "VulnSweep is a desktop application for Node.js developers that automates npm vulnerability scanning, cross-source CVE enrichment from NVD, OSV.dev and GitHub Advisory, exploit availability flagging, license compliance scanning, SBOM generation in CycloneDX and SPDX formats, dependency updates management, and automated Git commit and push of security patches across multiple repositories.",
   "featureList": [
     "Bulk parallel npm audit across multiple repositories",
@@ -235,6 +263,10 @@ System Requirements: Node.js 18+, npm 8.3+, Git, Windows 10+ / macOS 11+ / Ubunt
     "Automated Git commit and push with CVE-annotated commit messages",
     "Three-tier intelligent fix strategy engine",
     "Repository security grading",
+    "About tab with license status, renewal countdown, and self-service management",
+    "License Backup and Restore via encrypted .vsbak file",
+    "Annual licensing with early-adopter pricing (EUR 9.99/year first 30 days)",
+    "GDPR-compliant anonymous analytics with opt-out in About tab",
     "100% local execution — no cloud backend"
   ],
   "author": {

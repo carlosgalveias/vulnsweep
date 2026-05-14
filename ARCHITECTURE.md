@@ -17,6 +17,7 @@ This document provides a detailed technical overview of VulnSweep's architecture
 11. [Cross-Platform Storage](#cross-platform-storage)
 12. [License and Date Control Files](#license-and-date-control-files)
 13. [Build System and Packaging](#build-system-and-packaging)
+14. [Sprint 2 — Analytics, Yearly Licensing, About Tab, License Backup/Restore](#sprint-2--analytics-yearly-licensing-about-tab-license-backuprestore)
 
 ## High-Level Architecture
 
@@ -94,6 +95,7 @@ Located in `src/renderer/`, this layer handles all user interactions and visual 
     |   +-- BuyModal.jsx           # Commercial purchase flow
     |   +-- StatisticsTab.jsx      # Scan statistics display
     |   +-- InfoTooltip.jsx        # Reusable tooltip component (v1.4.0+)
+    |   +-- AboutTab.jsx           # About tab: license status, renewal, analytics opt-out (v1.1.0+)
     |   +-- ErrorBoundary.jsx      # React error boundary
     +-- hooks/
         +-- useProjectDiscovery.js     # Project discovery state management
@@ -117,11 +119,12 @@ Located in `src/main/`, this layer handles all system operations and business lo
     src/main/
     +-- main.js                 # Electron entry, window management, IPC handlers
     +-- config/
-    |   +-- constants.js        # UI and PayPal configuration constants
+    |   +-- constants.js        # UI, PayPal, and LICENSE_CONFIG pricing constants
     +-- modules/
     |   +-- discovery.js        # Project discovery logic
     |   +-- git.js              # Git operations wrapper
-    |   +-- license.js          # License validation and activation
+    |   +-- license.js          # License validation, activation, expiry, backup/restore
+    |   +-- analytics.js        # Aptabase analytics module with opt-out (v1.1.0+)
     |   +-- audit/              # npm audit analysis and fix strategies
     |       +-- index.js
     |       +-- parsers/        # Vulnerability output parsers
@@ -199,7 +202,7 @@ React hooks only (no Redux/MobX). Core state: selectedFolder, projects, vulnerab
 
 ## IPC Communication
 
-Active channels: select-folder, discover-projects, analyze-project, analyze-projects, apply-fixes, prepare-repository, commit-and-push, get-commercial-status, activate-license, get-install-info, open-payment-window.
+Active channels: select-folder, discover-projects, analyze-project, analyze-projects, apply-fixes, prepare-repository, commit-and-push, get-commercial-status, activate-license, get-install-info, open-payment-window, get-app-version, open-local-doc, backup-license, restore-license.
 
 All handlers return { success: true, content } or { success: false, error }. License handlers replace internal error messages with safe user-facing strings.
 
@@ -285,16 +288,15 @@ The .vsweep marker file is a zero-byte file whose filesystem creation timestamp 
 
 ### OS-Specific Paths
 
-Each platform places the file in a different, non-obvious subdirectory:
+The marker file is stored in the standard Electron `userData` directory on all platforms. This is the same location used by `secure-store.js` and is the correct per-user app data location. It is non-deceptive, AV-safe, and consistent with Electron conventions.
 
-| Platform | Path                                                        |
-| -------- | ----------------------------------------------------------- |
-| Windows  | %USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\.vsweep |
-| macOS    | ~/Library/Caches/com.apple.helpd/.vsweep                    |
-| Linux    | ~/.local/share/recently-used.xbel.d/.vsweep                 |
-| Other    | ~/.config/.vsweep                                           |
+| Platform | Path                 |
+| -------- | -------------------- |
+| All      | `{userData}/.vsweep` |
 
-The Windows path was chosen to sit inside the OneDrive log tree, which AV heuristics routinely ignore. The macOS path mimics Apple's help-daemon cache. The Linux path camouflages as a GTK recently-used auxiliary directory.
+Where `{userData}` resolves to the platform-standard Electron user data directory (e.g. `%APPDATA%\vulnsweep` on Windows, `~/Library/Application Support/vulnsweep` on macOS, `~/.config/vulnsweep` on Linux).
+
+If the marker file is deleted, the license can be restored from a `.vsbak` backup file.
 
 ### Implementation Notes
 
@@ -349,3 +351,147 @@ Platform-specific icon files must be generated from assets/logo.png before build
 | assets/logo.png  | Linux    | Used directly as the Linux icon           |
 
 See BUILDING.md for step-by-step icon generation instructions.
+
+---
+
+## Sprint 2 -- Analytics, Yearly Licensing, About Tab, License Backup/Restore
+
+> Added in Sprint 2 (v1.1.0, 2026-05-14).
+
+### Analytics Module
+
+**File:** `src/main/modules/analytics.js` (new)
+
+**Purpose:** Anonymous usage analytics via Aptabase (EU free tier, GDPR-compliant). Provides behavioural telemetry to guide product development without transmitting any personal data, source code, or repository contents.
+
+**Provider:** Aptabase EU region endpoint. App key: `A-EU-9601263447`.
+
+**Event Catalogue:**
+
+| Event Name            | Trigger                                               |
+| --------------------- | ----------------------------------------------------- |
+| `app_initialized`     | Fired once after `app.whenReady()` and store pre-warm |
+| `repo_scanned`        | Fired after each successful npm audit run             |
+| `sbom_generated`      | Fired after SBOM export completes                     |
+| `dependency_updated`  | Fired after each dependency update is applied         |
+| `vulnerability_fixed` | Fired after fix-and-commit cycle completes            |
+| `purchase_completed`  | Fired after successful license activation             |
+
+**Opt-Out Mechanism:**
+
+- Opt-out preference stored under key `analytics_opt_out` in `src/main/utils/secure-store.js`
+- Read once at module initialisation; cached in-process for the session lifetime
+- If opt-out is `true`, all `trackEvent()` calls return immediately without making any network request
+- Preference toggled from the About tab via `set-analytics-opt-out` IPC handler
+
+**Initialisation Sequence:**
+
+1. `app.whenReady()` resolves
+2. Store pre-warm call executes (`storeGet('_init')`)
+3. `analytics.init()` called -- reads opt-out preference, initialises Aptabase client if not opted out
+4. `app_initialized` event fired (if not opted out)
+5. All subsequent event calls use the cached client
+
+---
+
+### Yearly Licensing
+
+**Files:** `src/main/modules/license.js` (modified), `src/main/config/constants.js` (modified)
+
+**Purpose:** Introduces a time-bounded annual license model with an early-adopter pricing tier and expiry enforcement, while maintaining backward compatibility with legacy perpetual licenses.
+
+#### LICENSE_CONFIG Constants
+
+Defined in `src/main/config/constants.js`:
+
+| Constant                    | Value | Description                                           |
+| --------------------------- | ----- | ----------------------------------------------------- |
+| `EARLY_ADOPTER_PRICE`       | 9.99  | EUR price during early-adopter window                 |
+| `STANDARD_PRICE`            | 29.99 | EUR price after early-adopter window closes           |
+| `EARLY_ADOPTER_WINDOW_DAYS` | 30    | Days from first install during which EA price applies |
+
+#### getActivePrice()
+
+Returns `{ price, isEarlyAdopter }` based on the install timestamp stored in the secure store. Called by the `get-install-info` IPC handler to render the correct price in the purchase modal.
+
+#### checkLicense() -- Expiry Logic Extension
+
+The existing `checkLicense()` function was extended to handle annual expiry:
+
+1. Decrypts the license payload from the secure store (existing path)
+2. NEW: Checks for presence of `expiresAt` (epoch ms) in the payload
+3. If `expiresAt` is present and `Date.now() > expiresAt`: returns `{ isLicensed: false, isExpired: true, daysRemaining: 0 }`
+4. If `expiresAt` is present and license is valid: computes `daysRemaining = Math.ceil((expiresAt - Date.now()) / 86400000)` and includes it in the return object
+5. Backward compatibility: if `expiresAt` is absent (legacy perpetual license), treated as non-expiring; `daysRemaining` is set to `null`
+
+The `get-commercial-status` IPC handler surfaces `{ isLicensed, isExpired, daysRemaining, serialNumber }` to the renderer.
+
+---
+
+### About Tab
+
+**Files:** `src/renderer/components/AboutTab.jsx` (new), `src/main/main.js` (modified), `src/preload/preload.js` (modified)
+
+**Purpose:** A persistent, right-aligned navigation tab giving users self-service visibility into their license state and app metadata.
+
+**Component Structure (AboutTab.jsx):**
+
+- Mounted in `src/renderer/App.jsx` as a right-aligned tab in the navigation bar
+- On mount: calls `get-commercial-status` (license data) and `get-app-version` (version string) via IPC
+- Renders: app name + version, license status badge (Licensed / Expired / Trial), masked serial number, renewal date with `daysRemaining` countdown
+- Links: Privacy Policy and Disclaimer opened via `open-local-doc` IPC handler; GitHub Issues link
+- Analytics opt-out toggle: reads initial state from `get-analytics-opt-out` IPC; writes via `set-analytics-opt-out` IPC
+- License Backup button: conditionally rendered when `isLicensed === true`
+- License Restore button: always rendered
+
+**New IPC Handlers:**
+
+| Channel           | Direction        | Description                                                          |
+| ----------------- | ---------------- | -------------------------------------------------------------------- |
+| `get-app-version` | renderer -> main | Returns `app.getVersion()` string from Electron                      |
+| `open-local-doc`  | renderer -> main | Resolves path relative to `__dirname`; opens with `shell.openPath()` |
+
+---
+
+### License Backup / Restore
+
+**Files:** `src/main/modules/license.js` (modified), `src/main/main.js` (modified)
+
+**Purpose:** Enables seamless license migration to a reformatted or new machine by exporting all license state -- including the cryptographic `.vsweep` marker file's filesystem birthtime -- into a single portable encrypted file.
+
+#### .vsbak File Format
+
+| Field        | Size     | Description                                               |
+| ------------ | -------- | --------------------------------------------------------- |
+| Magic header | 4 bytes  | ASCII `VSWB` -- identifies the file as a VulnSweep backup |
+| Payload      | Variable | XOR-obfuscated gzip-compressed JSON                       |
+
+**JSON Payload Schema:**
+
+```
+{
+  "i": "<install timestamp string>",
+  "p": "<JSON-serialised sludge-crypt public key>",
+  "k": "<JSON-serialised sludge-crypt private key>",
+  "v": "<AES-encrypted license payload string>",
+  "birthtimeMs": 1234567890123
+}
+```
+
+#### Backup Flow (backupLicense())
+
+1. Reads keys `i`, `p`, `k`, `v` from `secure-store`
+2. Reads `birthtimeMs` from the `.vsweep` marker file via `fs.statSync().birthtimeMs`
+3. Serialises the five fields to JSON
+4. Compresses with Node.js `zlib.gzipSync()`
+5. XOR-obfuscates each byte with a fixed key pattern
+6. Prepends 4-byte `VSWB` magic header
+7. Opens `dialog.showSaveDialog` with default filename `vulnsweep_license_backup.vsbak`
+8. Writes the binary buffer to the chosen path
+
+**C-1 Safeguard:** The `backup-license` IPC handler checks `isLicensed` before executing. If not licensed, returns `{ success: false, error: 'Not licensed' }` without touching the filesystem.
+
+#### Restore Flow (restoreVsweepFileWithBirthtime())
+
+1. Opens `dialog.showOpenDialog` to select a `.vsbak` file
+2. Reads the binary file

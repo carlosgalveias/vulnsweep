@@ -86,6 +86,8 @@ VulnSweep's most powerful features are **completely free**. No license key. No t
 | **Dependency Updates**              | Scan all direct deps for newer versions; apply targeted updates with structured Git commits                                                                                |
 | **PDF Security Report Export**      | One-click A4 landscape PDF from Statistics tab: severity breakdown, repo A-F grades, CVE table with patched versions, cross-source enrichment summary, and discrepancy log | Yes |
 | **10 Free Fix-and-Commit Attempts** | Patch and commit across any number of repositories — 10 full fix+commit runs, completely free                                                                              |
+| **About Tab**                       | View app version, license status, serial number, renewal date, and Privacy Policy / Disclaimer links — always visible, no license required                                 |
+| **License Backup / Restore**        | Export your license to an encrypted `.vsbak` file; restore it on a reformatted or new machine with exact timestamp preservation                                            |
 
 > **VulnSweep is the only npm security tool that combines vulnerability scanning, CVE enrichment from three sources, active exploit flagging, license compliance, SBOM export, and dependency updates into a single free desktop application.**
 
@@ -192,6 +194,17 @@ _Parallel scanning across all discovered Node.js projects with real-time progres
 | **Auto Push**             | Pushes fixed changes to remote Git repositories after applying fixes                                        | 10 free attempts |
 | **CVE-Annotated Commits** | Commit body contains a full Markdown table with Library, From Version, To Version, CVE IDs, and Description | 10 free attempts |
 | **Safety Confirmations**  | Confirmation prompts before any destructive Git operation                                                   | Yes              |
+
+#### License and Account Management
+
+| Feature                    | Description                                                                                                                   | Free |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---- |
+| **About Tab**              | Right-aligned tab showing app version, license status (Licensed/Expired/Trial), serial number, and renewal countdown          | Yes  |
+| **Annual License Renewal** | License key valid for 1 year per device — renewal countdown shown in About tab; expired state shows clear renewal path        | Yes  |
+| **License Backup**         | Export all license data to an encrypted `.vsbak` file — available when licensed                                               | Yes  |
+| **License Restore**        | Restore a `.vsbak` backup on a reformatted or new machine — preserves exact cryptographic timestamp for seamless reactivation | Yes  |
+| **Privacy Links**          | About tab links directly to Privacy Policy and Disclaimer documents                                                           | Yes  |
+| **Anonymous Analytics**    | GDPR-compliant usage analytics via Aptabase (EU) — opt-out available in About tab at any time                                 | Yes  |
 
 #### Reporting and UI
 
@@ -315,17 +328,17 @@ Linux support is currently in development. Watch the [releases page](https://git
 
 VulnSweep is built on a **zero-trust, local-first** architecture. Your source code, project structure, and dependency data never leave your machine.
 
-| Data Type                    | What Happens                                                      |
-| ---------------------------- | ----------------------------------------------------------------- |
-| Your source code             | Never read, never transmitted — VulnSweep only executes npm audit |
-| package.json contents        | Processed locally to determine fix strategies                     |
-| npm registry calls           | Version resolution only — same as npm install already does        |
-| NVD API calls                | CVE enrichment lookups — CVE identifiers only, no code sent       |
-| OSV.dev API calls            | Package name + version lookups — no code sent                     |
-| GitHub Advisory calls        | Advisory ID lookups — no code sent                                |
-| Personal or identifying data | None collected or stored                                          |
-| Anonymous usage statistics   | May be collected in a future release — opt-in only                |
-| PDF security reports         | Generated and saved locally — never transmitted                   |
+| Data Type                    | What Happens                                                                                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your source code             | Never read, never transmitted — VulnSweep only executes npm audit                                                                                    |
+| package.json contents        | Processed locally to determine fix strategies                                                                                                        |
+| npm registry calls           | Version resolution only — same as npm install already does                                                                                           |
+| NVD API calls                | CVE enrichment lookups — CVE identifiers only, no code sent                                                                                          |
+| OSV.dev API calls            | Package name + version lookups — no code sent                                                                                                        |
+| GitHub Advisory calls        | Advisory ID lookups — no code sent                                                                                                                   |
+| Personal or identifying data | None collected or stored                                                                                                                             |
+| Anonymous usage statistics   | Collected anonymously via Aptabase (EU, GDPR-compliant) — opt-out available in the About tab at any time. No personal data, no code, no identifiers. |
+| PDF security reports         | Generated and saved locally — never transmitted                                                                                                      |
 
 ---
 
@@ -360,7 +373,17 @@ See [LICENSE.md](LICENSE.md) for full terms.
 
 **2024-2026 Carlos Galveias. All rights reserved.**
 
-This software is licensed, not sold. Unauthorized copying, distribution, modification, or reverse engineering of this software is strictly prohibited. A free tier is available with core features included at no cost. Additional features require a license key.
+This software is licensed, not sold. Unauthorized copying, distribution, modification, or reverse engineering of this software is strictly prohibited. A free tier is available with core features included at no cost. Unlimited fix-and-commit automation requires a commercial annual license.
+
+### Pricing
+
+| Tier                | Price                     | Availability                                    |
+| ------------------- | ------------------------- | ----------------------------------------------- |
+| **Early Adopter**   | EUR 9.99 / year / device  | First 30 days after install — time-limited      |
+| **Standard Annual** | EUR 29.99 / year / device | After 30-day early-adopter window closes        |
+| **Free Tier**       | Free forever              | Core scanning, CVE enrichment, SBOM, compliance |
+
+> The early-adopter window is device-specific and starts from your first install. It cannot be extended. The countdown is displayed in the About tab.
 
 ---
 
