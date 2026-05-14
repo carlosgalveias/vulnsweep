@@ -1,7 +1,7 @@
-import esbuild from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import esbuild from 'esbuild';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,7 +15,7 @@ const mainBuildOptions = {
   platform: 'node',
   target: 'node18',
   outfile: 'dist-main/main.js',
-  external: ['electron'],
+  external: ['electron', '@aptabase/electron'],
   minify: isProduction,
   sourcemap: !isProduction,
   treeShaking: true,
@@ -49,19 +49,19 @@ const preloadBuildOptions = {
 async function build() {
   try {
     console.log('Building main process...');
-    
+
     // Create output directories
     mkdirSync('dist-main', { recursive: true });
     mkdirSync('dist-main/preload', { recursive: true });
-    
+
     // Build main process
     await esbuild.build(mainBuildOptions);
     console.log('✓ Main process built successfully');
-    
+
     // Build preload scripts
     await esbuild.build(preloadBuildOptions);
     console.log('✓ Preload scripts built successfully');
-    
+
     // Copy package.json to dist-main for electron-builder
     const packageJson = JSON.parse(readFileSync('package.json', 'utf-8'));
     // Create a minimal package.json for the built app
@@ -74,12 +74,9 @@ async function build() {
       license: packageJson.license,
       dependencies: packageJson.dependencies || {},
     };
-    writeFileSync(
-      'dist-main/package.json',
-      JSON.stringify(minimalPackageJson, null, 2)
-    );
+    writeFileSync('dist-main/package.json', JSON.stringify(minimalPackageJson, null, 2));
     console.log('✓ Package.json copied to dist-main');
-    
+
     console.log('\n✓ Build completed successfully!');
   } catch (error) {
     console.error('Build failed:', error);

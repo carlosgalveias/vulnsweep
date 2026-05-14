@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types';
 import { useRef, useEffect } from 'react';
 
 function LogConsole({ logs, onClear }) {
@@ -97,5 +98,16 @@ function LogConsole({ logs, onClear }) {
     </div>
   );
 }
+
+LogConsole.propTypes = {
+  logs: PropTypes.arrayOf(
+    PropTypes.shape({
+      timestamp: PropTypes.string.isRequired,
+      level: PropTypes.string.isRequired,
+      message: PropTypes.string.isRequired,
+    })
+  ).isRequired,
+  onClear: PropTypes.func.isRequired,
+};
 
 export default LogConsole;

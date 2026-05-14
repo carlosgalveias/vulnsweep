@@ -28,7 +28,6 @@ class RegistryCache {
   constructor(ttl = CACHE_CONFIG.TTL_MS) {
     this.cache = new Map();
     this.ttl = ttl;
-    console.log(`[registry-cache] Initialized with ${ttl}ms TTL (${ttl / 1000}s)`);
   }
 
   /**
@@ -43,9 +42,6 @@ class RegistryCache {
 
     // Check if cached entry exists and is not expired
     if (cached && Date.now() - cached.timestamp < this.ttl) {
-      console.log(
-        `[registry-cache] Cache HIT for latest version of ${packageName} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`
-      );
       if (cached.value === null) {
         return createError(`Failed to fetch latest version for ${packageName} (cached error)`);
       }
@@ -53,7 +49,6 @@ class RegistryCache {
     }
 
     // Cache miss or expired - fetch new data
-    console.log(`[registry-cache] Cache MISS for latest version of ${packageName} - fetching...`);
     const value = await fetchFn(packageName);
 
     // Store in cache (even if null to avoid repeated failures)
@@ -80,9 +75,6 @@ class RegistryCache {
 
     // Check if cached entry exists and is not expired
     if (cached && Date.now() - cached.timestamp < this.ttl) {
-      console.log(
-        `[registry-cache] Cache HIT for all versions of ${packageName} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s, count: ${cached.value?.length || 0})`
-      );
       if (cached.value === null) {
         return createError(`Failed to fetch all versions for ${packageName} (cached error)`);
       }
@@ -90,7 +82,6 @@ class RegistryCache {
     }
 
     // Cache miss or expired - fetch new data
-    console.log(`[registry-cache] Cache MISS for all versions of ${packageName} - fetching...`);
     const value = await fetchFn(packageName);
 
     // Store in cache (even if null to avoid repeated failures)
@@ -100,7 +91,6 @@ class RegistryCache {
     });
 
     if (value) {
-      console.log(`[registry-cache] Cached ${value.length} versions for ${packageName}`);
       return createSuccess(value);
     }
 
@@ -112,9 +102,7 @@ class RegistryCache {
    * Useful for starting a fresh scan session or forcing cache refresh
    */
   clear() {
-    const size = this.cache.size;
     this.cache.clear();
-    console.log(`[registry-cache] Cleared ${size} cached entries`);
   }
 
   /**
@@ -157,10 +145,6 @@ class RegistryCache {
         this.cache.delete(key);
         pruned++;
       }
-    }
-
-    if (pruned > 0) {
-      console.log(`[registry-cache] Pruned ${pruned} expired entries`);
     }
 
     return pruned;

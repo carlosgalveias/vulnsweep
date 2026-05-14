@@ -7,21 +7,38 @@ function Header({
   onApplyFixes,
   onCommitPush,
   buttonsState,
+  scanButtonLabel = 'Scan & Audit',
+  applyButtonLabel = 'Apply Selected Fixes',
   allowReset,
   onAllowResetChange,
   bumpVersion,
   onBumpVersionChange,
+  removePackageLock,
+  onRemovePackageLockChange,
+  removeOverrides,
+  onRemoveOverridesChange,
   licStatus,
+  trialStatus,
   onBuyNow,
 }) {
   const showProgress = progress && progress.total > 0;
   const isUnlicensedCommercial = licStatus?.isCommercial && !licStatus?.isLicensed;
+  const trialActive = isUnlicensedCommercial && trialStatus && !trialStatus.trialExhausted;
+  const canApplyFix = !isUnlicensedCommercial || trialActive;
 
-  const disableApplyFixes = !buttonsState.applyFixes || isUnlicensedCommercial;
-  const applyFixesTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
+  const disableApplyFixes = !buttonsState.applyFixes || !canApplyFix;
+  const applyFixesTitle = trialActive
+    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
+    : isUnlicensedCommercial
+      ? 'Requires commercial license or active trial'
+      : '';
 
-  const disableCommitPush = !buttonsState.commitPush || isUnlicensedCommercial;
-  const commitPushTitle = isUnlicensedCommercial ? 'Requires commercial version' : '';
+  const disableCommitPush = !buttonsState.commitPush || !canApplyFix;
+  const commitPushTitle = trialActive
+    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
+    : isUnlicensedCommercial
+      ? 'Requires commercial license or active trial'
+      : '';
 
   return (
     <header className="bg-surface-raised border-b border-gray-700 compact-header">
@@ -87,6 +104,36 @@ function Header({
               </span>
             </label>
           </div>
+
+          {/* Remove package-lock.json Toggle */}
+          <div className="flex items-center gap-2 px-2">
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={removePackageLock}
+                onChange={(e) => onRemovePackageLockChange(e.target.checked)}
+                className="w-3.5 h-3.5 text-yellow-600 bg-surface-overlay border-gray-600 rounded focus:ring-yellow-500 focus:ring-2 cursor-pointer"
+              />
+              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
+                Remove package-lock.json
+              </span>
+            </label>
+          </div>
+
+          {/* Remove overrides Toggle */}
+          <div className="flex items-center gap-2 px-2">
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input
+                type="checkbox"
+                checked={removeOverrides}
+                onChange={(e) => onRemoveOverridesChange(e.target.checked)}
+                className="w-3.5 h-3.5 text-yellow-600 bg-surface-overlay border-gray-600 rounded focus:ring-yellow-500 focus:ring-2 cursor-pointer"
+              />
+              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
+                Remove overrides
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Middle Section: Progress Indicator */}
@@ -119,7 +166,7 @@ function Header({
             onClick={onScanAudit}
             className="compact-btn bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors duration-200 whitespace-nowrap"
           >
-            Scan & Audit
+            {scanButtonLabel}
           </button>
           <button
             onClick={onApplyFixes}
@@ -131,7 +178,7 @@ function Header({
                 : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
           >
-            Apply Selected Fixes
+            {applyButtonLabel}
           </button>
           <button
             onClick={onCommitPush}

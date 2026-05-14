@@ -8,6 +8,25 @@ const normalizeSeverity = (s) => {
   return lower === 'moderate' ? 'medium' : lower;
 };
 
+// Severity tier rank: higher number = more severe
+const SEVERITY_TIER = { critical: 5, high: 4, medium: 3, moderate: 3, low: 2, info: 1 };
+
+/**
+ * Returns the effective severity for a vulnerability, preferring
+ * enrichment.mergedSeverity if it is strictly higher than vuln.severity.
+ * Treats "moderate" and "medium" as equivalent (both rank 3).
+ */
+function getEffectiveSeverity(vuln) {
+  const base = normalizeSeverity(vuln.severity);
+  const merged = vuln.enrichment?.mergedSeverity
+    ? normalizeSeverity(vuln.enrichment.mergedSeverity)
+    : null;
+  if (merged && (SEVERITY_TIER[merged] ?? 0) > (SEVERITY_TIER[base] ?? 0)) {
+    return merged;
+  }
+  return base;
+}
+
 const SEVERITY_CONFIG = {
   critical: { color: '#dc2626', label: 'Critical' },
   high: { color: '#ea580c', label: 'High' },
@@ -22,7 +41,7 @@ const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info', 'unknown'];
 function calculateGrade(vulns) {
   const counts = { critical: 0, high: 0, medium: 0, low: 0 };
   vulns.forEach((v) => {
-    const s = normalizeSeverity(v.severity);
+    const s = getEffectiveSeverity(v);
     if (s in counts) counts[s]++;
   });
   if (counts.critical > 0) return 'F';
@@ -88,10 +107,37 @@ function CustomTooltip({ active, payload }) {
 CustomTooltip.propTypes = { active: PropTypes.bool, payload: PropTypes.array };
 CustomTooltip.defaultProps = { active: false, payload: [] };
 
-async function exportToPdf(total, pieData, repoRows, cveRows) {
+/** Capitalises first letter; returns em-dash for falsy input. */
+function capitalize(str) {
+  if (!str) return '—';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+/**
+ * Builds a plain-text Sources string for a PDF cell (no HTML).
+ * Each confirmed source appears on its own line with its URL.
+ */
+function buildSourcesText(enrichment) {
+  if (!enrichment || !enrichment.sources) return '—';
+  const parts = [];
+  const { osv, nvd, github } = enrichment.sources;
+  if (osv && osv.found) {
+    parts.push(osv.url ? `OSV: ${osv.url}` : 'OSV');
+  }
+  if (nvd && nvd.found) {
+    parts.push(nvd.url ? `NVD: ${nvd.url}` : 'NVD');
+  }
+  if (github && github.found) {
+    parts.push(github.url ? `GitHub Advisory: ${github.url}` : 'GitHub Advisory');
+  }
+  return parts.length > 0 ? parts.join('\n') : '—';
+}
+
+async function exportToPdf(total, pieData, repoRows, cveRows, allVulns) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  // Landscape so the Cross-Source correlation table fits on A4
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const now = new Date();
   const dateLabel = now.toLocaleDateString('en-GB', {
     day: '2-digit',
@@ -157,18 +203,99 @@ async function exportToPdf(total, pieData, repoRows, cveRows) {
     ]),
     styles: { fontSize: 7, cellPadding: 2 },
     headStyles: { fillColor: [31, 41, 55] },
-    columnStyles: { 5: { cellWidth: 50 } },
+    columnStyles: { 5: { cellWidth: 60 } },
   });
+
+  const enrichedVulns = (allVulns || []).filter(
+    (v) => v.enrichment && (v.enrichment.status === 'enriched' || v.enrichment.status === 'partial')
+  );
+  const enrichedCount = enrichedVulns.length;
+  const discrepancyCount = enrichedVulns.filter(
+    (v) => v.enrichment.severityDiscrepancy === true
+  ).length;
+  const effectiveCritical = (allVulns || []).filter(
+    (v) => getEffectiveSeverity(v) === 'critical'
+  ).length;
+  const effectiveHigh = (allVulns || []).filter((v) => getEffectiveSeverity(v) === 'high').length;
+
+  const y3 = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(10);
+  doc.setTextColor(30, 30, 30);
+  doc.text('Cross-Source CVE Correlation', 14, y3);
+
+  autoTable(doc, {
+    startY: y3 + 3,
+    head: [['Metric', 'Value']],
+    body: [
+      ['Enriched Vulnerabilities', String(enrichedCount)],
+      ['Severity Disagreements', String(discrepancyCount)],
+      ['Critical (effective)', String(effectiveCritical)],
+      ['High (effective)', String(effectiveHigh)],
+    ],
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [31, 41, 55] },
+    columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 30 } },
+  });
+
+  if (enrichedVulns.length > 0) {
+    const y4 = doc.lastAutoTable.finalY + 6;
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text('Correlation Details', 14, y4);
+
+    const correlationBody = enrichedVulns.map((v) => {
+      const npmSev = capitalize(v.severity);
+      const effSev = getEffectiveSeverity(v);
+      const isUpgraded = effSev !== normalizeSeverity(v.severity);
+      const effSevLabel = isUpgraded ? `${capitalize(effSev)} ▲` : capitalize(effSev);
+      const sourcesText = buildSourcesText(v.enrichment);
+      const aliases =
+        v.enrichment.allAliases && v.enrichment.allAliases.length > 0
+          ? v.enrichment.allAliases.join(', ')
+          : '—';
+      const discrepancy = v.enrichment.severityDiscrepancy
+        ? v.enrichment.discrepancyDetails || 'Severity mismatch'
+        : '—';
+      return [v.name || v.package || '—', npmSev, effSevLabel, sourcesText, aliases, discrepancy];
+    });
+
+    autoTable(doc, {
+      startY: y4 + 3,
+      head: [
+        ['Package', 'npm Severity', 'Effective Severity', 'Sources', 'Aliases', 'Discrepancy'],
+      ],
+      body: correlationBody,
+      styles: { fontSize: 6.5, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { fillColor: [31, 41, 55] },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 90 },
+        4: { cellWidth: 45 },
+        5: { cellWidth: 50 },
+      },
+      didParseCell(data) {
+        if (data.column.index === 5 && data.section === 'body') {
+          const cellText = data.cell.raw;
+          if (cellText && cellText !== '—') {
+            data.cell.styles.fillColor = [255, 243, 205];
+            data.cell.styles.textColor = [120, 80, 0];
+          }
+        }
+      },
+    });
+  }
   doc.save(fileName);
 }
 
-function StatisticsTab({ vulnerabilities }) {
+function StatisticsTab({ vulnerabilities, hasScanned }) {
   const total = vulnerabilities.length;
 
   const pieData = useMemo(() => {
     const counts = {};
     vulnerabilities.forEach((v) => {
-      const s = normalizeSeverity(v.severity);
+      const s = getEffectiveSeverity(v);
       const bucket = s in SEVERITY_CONFIG ? s : 'unknown';
       counts[bucket] = (counts[bucket] || 0) + 1;
     });
@@ -189,7 +316,7 @@ function StatisticsTab({ vulnerabilities }) {
       .map(([projectName, vulns]) => {
         const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
         vulns.forEach((v) => {
-          const s = normalizeSeverity(v.severity);
+          const s = getEffectiveSeverity(v);
           if (s in counts) counts[s]++;
           else counts.info++;
         });
@@ -208,7 +335,7 @@ function StatisticsTab({ vulnerabilities }) {
         projectName: v.projectName,
         cweId: v.cwe?.[0] ?? '—',
         package: v.package,
-        severity: normalizeSeverity(v.severity),
+        severity: getEffectiveSeverity(v),
         title: v.title || '',
         url: v.url || '',
         installedVersion: v.installedVersion || '',
@@ -219,14 +346,13 @@ function StatisticsTab({ vulnerabilities }) {
         return (o[a.severity] ?? 6) - (o[b.severity] ?? 6);
       });
   }, [vulnerabilities]);
-
   const handleExportPdf = useCallback(() => {
-    exportToPdf(total, pieData, repoRows, cveRows).catch((err) =>
+    exportToPdf(total, pieData, repoRows, cveRows, vulnerabilities).catch((err) =>
       console.error('PDF export failed:', err)
     );
-  }, [total, pieData, repoRows, cveRows]);
+  }, [total, pieData, repoRows, cveRows, vulnerabilities]);
 
-  if (total === 0) {
+  if (!hasScanned) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-500">
         <svg
@@ -242,11 +368,43 @@ function StatisticsTab({ vulnerabilities }) {
             d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
           />
         </svg>
-        <p className="text-sm font-medium">No vulnerability data yet</p>
-        <p className="text-xs mt-1">Run a scan to see statistics</p>
+        <p className="text-sm font-medium">Scan to create report</p>
+        <p className="text-xs mt-1">Run a scan to generate statistics and the security report</p>
       </div>
     );
   }
+
+  if (hasScanned && total === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-gray-100">
+        <div className="bg-surface-raised border border-gray-700 rounded-lg p-8 flex flex-col items-center gap-4 max-w-sm w-full mx-auto">
+          <span className="text-6xl font-bold" style={{ color: GRADE_COLOR['A'] }}>
+            A
+          </span>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-white">0 vulnerabilities</p>
+            <p className="text-sm text-gray-400 mt-1">All scanned projects are secure</p>
+          </div>
+          <div className="w-full border-t border-gray-700 pt-4 grid grid-cols-2 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold text-white">0</div>
+              <div className="text-xs text-gray-400 mt-0.5">Total Vulnerabilities</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold" style={{ color: GRADE_COLOR['A'] }}>
+                A
+              </div>
+              <div className="text-xs text-gray-400 mt-0.5">Security Grade</div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 text-center">
+            No vulnerabilities detected. Your projects meet the highest security standard.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-auto bg-surface text-gray-100">
       <div className="p-4 space-y-6">
@@ -497,7 +655,10 @@ function StatisticsTab({ vulnerabilities }) {
   );
 }
 
-StatisticsTab.propTypes = { vulnerabilities: PropTypes.array.isRequired };
-StatisticsTab.defaultProps = { vulnerabilities: [] };
+StatisticsTab.propTypes = {
+  vulnerabilities: PropTypes.array.isRequired,
+  hasScanned: PropTypes.bool,
+};
+StatisticsTab.defaultProps = { vulnerabilities: [], hasScanned: false };
 
 export default StatisticsTab;

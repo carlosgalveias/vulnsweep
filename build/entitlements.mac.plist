@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- REQUIRED for Electron: Allows V8 JIT compilation to map memory pages as executable.
+         Both allow-jit and allow-unsigned-executable-memory are needed together for Electron
+         on Apple Silicon and Intel. Removing either will cause Electron to crash at startup
+         under Hardened Runtime. See: https://www.electronjs.org/docs/latest/tutorial/code-signing -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- REQUIRED for Electron: Allows V8 to write to and execute the same memory pages.
+         Required alongside allow-jit for the V8 engine to function under Hardened Runtime. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- WARNING - BROAD PERMISSION: Disables macOS library validation, allowing the app to
+         load native Node.js .node addons that are not signed by Apple or the app developer.
+         This is currently required because native modules bundled via electron-builder
+         may not carry valid Apple Developer signatures. If all native modules are properly
+         signed, this entitlement should be removed to reduce attack surface.
+         Reference: https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_cs_disable-library-validation -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- REQUIRED: Allows outbound TCP/UDP connections. VulnSweep requires this for
+         npm registry queries, git remote operations, and vulnerability database lookups. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- REQUIRED: Allows reading from and writing to files the user explicitly selects
+         via NSOpenPanel / NSSavePanel (Electron's dialog.showOpenDialog / showSaveDialog).
+         VulnSweep requires this to scan project directories the user selects. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+  </dict>
+</plist>

@@ -1,35 +1,27 @@
-/* eslint-disable no-console, import/order, no-unused-vars */
-/**
- * Shielded License Generator
- * Protects global console from tampering by aggressive modules.
- */
+﻿/* eslint-disable no-console, no-unused-vars */
+// Developer License Generator - Windows-only developer utility.
+// Writes a valid device-bound license into the encrypted store.
+// Store : %APPDATA%\VulnSweep\store.dat
+// Marker: %USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\.vsweep
+// Usage : node scripts/generate-license.js
 
+'use strict';
+
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const systeminformation = require('systeminformation');
 
-// 1. PRESERVE ORIGINAL CONSOLE & PROCESS STATE IMMEDIATELY
 const nativeConsole = { ...console };
 const originalExit = process.exit;
 
-// Create a safe logging utility that bypasses global console hijacking
-// We use sync writes to ensure they appear even if the process crashes immediately after
-const safeLog = (msg) => {
-  fs.writeSync(1, `[SYSTEM] ${msg}\n`);
-};
+const safeLog = (msg) => fs.writeSync(1, `[SYSTEM] ${msg}\n`);
+const safeError = (msg) => fs.writeSync(2, `\x1b[31m[SYSTEM-ERROR]\x1b[0m ${msg}\n`);
 
-const safeError = (msg) => {
-  fs.writeSync(2, `\x1b[31m[SYSTEM-ERROR]\x1b[0m ${msg}\n`);
-};
-
-/**
- * Restore console if it was hijacked
- */
 function protectEnvironment() {
-  // Check if console.log is native or a stub
   const logStr = console.log.toString();
   const isTampered = !logStr.includes('[native code]') || logStr.length < 50;
-
   if (isTampered) {
     safeLog('Detected console tampering. Restoring environment...');
     Object.keys(nativeConsole).forEach((key) => {
@@ -40,174 +32,212 @@ function protectEnvironment() {
           writable: true,
           enumerable: true,
         });
-      } catch (e) {
+      } catch (_e) {
         console[key] = nativeConsole[key];
       }
     });
   }
 }
 
-// Global reference for the crypt module
-let sludge;
-
-safeLog('--- Initializing Shielded Environment ---');
-
-// 2. SET UP AGGRESSIVE EXIT MONITORING
-// We do this BEFORE the require so we can catch an exit inside the module's constructor
 process.exit = (code) => {
   const stack = new Error().stack;
   safeError(`INTERNAL EXIT DETECTED! Exit code: ${code}`);
   safeError(`Call stack:\n${stack}`);
-  // We actually prevent the exit for a moment to allow logs to flush
   setTimeout(() => originalExit(code), 500);
 };
 
 process.on('uncaughtException', (err) => {
   safeError('UNCAUGHT EXCEPTION DURING LOAD:');
-  safeError(err.stack || err);
+  safeError(err.stack || String(err));
 });
 
+let sludge;
+safeLog('--- Initializing Shielded Environment ---');
+safeLog('Attempting to require("sludge-crypt")...');
 try {
-  safeLog('Attempting to require("sludge-crypt")...');
-
-  // 3. REQUIRE MODULE
   sludge = require('sludge-crypt');
-
-  // 4. IMMEDIATELY REVERT TAMPERING
   protectEnvironment();
-  safeLog('Module loaded and environment protected.');
+  safeLog('sludge-crypt loaded and environment protected.');
 } catch (error) {
   safeError(`Failed to import sludge-crypt: ${error.message}`);
   originalExit(1);
 }
 
+// Windows store path: %APPDATA%\VulnSweep\store.dat
+const STORE_DIR = path.join(process.env.APPDATA, 'VulnSweep');
+const STORE_FILE = path.join(STORE_DIR, 'store.dat');
+
+// Vsweep marker file path (exact Windows path from license.js)
+const VSWEEP_FILE = path.join(
+  os.homedir(),
+  'AppData',
+  'Local',
+  'Microsoft',
+  'OneDrive',
+  'logs',
+  '.vsweep'
+);
+
+// Encryption secret - replicates _deriveEncryptionSecret() from secure-store.js
+function deriveEncryptionSecret() {
+  let raw = 'vs-fb-2024-xk';
+  try {
+    const ifaces = os.networkInterfaces();
+    outer: for (const name of Object.keys(ifaces)) {
+      for (const addr of ifaces[name] || []) {
+        if (addr.internal) continue;
+        if (!addr.mac || addr.mac === '00:00:00:00:00:00') continue;
+        raw = addr.mac;
+        break outer;
+      }
+    }
+  } catch (_e) {
+    /* use fallback */
+  }
+  const hashed = crypto.createHash('sha256').update(raw).digest('hex');
+  console.log(`  MAC raw material : ${raw}`);
+  console.log(`  Encryption secret: ${hashed.slice(0, 8)}...`);
+  return hashed;
+}
+
+// File-backed storage adapter - mirrors _buildFileStorageAdapter() in secure-store.js
+function buildAdapter(filePath) {
+  return {
+    getItem(key) {
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        return data[key] !== undefined ? data[key] : null;
+      } catch (e) {
+        if (e.code === 'ENOENT') return null;
+        throw e;
+      }
+    },
+    setItem(key, value) {
+      let data = {};
+      try {
+        data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+
+      try {
+        data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+      data[key] = value;
+      fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');
+    },
+    removeItem(key) {
+      let data = {};
+      try {
+        data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (e) {
+        if (e.code !== 'ENOENT') return;
+      }
+      delete data[key];
+      fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');
+    },
+  };
+}
+
+function createSecureLS(storePath) {
+  const SecureLS = require('secure-ls').default;
+  const secret = deriveEncryptionSecret();
+  const adapter = buildAdapter(storePath);
+  return new SecureLS({
+    encodingType: 'AES',
+    isCompression: false,
+    encryptionSecret: secret,
+    storage: adapter,
+  });
+}
+
 async function getDeviceData() {
-  console.log('1. Getting device data...');
+  console.log('  Querying system hardware...');
   const [baseboard, networkInterfaces] = await Promise.all([
     systeminformation.baseboard(),
     systeminformation.networkInterfaces(),
   ]);
-
   const network = Array.isArray(networkInterfaces) ? networkInterfaces : [networkInterfaces];
   const mac1 = network.length > 0 ? network[0].mac : '00:00:00:00:00:00';
-  const mac2 = network.length > 1 ? network[1].mac : null;
-
-  return {
-    serialNumber: baseboard.serial || 'unknown',
-    mac1,
-    mac2,
-  };
-}
-
-function getVsweepFilePath() {
-  return path.join(require('os').homedir(), 'AppData', 'Roaming', '.vsweep');
-}
-
-const { execSync } = require('child_process');
-
-function setRegistryValue(keyName, value) {
-  const b64 = Buffer.from(value, 'utf8').toString('base64');
-  console.log('setting registry value: ', keyName, b64);
-  execSync(`REG ADD HKCU\\Software\\vsweep /v ${keyName} /t REG_SZ /d "${b64}" /f`, {
-    stdio: 'ignore',
-  });
-}
-
-function getRegistryValue(keyName) {
-  console.log('getting registry value: ', keyName);
-  try {
-    const output = execSync(`REG QUERY HKCU\\Software\\vsweep /v ${keyName}`, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const lines = output.split('\n');
-    let val = null;
-    for (const line of lines) {
-      console.log('line: ', line);
-      if (line.includes(keyName) && line.includes('REG_SZ')) {
-        val = line.substring(line.indexOf('REG_SZ') + 6).trim();
-        break;
-      }
-    }
-    console.log('val: ', val);
-    if (val) {
-      const decoded = Buffer.from(val, 'base64').toString('utf8');
-      console.log('decoded: ', decoded);
-      return decoded;
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
+  return { serialNumber: baseboard.serial || 'unknown', mac1 };
 }
 
 async function main() {
-  console.log('Starting commercial license generation...');
-  try {
-    const vsweepFile = getVsweepFilePath();
-    if (!fs.existsSync(vsweepFile)) {
-      console.log('Creating vsweep marker file...');
-      fs.writeFileSync(vsweepFile, '');
-    }
-
-    const stat = fs.statSync(vsweepFile);
-    const creationDate = stat.birthtimeMs || stat.ctimeMs;
-
-    let pStr = getRegistryValue('p');
-    let kStr = getRegistryValue('k');
-    let keys;
-
-    if (!pStr || !kStr) {
-      console.log('Generating new bile pair keys...');
-      keys = await sludge.generateBilePair();
-
-      pStr = JSON.stringify(keys.publicKey);
-      kStr = JSON.stringify(keys.privateKey);
-      setRegistryValue('p', pStr);
-      setRegistryValue('k', kStr);
-    } else {
-      console.log('Using existing keys from registry...');
-      keys = {
-        publicKey: JSON.parse(pStr),
-        privateKey: JSON.parse(kStr),
-      };
-    }
-    console.log(keys);
-    const deviceData = await getDeviceData();
-    console.log('Device data retrieved.');
-
-    const payload = {
-      serialNumber: deviceData.serialNumber,
-      mac1: deviceData.mac1,
-      paymentId: 'generated-via-script',
-      timestamp: Date.now(),
-    };
-
-    console.log('Composing license with sludge-crypt...');
-
-    if (!sludge || typeof sludge.compose !== 'function') {
-      throw new Error('sludge-crypt is loaded but .compose function is missing.');
-    }
-
-    const encrypted = await sludge.compose(payload, keys.publicKey, creationDate);
-
-    console.log('Saving license to registry...');
-    setRegistryValue('v', encrypted);
-
-    console.log('License generated successfully in registry!');
-  } catch (error) {
-    console.error('CRITICAL ERROR in main loop:', error);
-    process.exit(1);
+  console.log('\n=== VulnSweep Developer License Generator ===\n');
+  console.log('Step 1: Ensuring store directory...');
+  fs.mkdirSync(STORE_DIR, { recursive: true });
+  console.log(`  Store dir  : ${STORE_DIR}`);
+  console.log(`  Store file : ${STORE_FILE}`);
+  console.log('\nStep 2: Ensuring .vsweep marker file...');
+  fs.mkdirSync(path.dirname(VSWEEP_FILE), { recursive: true });
+  if (!fs.existsSync(VSWEEP_FILE)) {
+    fs.writeFileSync(VSWEEP_FILE, '');
+    console.log(`  Created    : ${VSWEEP_FILE}`);
+  } else {
+    console.log(`  Exists     : ${VSWEEP_FILE}`);
   }
+  const stat = fs.statSync(VSWEEP_FILE);
+  const creationDate = stat.birthtimeMs || stat.ctimeMs;
+  console.log(`  Date used  : ${new Date(creationDate).toISOString()}`);
+  console.log('\nStep 3: Deriving encryption secret and building store instance...');
+  let ls;
+  try {
+    ls = createSecureLS(STORE_FILE);
+    console.log('  SecureLS instance created successfully.');
+  } catch (err) {
+    safeError(`Failed to create SecureLS: ${err.message}`);
+    originalExit(1);
+  }
+  console.log('\nStep 4: Generating bile-pair keys with sludge-crypt...');
+  if (!sludge || typeof sludge.generateBilePair !== 'function')
+    throw new Error('sludge-crypt: .generateBilePair missing');
+  const keys = await sludge.generateBilePair();
+  const pStr = JSON.stringify(keys.publicKey);
+  const kStr = JSON.stringify(keys.privateKey);
+  console.log('  Keys generated.');
+  console.log('\nStep 5: Collecting device data...');
+  const deviceData = await getDeviceData();
+  console.log(`  Serial : ${deviceData.serialNumber}`);
+  console.log(`  MAC1   : ${deviceData.mac1}`);
+  console.log('\nStep 6: Composing license payload...');
+  if (typeof sludge.compose !== 'function') throw new Error('sludge-crypt: .compose missing');
+  const payload = {
+    serialNumber: deviceData.serialNumber,
+    mac1: deviceData.mac1,
+    paymentId: 'generated-via-script',
+    timestamp: Date.now(),
+  };
+  const encrypted = await sludge.compose(payload, keys.publicKey, Math.floor(creationDate));
+  console.log('  Payload composed and encrypted.');
+  console.log('  creationDate passed to compose:', Math.floor(creationDate));
+  console.log('\nStep 7: Writing keys to encrypted store...');
+  ls.set('p', pStr);
+  ls.set('k', kStr);
+  ls.set('v', encrypted);
+  console.log(`  Wrote key p  (public key,  ${pStr.length} chars)`);
+  console.log(`  Wrote key k  (private key, ${kStr.length} chars)`);
+  console.log(`  Wrote key v  (license,     ${encrypted.length} chars)`);
+  const serialB64 = Buffer.from(deviceData.serialNumber, 'utf8')
+    .toString('base64')
+    .replace(/[+/=]/g, '')
+    .toUpperCase()
+    .slice(0, 8);
+  const licenseKey = `VS-${serialB64}-${Date.now().toString(16).toUpperCase()}`;
+  console.log('\n=== SUCCESS ===');
+  console.log(`License key  : ${licenseKey}`);
+  console.log(`Store path   : ${STORE_FILE}`);
+  console.log(`Marker path  : ${VSWEEP_FILE}`);
+  console.log('Keys written : p, k, v');
 }
 
-// EXECUTION
 main()
   .then(() => {
     console.log('Script execution finished.');
   })
   .catch((error) => {
     safeError('Fatal script error:');
-    safeError(error.stack || error);
+    safeError(error.stack || String(error));
     originalExit(1);
   });

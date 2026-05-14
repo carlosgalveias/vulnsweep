@@ -173,6 +173,159 @@ const PAYPAL_CONFIG = {
 };
 
 // ============================================
+// ENRICHMENT CONFIGURATION
+// ============================================
+
+/**
+ * CVE enrichment configuration for cross-source vulnerability correlation.
+ * Covers OSV.dev, NVD API v2, and GitHub Advisory Database integrations.
+ * @namespace ENRICHMENT_CONFIG
+ */
+const ENRICHMENT_CONFIG = {
+  /**
+   * OSV.dev batch query endpoint
+   * @type {string}
+   */
+  OSV_API_URL: 'https://api.osv.dev/v1/query',
+
+  /**
+   * NVD API v2 CVE lookup endpoint
+   * @type {string}
+   */
+  NVD_API_URL: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
+
+  /**
+   * GitHub Advisory REST API base endpoint (no auth required for public data)
+   * @type {string}
+   */
+  GITHUB_ADVISORY_API_URL: 'https://api.github.com/advisories',
+
+  /**
+   * Minimum delay between consecutive NVD API calls (milliseconds).
+   * NVD free tier allows ~5 requests per 30 seconds without an API key.
+   * 6 seconds between calls keeps us safely under that limit.
+   * @type {number}
+   */
+  NVD_RATE_LIMIT_MS: 6000,
+
+  /**
+   * Optional NVD API key read from environment variable.
+   * When set, NVD allows 50 req/30s instead of 5 req/30s.
+   * @type {string|undefined}
+   */
+  get NVD_API_KEY() {
+    return process.env.NVD_API_KEY || undefined;
+  },
+
+  /**
+   * Per-request HTTP timeout for all enrichment API calls (milliseconds).
+   * @type {number}
+   */
+  ENRICHMENT_TIMEOUT_MS: 15000,
+
+  /**
+   * In-process enrichment cache TTL (milliseconds).
+   * Default: 30 minutes.
+   * @type {number}
+   */
+  ENRICHMENT_CACHE_TTL_MS: 30 * 60 * 1000,
+
+  /**
+   * Disk-based enrichment cache TTL (milliseconds).
+   * Longer TTL is appropriate for disk cache since CVE data rarely changes day-to-day.
+   * Default: 24 hours.
+   * @type {number}
+   */
+  DISK_CACHE_TTL_MS: 24 * 60 * 60 * 1000,
+
+  /**
+   * User-Agent header sent with all enrichment HTTP requests.
+   * GitHub API requires a non-empty User-Agent; NVD recommends one.
+   * @type {string}
+   */
+  USER_AGENT: 'VulnSweep/1.0 (https://github.com/vulnsweep)',
+
+  /**
+   * CISA Known Exploited Vulnerabilities catalog static JSON feed.
+   * Cached to disk for DISK_CACHE_TTL_MS (24 h). Refreshed on first call after TTL expires.
+   * @type {string}
+   */
+  CISA_KEV_URL:
+    'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json',
+
+  /**
+   * EPSS v3 API base URL. Append ?cve=CVE-XXXX-XXXXX for per-CVE exploit probability queries.
+   * Returns epss score (0-1 float) and percentile (0-1 float).
+   * @type {string}
+   */
+  EPSS_API_URL: 'https://api.first.org/data/v1/epss',
+};
+
+// ============================================
+// LICENSE CONFIGURATION
+// ============================================
+
+/**
+ * License pricing and duration constants for Feature A (Yearly Pricing).
+ * @namespace LICENSE_CONFIG
+ */
+const LICENSE_CONFIG = {
+  /**
+   * Promotional price in EUR, active within the first PROMO_DAYS days of install.
+   * @type {number}
+   */
+  PROMO_PRICE_EUR: 9.99,
+
+  /**
+   * Full price in EUR, active after the PROMO_DAYS window expires.
+   * @type {number}
+   */
+  FULL_PRICE_EUR: 29.99,
+
+  /**
+   * Number of days from install during which the promo price is active.
+   * @type {number}
+   */
+  PROMO_DAYS: 30,
+
+  /**
+   * Duration of a purchased license in days (365 = 1 year / annual license).
+   * @type {number}
+   */
+  LICENSE_DURATION_DAYS: 365,
+};
+
+// ============================================
+// DEPENDENCY UPDATES CONFIGURATION (F13)
+// ============================================
+
+/**
+ * Dependency updates feature configuration (F13).
+ * Controls npm registry access, version display limits, and HTTP timeouts.
+ * @namespace DEP_UPDATES_CONFIG
+ */
+const DEP_UPDATES_CONFIG = {
+  /**
+   * npm registry URL. GET <REGISTRY_URL>/<pkgName> returns metadata with `versions` object.
+   * @type {string}
+   */
+  REGISTRY_URL: 'https://registry.npmjs.org',
+
+  /**
+   * Max versions per package shown in UI dropdown. Newest N entries kept.
+   * Prevents the dropdown from having hundreds of entries for active packages like `typescript`.
+   * @type {number}
+   */
+  MAX_VERSIONS_SHOWN: 50,
+
+  /**
+   * Per-package HTTP timeout for registry fetches (ms).
+   * @type {number}
+   */
+  FETCH_TIMEOUT_MS: 10000,
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -182,4 +335,7 @@ module.exports = {
   API_CONFIG,
   UI_CONFIG,
   PAYPAL_CONFIG,
+  ENRICHMENT_CONFIG,
+  DEP_UPDATES_CONFIG,
+  LICENSE_CONFIG,
 };

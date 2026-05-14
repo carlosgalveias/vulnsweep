@@ -1,13 +1,29 @@
 /* eslint-disable import/order */
 const path = require('path');
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
 const audit = require('./modules/audit');
+const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
+const analytics = require('./modules/analytics');
+// Initialize Aptabase analytics synchronously here — BEFORE app.whenReady().
+// The SDK's initialize() checks app.isReady() and silently disables tracking if
+// called after the app is already ready. Calling it here satisfies that contract.
+// Events queued via trackEvent() before the SDK's internal async setup finishes
+// are buffered by the SDK and flushed automatically once setup completes.
+analytics.init();
+const isDevelopment = process.env.NODE_ENV === 'development';
+if (!isDevelopment) {
+  Menu.setApplicationMenu(null);
+}
+// Imported at top level — pre-warm call happens inside app.whenReady() after
+// app.getPath('userData') is available, ensuring the correct store path is used.
+const { storeGet, storeSet } = require('./utils/secure-store');
+const trialStore = require('./utils/trial-store');
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
@@ -84,7 +100,9 @@ function sanitizePath(inputPath) {
 function createSplashWindow() {
   // Determine if running in development mode
   const isDevelopment = process.env.NODE_ENV === 'development';
-
+  if (!isDevelopment) {
+    Menu.setApplicationMenu(null);
+  }
   splashWindow = new BrowserWindow({
     width: 400,
     height: 400,
@@ -175,28 +193,10 @@ function createWindow() {
     },
   });
 
-  // Allow PayPal's payment popup (window.open) to share the same session.
-  // Without this, the popup gets an isolated session and the buyer's access
-  // token is lost when it closes, causing the "token not present" capture error.
+  // All window.open calls from the renderer are denied or redirected to the system browser.
+  // Payment is handled via a dedicated managed BrowserWindow (open-payment-window IPC handler)
+  // with its own isolated session — no popup sharing is needed.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    const isPayPal =
-      url.includes('paypal.com') ||
-      url.includes('paypalobjects.com') ||
-      url.startsWith('about:blank');
-    if (isPayPal) {
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: {
-          webPreferences: {
-            partition: SESSION_PARTITION,
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-          },
-        },
-      };
-    }
-    // All other external links open in system browser
     require('electron').shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -288,18 +288,23 @@ ipcMain.handle('discover-projects', async (event, basePath) => {
 // ============================================
 
 /**
- * Handler: Prepare repository (reset + pull)
+ * Handler: Prepare repository (reset + pull + optional cleanup)
  */
-ipcMain.handle('prepare-repository', async (event, projectPath, allowReset) => {
+ipcMain.handle('prepare-repository', async (event, projectPath, allowReset, options = {}) => {
   try {
-    console.log(`[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}`);
+    const { removePackageLock = false, removeOverrides = false } = options;
+    console.log(
+      `[IPC] Preparing repository: ${projectPath}, allowReset: ${allowReset}, removePackageLock: ${removePackageLock}, removeOverrides: ${removeOverrides}`
+    );
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
 
-    // Prepare repository
-    const result = await git.prepareRepository(sanitized, allowReset);
-
+    // Prepare repository (reset -> pull -> removeOverrides -> removePackageLock+node_modules)
+    const result = await git.prepareRepository(sanitized, allowReset, {
+      removePackageLock,
+      removeOverrides,
+    });
     if (result.success) {
       sendLogMessage('success', `Repository prepared: ${path.basename(sanitized)}`);
     } else {
@@ -409,7 +414,6 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     // This ensures fresh data for each user-initiated scan while preserving
     // cache hits across all projects in the same session
     audit.clearCache();
-    console.log('[IPC] Registry cache cleared for new scan session');
 
     const results = [];
     const total = projectPaths.length;
@@ -464,6 +468,10 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
 
     sendLogMessage('success', `Batch analysis complete: ${results.length} projects analyzed`);
 
+    analytics.trackEvent('repository_scanned', {
+      repoCount: results.length,
+      totalVulnerabilities: results.reduce((s, r) => s + (r.content?.summary?.total || 0), 0),
+    });
     return { success: true, content: results };
   } catch (error) {
     console.error(`[IPC] analyze-projects error: ${error.message}`);
@@ -474,11 +482,49 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
 
 /**
  * Handler: Apply fixes to a project
+ *
+ * Gate logic:
+ *   1. If user is licensed → allow unconditionally.
+ *   2. If unlicensed and trial exhausted (0 fixes remaining) → block with message.
+ *   3. If unlicensed and trial not exhausted → allow, then increment fix counter.
  */
-ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion = true) => {
+ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {}) => {
+  // Support legacy callers that passed bumpVersion as a plain boolean
+  const bumpVersion =
+    typeof options === 'boolean'
+      ? options
+      : options && options.bumpVersion !== undefined
+        ? options.bumpVersion
+        : true;
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
+
+    // --- Trial / license gate ---
+    let isLicensed = false;
+    try {
+      const licStatus = await license.checkLicense();
+      isLicensed = licStatus.isLicensed === true;
+    } catch (licErr) {
+      console.warn(
+        '[IPC] apply-fixes: license check failed, treating as unlicensed:',
+        licErr.message
+      );
+    }
+
+    if (!isLicensed) {
+      const trialStatus = trialStore.getTrialStatus();
+      if (trialStatus.trialExhausted) {
+        console.log('[IPC] apply-fixes: trial exhausted for unlicensed user.');
+        sendLogMessage('warn', 'Free trial exhausted. Upgrade to apply more fixes.');
+        return {
+          success: false,
+          trialExhausted: true,
+          error: 'Free fixes exhausted. Please upgrade to continue applying fixes.',
+        };
+      }
+    }
+    // ----------------------------
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
@@ -504,6 +550,10 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
       `Fixes applied: ${result.content?.applied?.length || 0} changes, ${result.content?.resolved?.length || 0} resolved`
     );
 
+    const _sevs = (strategies || []).map((s) => (s.severity || 'unknown').toLowerCase());
+    const _sevOrder = ['critical', 'high', 'moderate', 'low', 'unknown'];
+    const _topSev = _sevOrder.find((s) => _sevs.includes(s)) || 'unknown';
+    analytics.trackEvent('vulnerability_fixed', { severity: _topSev, fixCount: strategies.length });
     return { success: true, content: result.content };
   } catch (error) {
     console.error(`[IPC] apply-fixes error: ${error.message}`);
@@ -513,19 +563,430 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, bumpVersion
 });
 
 // ============================================
+// IPC HANDLERS - ENRICHMENT (F1)
+// ============================================
+
+/**
+ * Handler: Enrich an array of vulnerability objects with cross-source CVE data.
+ * Streams per-vulnerability progress events back to the renderer via
+ * 'enrichment-progress' push channel.
+ *
+ * Input:  { vulnerabilities: VulnObject[] }
+ * Output: { success: boolean, content?: VulnObject[], error?: string }
+ */
+ipcMain.handle('enrich-vulnerabilities', async (event, vulnerabilities) => {
+  try {
+    if (!Array.isArray(vulnerabilities) || vulnerabilities.length === 0) {
+      return { success: true, content: [] };
+    }
+
+    console.log(
+      `[IPC] enrich-vulnerabilities: enriching ${vulnerabilities.length} vulnerabilities`
+    );
+    sendLogMessage('info', `Enriching ${vulnerabilities.length} vulnerabilities with CVE data…`);
+
+    const total = vulnerabilities.length;
+
+    const enriched = await enrichVulnerabilities(
+      vulnerabilities,
+      (current, _total, packageName) => {
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('enrichment-progress', { current, total, packageName });
+        }
+      }
+    );
+
+    sendLogMessage(
+      'success',
+      `CVE enrichment complete: ${enriched.length} vulnerabilities enriched`
+    );
+    return { success: true, content: enriched };
+  } catch (err) {
+    console.error(`[IPC] enrich-vulnerabilities error: ${err.message}`);
+    sendLogMessage('error', `CVE enrichment failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current enrichment settings / status.
+ */
+ipcMain.handle('get-enrichment-settings', () => {
+  const { ENRICHMENT_CONFIG } = require('./config/constants');
+  return {
+    success: true,
+    content: {
+      osvApiUrl: ENRICHMENT_CONFIG.OSV_API_URL,
+      nvdApiUrl: ENRICHMENT_CONFIG.NVD_API_URL,
+      githubAdvisoryApiUrl: ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL,
+      nvdRateLimitMs: ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS,
+      nvdApiKeyConfigured: !!ENRICHMENT_CONFIG.NVD_API_KEY,
+      timeoutMs: ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+      cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
+    },
+  };
+});
+
+// ============================================
+// IPC HANDLERS - DEPENDENCY UPDATES (F13)
+// ============================================
+
+/**
+ * Handler: Scan direct dependencies of a project for available updates.
+ * Streams per-package progress events via 'dep-update-progress' push channel.
+ *
+ * Input:  projectPath: string
+ * Output: { success: boolean, content?: UpdateCandidate[], error?: string }
+ */
+ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false, options = {}) => {
+  const { removeOverrides = false, removePackageLock = false } = options;
+  try {
+    console.log(
+      `[IPC] scan-dep-updates: ${projectPath}, allowReset: ${allowReset}, removeOverrides: ${removeOverrides}, removePackageLock: ${removePackageLock}`
+    );
+    sendLogMessage('info', `Scanning dependency updates for ${path.basename(projectPath)}...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    const { scanDependencyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const progressCb = ({ current, total, repoName, packageName }) => {
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('dep-update-progress', {
+          current,
+          total,
+          repoName,
+          packageName,
+        });
+      }
+    };
+
+    // Mirror audit scan: run git prepare (reset+pull+removeOverrides+removePackageLock)
+    // per repo whenever any prep option is active.
+    if (allowReset || removeOverrides || removePackageLock) {
+      const fs = require('fs');
+      const path_ = require('path');
+      let repos = [];
+      try {
+        const entries = await fs.promises.readdir(sanitized, { withFileTypes: true });
+        const dirs = entries.filter((e) => e.isDirectory());
+        for (const d of dirs) {
+          const rp = path_.join(sanitized, d.name);
+          try {
+            await fs.promises.access(path_.join(rp, 'package.json'));
+            repos.push(rp);
+          } catch {
+            /* skip */
+          }
+        }
+        if (repos.length === 0) repos = [sanitized]; // single-repo fallback
+      } catch {
+        repos = [sanitized];
+      }
+      for (const repoPath of repos) {
+        sendLogMessage('info', `Preparing repository: ${path.basename(repoPath)}...`);
+        try {
+          await git.prepareRepository(repoPath, allowReset, { removeOverrides, removePackageLock });
+        } catch (prepErr) {
+          sendLogMessage(
+            'warn',
+            `Git prepare failed for ${path.basename(repoPath)}: ${prepErr.message}`
+          );
+        }
+      }
+    }
+
+    const result = await scanDependencyUpdates(sanitized, progressCb);
+
+    if (!result.success) {
+      console.error(`[IPC] scan-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency scan failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const totalCandidates = result.content.reduce((sum, r) => sum + r.candidates.length, 0);
+    sendLogMessage(
+      'success',
+      `Found ${totalCandidates} packages with available updates across ${result.content.length} repo(s)`
+    );
+    return { success: true, content: result.content };
+  } catch (error) {
+    console.error(`[IPC] scan-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency scan failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * Handler: Apply selected dependency updates via npm install and commit locally.
+ *
+ * Input:  projectPath: string, updates: ApplyUpdate[]
+ * Output: { success: boolean, commitMessage?: string, error?: string }
+ */
+ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
+  try {
+    console.log(`[IPC] apply-dep-updates: ${projectPath}, ${updates.length} updates`);
+    sendLogMessage('info', `Applying ${updates.length} dependency update(s)...`);
+
+    const sanitized = sanitizePath(projectPath);
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { success: false, error: 'No updates provided' };
+    }
+
+    const { applyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
+
+    const result = await applyUpdates(sanitized, updates);
+
+    if (!result.success) {
+      console.error(`[IPC] apply-dep-updates error: ${result.error}`);
+      sendLogMessage('error', `Dependency update failed: ${result.error}`);
+      return { success: false, error: result.error };
+    }
+
+    const commitMessage = result.content.commitMessage || 'updates applied';
+    sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
+    analytics.trackEvent('dependency_updated', { updateCount: updates.length });
+    return { success: true, commitMessage };
+  } catch (error) {
+    console.error(`[IPC] apply-dep-updates error: ${error.message}`);
+    sendLogMessage('error', `Dependency update failed: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - LICENSE SCAN & SBOM (F8/F9)
+// ============================================
+
+ipcMain.handle('license:scan', async (event, projectPath) => {
+  try {
+    console.log(`[IPC] license:scan: ${projectPath}`);
+    sendLogMessage('info', `Scanning licenses for ${path.basename(projectPath)}...`);
+
+    const sanitized = sanitizePath(projectPath);
+    const { scanLicenses } = require('./modules/license-scanner');
+    const result = await scanLicenses(sanitized);
+
+    sendLogMessage('success', `License scan complete: ${result.stats.total} packages found`);
+    return { success: true, content: result };
+  } catch (err) {
+    console.error(`[IPC] license:scan error: ${err.message}`);
+    sendLogMessage('error', `License scan failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('sbom:get-save-path', async (event, { format }) => {
+  try {
+    const EXT = { cyclonedx: 'json', spdx: 'json', csv: 'csv' };
+    const LABEL = { cyclonedx: 'CycloneDX JSON', spdx: 'SPDX JSON', csv: 'CSV' };
+    const ext = EXT[format] || 'json';
+    const label = LABEL[format] || 'SBOM';
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save SBOM File',
+      defaultPath: `sbom.${ext}`,
+      filters: [
+        { name: label, extensions: [ext] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    return { filePath: result.filePath || null, canceled: result.canceled };
+  } catch (err) {
+    console.error(`[IPC] sbom:get-save-path error: ${err.message}`);
+    return { filePath: null, canceled: true, error: err.message };
+  }
+});
+
+/**
+ * Derive a human-readable document name from an array of scanned project paths.
+ *
+ * Rules:
+ *   - 0 paths  → 'scan'
+ *   - 1 path   → basename of that path (preserves existing single-repo behaviour)
+ *   - N paths  → basename of the deepest common ancestor directory, or
+ *                'multi-repo-scan' when paths share no common ancestor segment
+ *
+ * @param {string[]} paths - Absolute project paths
+ * @returns {string}
+ */
+function deriveDocumentName(paths) {
+  if (!paths || paths.length === 0) return 'scan';
+  if (paths.length === 1) return path.basename(paths[0]);
+
+  const parts = paths.map((p) => p.split(path.sep));
+  const minLen = Math.min(...parts.map((p) => p.length));
+  const common = [];
+  for (let i = 0; i < minLen; i++) {
+    if (parts.every((p) => p[i] === parts[0][i])) {
+      common.push(parts[0][i]);
+    } else {
+      break;
+    }
+  }
+  return common.length > 0 ? common[common.length - 1] : 'multi-repo-scan';
+}
+
+ipcMain.handle('sbom:export', async (event, { licenseResult, format, outputPath }) => {
+  try {
+    // Validate outputPath is an absolute path (provided by OS dialog, not user input)
+    if (!outputPath || typeof outputPath !== 'string' || !path.isAbsolute(outputPath)) {
+      return { success: false, error: 'Invalid output path' };
+    }
+
+    console.log(`[IPC] sbom:export format=${format} path=${outputPath}`);
+    sendLogMessage('info', `Exporting SBOM (${format}) to ${path.basename(outputPath)}...`);
+
+    const { generateSbom } = require('./modules/sbom-generator');
+
+    // Derive a document name that correctly represents all scanned repositories.
+    // licenseResult.projectPaths (added in the renderer merge step) contains every
+    // path that contributed to this merged result. For a single-repo scan it falls
+    // back to the legacy licenseResult.projectPath so behaviour is unchanged.
+    const allPaths = licenseResult.projectPaths || [licenseResult.projectPath];
+    const documentName = deriveDocumentName(allPaths);
+
+    // Read the version from the first project's package.json (best-effort).
+    let projectVersion = '0.0.0';
+    try {
+      const pkgJson = JSON.parse(
+        require('fs').readFileSync(path.join(licenseResult.projectPath, 'package.json'), 'utf8')
+      );
+      projectVersion = pkgJson.version || '0.0.0';
+    } catch {
+      /* use default version */
+    }
+
+    const projectMeta = {
+      name: documentName,
+      version: projectVersion,
+      toolVersion: app.getVersion(),
+    };
+
+    const content = generateSbom(licenseResult, format, projectMeta);
+    await require('fs').promises.writeFile(outputPath, content, 'utf8');
+
+    sendLogMessage('success', `SBOM exported: ${path.basename(outputPath)}`);
+    analytics.trackEvent('sbom_generated', { format });
+    return { success: true };
+  } catch (err) {
+    console.error(`[IPC] sbom:export error: ${err.message}`);
+    sendLogMessage('error', `SBOM export failed: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - TRIAL
+// ============================================
+
+/**
+ * Handler: Increment the trial fix counter by one, called once per user-initiated
+ * "Apply Fixes" operation (not per repository). Licensed users are silently skipped.
+ */
+ipcMain.handle('increment-trial-fix', async () => {
+  try {
+    const licStatus = await license.checkLicense();
+    if (licStatus.isLicensed === true) return { success: true, skipped: true };
+    const updated = trialStore.incrementFixCount();
+    return { success: true, fixesConsumed: updated.fixesConsumed };
+  } catch (err) {
+    console.error('[IPC] increment-trial-fix error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current trial status (fixes remaining, days until price change, exhausted flag).
+ * Called by the renderer on mount and after each fix application to keep the footer current.
+ */
+ipcMain.handle('get-trial-status', async () => {
+  try {
+    return trialStore.getTrialStatus();
+  } catch (err) {
+    console.error('[IPC] get-trial-status error:', err.message);
+    // Safe fallback — show full quota so the UI never incorrectly blocks the user.
+    return {
+      fixesRemaining: 10,
+      fixesConsumed: 0,
+      daysUntilPriceChange: 30,
+      trialExhausted: false,
+    };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - ANALYTICS (D)
+// ============================================
+
+ipcMain.handle('set-analytics-opt-out', (_event, value) => {
+  try {
+    storeSet('ao', value ? '1' : null);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-analytics-opt-out', () => {
+  try {
+    return { optOut: storeGet('ao') === '1' };
+  } catch {
+    return { optOut: false };
+  }
+});
+
+// ============================================
 // IPC HANDLERS - LICENSE
 // ============================================
 
 ipcMain.handle('get-commercial-status', async () => {
-  return await license.checkLicense();
+  try {
+    return await license.checkLicense();
+  } catch (err) {
+    console.error('[IPC] get-commercial-status error:', err.message);
+    // Fail closed: isCommercial:false means the renderer treats this as a free/community
+    // build, showing no commercial UI. Safer than exposing monetization intent on error.
+    return { isCommercial: false, isLicensed: false };
+  }
 });
 
 ipcMain.handle('activate-license', async (event, paymentData) => {
-  return await license.activateLicense(paymentData);
+  try {
+    return await license.activateLicense(paymentData);
+  } catch (err) {
+    console.error('[IPC] activate-license error:', err.message);
+    // Do NOT forward err.message to the renderer — it may contain internal file paths,
+    // encryption details, or the hidden .vsweep marker path. Return a safe user message.
+    return { success: false, error: 'License activation failed. Please try again.' };
+  }
 });
 
 ipcMain.handle('get-install-info', () => {
-  return license.getInstallInfo();
+  try {
+    return license.getInstallInfo();
+  } catch (err) {
+    console.error('[IPC] get-install-info error:', err.message);
+    // Use constants exported from license.js rather than duplicating magic numbers here.
+    return license.getPromoDefaults();
+  }
+});
+
+/**
+ * Handler: Return active purchase price (promo vs full) and promo end date.
+ * Used by BuyModal to display dynamic pricing without hardcoded constants.
+ * @returns {{ price: number, isPromo: boolean, promoEndsAt: string|null }}
+ */
+ipcMain.handle('get-active-price', async () => {
+  try {
+    return license.getActivePrice();
+  } catch (err) {
+    console.error('[IPC] get-active-price error:', err.message);
+    const { LICENSE_CONFIG } = require('./config/constants');
+    return { price: LICENSE_CONFIG.PROMO_PRICE_EUR, isPromo: true, promoEndsAt: null };
+  }
 });
 
 /**
@@ -549,6 +1010,9 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // Isolated session — completely separate from the main app session.
+        // The permissive PayPal-scoped CSP is applied to this partition only.
+        partition: 'payment-isolated',
       },
     });
 
@@ -591,6 +1055,9 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
       }
 
       const result = await license.generateLicense();
+      if (result.ok) {
+        analytics.trackEvent('paypal_purchase_success');
+      }
       resolve(result);
     }
 
@@ -609,38 +1076,148 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
 });
 
 // ============================================
+// IPC HANDLERS - APP INFO (B)
+// ============================================
+
+/**
+ * Handler: Return app version and name.
+ * Used by the About tab to display the current application version.
+ * @returns {{ version: string, name: string }}
+ */
+ipcMain.handle('get-app-version', () => ({
+  version: app.getVersion(),
+  name: app.getName(),
+}));
+
+/**
+ * Handler: Open a local documentation file in the system default application.
+ * Only PRIVACY_POLICY.md and DISCLAIMER.md are permitted — all other filenames
+ * are rejected with an error to prevent path traversal.
+ * @param {string} filename - One of the allowed document filenames
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+const ALLOWED_DOCS = ['PRIVACY_POLICY.md', 'DISCLAIMER.md'];
+ipcMain.handle('open-local-doc', async (_event, filename) => {
+  if (!ALLOWED_DOCS.includes(filename)) {
+    return { success: false, error: 'Document not allowed' };
+  }
+  try {
+    const docPath = path.join(app.getAppPath(), filename);
+    await shell.openPath(docPath);
+    return { success: true };
+  } catch (err) {
+    console.error(`[IPC] open-local-doc error: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Create a license backup file (.vsbak) via save dialog.
+ * Only available when a valid license is active — returns error if not licensed.
+ * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+ */
+ipcMain.handle('license-backup', async () => {
+  try {
+    const licCheck = await license.checkLicense();
+    if (!licCheck.isLicensed) return { success: false, error: 'No valid license to backup' };
+    const saveResult = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save License Backup',
+      defaultPath: 'vulnsweep-license.vsbak',
+      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true };
+    return await license.createLicenseBackup(saveResult.filePath);
+  } catch (err) {
+    console.error('[IPC] license-backup error:', err.message);
+    return { success: false, error: 'Backup failed. Please try again.' };
+  }
+});
+
+/**
+ * Handler: Restore a license from a .vsbak backup file via open dialog.
+ * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
+ */
+ipcMain.handle('license-restore', async () => {
+  try {
+    const openResult = await dialog.showOpenDialog(mainWindow, {
+      title: 'Restore License Backup',
+      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
+      properties: ['openFile'],
+    });
+    if (openResult.canceled || openResult.filePaths.length === 0)
+      return { success: false, cancelled: true };
+    return await license.restoreLicenseBackup(openResult.filePaths[0]);
+  } catch (err) {
+    console.error('[IPC] license-restore error:', err.message);
+    return { success: false, error: 'Restore failed. Please try again.' };
+  }
+});
+
+// ============================================
 // APP LIFECYCLE
 // ============================================
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
+  // Pre-warm the secure store now that app.getPath('userData') is available.
+  // storeGet is imported at the top of this file; calling it here (post app.ready)
+  // guarantees _getInstance() binds to the correct Electron userData path rather
+  // than the ~/.vsweep-store fallback that would be used if called before app.ready.
+  storeGet('_init'); // triggers lazy initialization while app is ready
+
+  // analytics.init() is called at module top-level (before app.whenReady()) — see top of file.
+  analytics.trackEvent('app_initialized');
+
   const { session } = require('electron');
 
-  // Apply permissive CSP to the named session used by the main window and PayPal popups.
-  // Using a named partition ensures the CSP applies to all windows sharing that session.
+  // CSP for the main application window and splash screen.
+  // In production: strict policy — no external resources, no inline scripts, no network.
+  // In development: relaxed policy to allow Vite HMR inline preamble and WebSocket.
   const mainSession = session.fromPartition('persist:vulnsweep');
-
-  // Strip "Electron/x.x.x" and the app name from the user agent.
-  // PayPal's SDK detects "Electron" in the UA and sets disableSetCookie=true,
-  // which breaks the buyer access token flow — the token is passed via cookies
-  // from the login popup back to the parent window. Without cookies, capture fails.
-  // Presenting as a standard Chrome browser makes PayPal use its normal cookie auth.
-  const chromeUA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.188 Safari/537.36';
-  mainSession.setUserAgent(chromeUA);
-
   mainSession.webRequest.onHeadersReceived((details, callback) => {
-    const csp = [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://* http://* blob:",
-      "style-src 'self' 'unsafe-inline' https://* http://*",
-      "img-src 'self' data: https: blob:",
-      "connect-src 'self' https://* http://*",
-      "frame-src 'self' https://* http://*",
-      "font-src 'self' data: https://* http://*",
-      'worker-src blob:',
-    ].join('; ');
+    const csp = isDevelopment
+      ? [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob: data:",
+          "font-src 'self'",
+          "connect-src 'self' ws://localhost:* http://localhost:*",
+          "frame-src 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+        ].join('; ')
+      : [
+          "default-src 'none'",
+          "script-src 'self'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' blob:",
+          "font-src 'self'",
+          "connect-src 'none'",
+          "frame-src 'none'",
+          "object-src 'none'",
+          "base-uri 'self'",
+        ].join('; ');
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    });
+  });
 
+  // Permissive CSP scoped to PayPal origins for the isolated payment window only.
+  const paymentSession = session.fromPartition('payment-isolated');
+  paymentSession.webRequest.onHeadersReceived((details, callback) => {
+    const csp = [
+      "default-src 'self' https://www.paypal.com https://www.paypalobjects.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.paypal.com https://www.paypalobjects.com",
+      "style-src 'self' 'unsafe-inline' https://www.paypal.com https://www.paypalobjects.com",
+      "img-src 'self' data: https:",
+      "connect-src 'self' https://www.paypal.com https://www.paypalobjects.com https://api.paypal.com",
+      'frame-src https://www.paypal.com',
+      "font-src 'self' data: https://www.paypalobjects.com",
+    ].join('; ');
     callback({
       responseHeaders: {
         ...details.responseHeaders,

@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types';
 import { useState, useRef, useEffect } from 'react';
 
 /**
@@ -64,12 +65,7 @@ function InfoTooltip({ content, title }) {
                 className="text-gray-400 hover:text-gray-200"
                 aria-label="Close"
               >
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -82,13 +78,16 @@ function InfoTooltip({ content, title }) {
           )}
 
           {/* Body */}
-          <div className="px-3 py-2 text-xs text-gray-300 max-h-64 overflow-y-auto">
-            {content}
-          </div>
+          <div className="px-3 py-2 text-xs text-gray-300 max-h-64 overflow-y-auto">{content}</div>
         </div>
       )}
     </div>
   );
 }
+
+InfoTooltip.propTypes = {
+  content: PropTypes.node.isRequired,
+  title: PropTypes.string,
+};
 
 export default InfoTooltip;
