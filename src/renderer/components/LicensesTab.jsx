@@ -1,5 +1,5 @@
 ﻿/* eslint-disable react/prop-types */
-import { Download, ExternalLink } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { LICENSE_TIER_COLORS } from '../constants';
@@ -136,12 +136,6 @@ function LicensesTab({ licenseResult, isScanning, scanError }) {
       setExportError(err.message);
     } finally {
       setIsExporting(false);
-    }
-  }
-
-  function handleOpenExternal(url) {
-    if (url && window.electronAPI?.openExternal) {
-      window.electronAPI.openExternal(url);
     }
   }
 
@@ -304,22 +298,14 @@ function LicensesTab({ licenseResult, isScanning, scanError }) {
                 {atRiskEntries.map((entry) => (
                   <tr key={entry.purl} className="border-b border-gray-800 hover:bg-surface-raised">
                     <td className="py-1.5 pr-3 font-mono text-gray-100">
-                      {entry.name}
-                      {entry.npmUrl && (
-                        <a
-                          href={entry.npmUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ml-1.5 text-blue-400 hover:text-blue-300 inline-flex items-center"
-                          title="View on npm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleOpenExternal(entry.npmUrl);
-                          }}
-                        >
-                          <ExternalLink size={11} />
-                        </a>
-                      )}
+                      <a
+                        href={`https://www.npmjs.com/package/${entry.name}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:text-blue-300 underline"
+                      >
+                        {entry.name}
+                      </a>
                     </td>
                     <td className="py-1.5 pr-3 font-mono text-gray-300">{entry.version}</td>
                     <td className="py-1.5 pr-3 font-mono text-xs">{entry.license}</td>
@@ -364,22 +350,14 @@ function LicensesTab({ licenseResult, isScanning, scanError }) {
                 {unknownEntries.map((entry) => (
                   <tr key={entry.purl} className="border-b border-gray-800 hover:bg-surface-raised">
                     <td className="py-1.5 pr-3 font-mono text-gray-100">
-                      {entry.name}
-                      {entry.npmUrl && (
-                        <a
-                          href={entry.npmUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="ml-1.5 text-blue-400 hover:text-blue-300 inline-flex items-center"
-                          title="View on npm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleOpenExternal(entry.npmUrl);
-                          }}
-                        >
-                          <ExternalLink size={11} />
-                        </a>
-                      )}
+                      <a
+                        href={`https://www.npmjs.com/package/${entry.name}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 hover:text-blue-300 underline"
+                      >
+                        {entry.name}
+                      </a>
                     </td>
                     <td className="py-1.5 pr-3 font-mono text-gray-300">{entry.version}</td>
                     <td className="py-1.5 pr-3 font-mono text-xs">
