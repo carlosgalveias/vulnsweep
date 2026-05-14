@@ -1,5 +1,6 @@
 /* eslint-disable import/order */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import FirstRunModal from './components/FirstRunModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
@@ -17,6 +18,9 @@ import useProjectDiscovery from './hooks/useProjectDiscovery';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
 
 function App() {
+  const [showFirstRun, setShowFirstRun] = useState(
+    () => localStorage.getItem('vulnsweep_terms_accepted') !== 'true'
+  );
   const [licStatus, setLicStatus] = useState(null);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [scanCount, setScanCount] = useState(0);
@@ -51,6 +55,11 @@ function App() {
   });
 
   const [dirtyRepos, setDirtyRepos] = useState(new Set());
+
+  const handleFirstRunAccept = useCallback(() => {
+    localStorage.setItem('vulnsweep_terms_accepted', 'true');
+    setShowFirstRun(false);
+  }, []);
 
   const addDirtyRepo = useCallback((repoPath) => {
     setDirtyRepos((prev) => {
@@ -463,185 +472,188 @@ function App() {
   const trialExhausted = trialStatus?.trialExhausted === true;
 
   return (
-    <div className="h-screen flex flex-col bg-surface text-gray-100">
-      <ErrorBoundary fallbackMessage="Failed to load header">
-        <Header
-          selectedFolder={selectedFolder}
-          onBrowseFolder={browseFolder}
-          progress={combinedProgress}
-          onScanAudit={handleScanAudit}
-          onApplyFixes={handleApplyFixes}
-          onCommitPush={commitAndPush}
-          buttonsState={buttonsState}
-          scanButtonLabel={scanButtonLabel}
-          applyButtonLabel={applyButtonLabel}
-          allowReset={allowReset}
-          onAllowResetChange={handleAllowResetChange}
-          bumpVersion={bumpVersion}
-          onBumpVersionChange={setBumpVersion}
-          removePackageLock={removePackageLock}
-          onRemovePackageLockChange={setRemovePackageLock}
-          removeOverrides={removeOverrides}
-          onRemoveOverridesChange={setRemoveOverrides}
-          licStatus={licStatus}
-          trialStatus={trialStatus}
-          onBuyNow={() => setShowBuyModal(true)}
+    <>
+      {showFirstRun && <FirstRunModal onAccept={handleFirstRunAccept} />}
+      <div className="h-screen flex flex-col bg-surface text-gray-100">
+        <ErrorBoundary fallbackMessage="Failed to load header">
+          <Header
+            selectedFolder={selectedFolder}
+            onBrowseFolder={browseFolder}
+            progress={combinedProgress}
+            onScanAudit={handleScanAudit}
+            onApplyFixes={handleApplyFixes}
+            onCommitPush={commitAndPush}
+            buttonsState={buttonsState}
+            scanButtonLabel={scanButtonLabel}
+            applyButtonLabel={applyButtonLabel}
+            allowReset={allowReset}
+            onAllowResetChange={handleAllowResetChange}
+            bumpVersion={bumpVersion}
+            onBumpVersionChange={setBumpVersion}
+            removePackageLock={removePackageLock}
+            onRemovePackageLockChange={setRemovePackageLock}
+            removeOverrides={removeOverrides}
+            onRemoveOverridesChange={setRemoveOverrides}
+            licStatus={licStatus}
+            trialStatus={trialStatus}
+            onBuyNow={() => setShowBuyModal(true)}
+          />
+        </ErrorBoundary>
+
+        <div className="flex items-end bg-surface-raised border-b border-gray-700 px-4 pt-1 flex-shrink-0">
+          {[
+            { id: 'scanner', label: 'Scanner' },
+            { id: 'statistics', label: 'Statistics' },
+            { id: 'dep-updates', label: 'Dep Updates' },
+            { id: 'licenses', label: 'Licenses' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${activeTab === tab.id ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {activeTab === 'scanner' && (
+            <>
+              <div className="h-[60%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
+                  <VulnerabilityGrid
+                    vulnerabilities={vulnerabilities}
+                    selectedVulns={selectedVulns}
+                    onToggleVuln={toggleVulnerability}
+                    onToggleAll={toggleAll}
+                    isLoading={isScanning}
+                    hasFolder={!!selectedFolder}
+                    hasScanned={hasScanned}
+                    isEnriching={isEnriching}
+                    enrichmentProgress={enrichmentProgress}
+                  />
+                </ErrorBoundary>
+              </div>
+              <div className="h-[40%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load log console">
+                  <LogConsole logs={logs} onClear={clearLogs} />
+                </ErrorBoundary>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'statistics' && (
+            <div className="flex-1 overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load statistics">
+                <StatisticsTab vulnerabilities={vulnerabilities} hasScanned={hasScanned} />
+              </ErrorBoundary>
+            </div>
+          )}
+
+          {activeTab === 'dep-updates' && (
+            <>
+              <div className="h-[60%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load dependency updates">
+                  <DependencyUpdatesTab
+                    candidates={depUpdateCandidates}
+                    isScanning={isDepScanning}
+                    scanError={depScanError}
+                    selectedPackages={selectedDepUpdates}
+                    onSelectionChange={setSelectedDepUpdates}
+                    applyStatus={depApplyStatus}
+                    applyError={depApplyError}
+                    commitMessage={depCommitMessage}
+                    appliedPackages={appliedDepPackages}
+                  />
+                </ErrorBoundary>
+              </div>
+              <div className="h-[40%] overflow-hidden">
+                <ErrorBoundary fallbackMessage="Failed to load log console">
+                  <LogConsole logs={logs} onClear={clearLogs} />
+                </ErrorBoundary>
+              </div>
+            </>
+          )}
+          {activeTab === 'licenses' && (
+            <div className="flex-1 overflow-hidden">
+              <ErrorBoundary fallbackMessage="Failed to load licenses">
+                <LicensesTab
+                  licenseResult={licenseResult}
+                  isScanning={isScanning || isLicenseScanning}
+                  scanError={licenseScanError}
+                  projectPath={selectedFolder}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
+          {isUnlicensed && (
+            <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
+              {trialExhausted ? (
+                <>
+                  <span>Free fixes exhausted - Upgrade to continue applying fixes</span>
+                  <button
+                    onClick={() => setShowBuyModal(true)}
+                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                  >
+                    Upgrade Now
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left - {daysLeft}{' '}
+                    {daysLeft !== 1 ? 'days' : 'day'} until price changes
+                  </span>
+                  <button
+                    onClick={() => setShowBuyModal(true)}
+                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
+                  >
+                    Buy Now
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <Modal
+          isOpen={showHighRiskModal}
+          onClose={closeHighRiskModal}
+          onConfirm={confirmHighRiskFixes}
+          title="Confirm HIGH Risk Fixes"
+          message={`You are about to apply ${highRiskCount} HIGH risk fix(es). These involve major version updates that may introduce breaking changes. Are you sure you want to proceed?`}
+          confirmText="Apply Fixes"
+          confirmStyle="danger"
         />
-      </ErrorBoundary>
 
-      <div className="flex items-end bg-surface-raised border-b border-gray-700 px-4 pt-1 flex-shrink-0">
-        {[
-          { id: 'scanner', label: 'Scanner' },
-          { id: 'statistics', label: 'Statistics' },
-          { id: 'dep-updates', label: 'Dep Updates' },
-          { id: 'licenses', label: 'Licenses' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${activeTab === tab.id ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        <Modal
+          isOpen={showGitResetModal}
+          onClose={cancelGitReset}
+          onConfirm={confirmGitReset}
+          title="Git Reset Warning"
+          message="Git reset is ENABLED. VulnSweep will run git reset --hard on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?"
+          confirmText="Proceed with Scan"
+          confirmStyle="danger"
+        />
+
+        <BuyModal
+          isOpen={showBuyModal}
+          onClose={() => setShowBuyModal(false)}
+          installInfo={installInfo}
+          onPaymentSuccess={async ({ licenseKey }) => {
+            try {
+              const status = await window.electronAPI.getCommercialStatus();
+              setLicStatus(status);
+              setShowBuyModal(false);
+              addLog('info', `Commercial license activated! Key: ${licenseKey}`);
+            } catch (err) {
+              addLog('error', `Failed to refresh license status: ${err.message}`);
+            }
+          }}
+        />
       </div>
-
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {activeTab === 'scanner' && (
-          <>
-            <div className="h-[60%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load vulnerability grid">
-                <VulnerabilityGrid
-                  vulnerabilities={vulnerabilities}
-                  selectedVulns={selectedVulns}
-                  onToggleVuln={toggleVulnerability}
-                  onToggleAll={toggleAll}
-                  isLoading={isScanning}
-                  hasFolder={!!selectedFolder}
-                  hasScanned={hasScanned}
-                  isEnriching={isEnriching}
-                  enrichmentProgress={enrichmentProgress}
-                />
-              </ErrorBoundary>
-            </div>
-            <div className="h-[40%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load log console">
-                <LogConsole logs={logs} onClear={clearLogs} />
-              </ErrorBoundary>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'statistics' && (
-          <div className="flex-1 overflow-hidden">
-            <ErrorBoundary fallbackMessage="Failed to load statistics">
-              <StatisticsTab vulnerabilities={vulnerabilities} hasScanned={hasScanned} />
-            </ErrorBoundary>
-          </div>
-        )}
-
-        {activeTab === 'dep-updates' && (
-          <>
-            <div className="h-[60%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load dependency updates">
-                <DependencyUpdatesTab
-                  candidates={depUpdateCandidates}
-                  isScanning={isDepScanning}
-                  scanError={depScanError}
-                  selectedPackages={selectedDepUpdates}
-                  onSelectionChange={setSelectedDepUpdates}
-                  applyStatus={depApplyStatus}
-                  applyError={depApplyError}
-                  commitMessage={depCommitMessage}
-                  appliedPackages={appliedDepPackages}
-                />
-              </ErrorBoundary>
-            </div>
-            <div className="h-[40%] overflow-hidden">
-              <ErrorBoundary fallbackMessage="Failed to load log console">
-                <LogConsole logs={logs} onClear={clearLogs} />
-              </ErrorBoundary>
-            </div>
-          </>
-        )}
-        {activeTab === 'licenses' && (
-          <div className="flex-1 overflow-hidden">
-            <ErrorBoundary fallbackMessage="Failed to load licenses">
-              <LicensesTab
-                licenseResult={licenseResult}
-                isScanning={isScanning || isLicenseScanning}
-                scanError={licenseScanError}
-                projectPath={selectedFolder}
-              />
-            </ErrorBoundary>
-          </div>
-        )}
-        {isUnlicensed && (
-          <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
-            {trialExhausted ? (
-              <>
-                <span>Free fixes exhausted - Upgrade to continue applying fixes</span>
-                <button
-                  onClick={() => setShowBuyModal(true)}
-                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                >
-                  Upgrade Now
-                </button>
-              </>
-            ) : (
-              <>
-                <span>
-                  You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left - {daysLeft}{' '}
-                  {daysLeft !== 1 ? 'days' : 'day'} until price changes
-                </span>
-                <button
-                  onClick={() => setShowBuyModal(true)}
-                  className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                >
-                  Buy Now
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      <Modal
-        isOpen={showHighRiskModal}
-        onClose={closeHighRiskModal}
-        onConfirm={confirmHighRiskFixes}
-        title="Confirm HIGH Risk Fixes"
-        message={`You are about to apply ${highRiskCount} HIGH risk fix(es). These involve major version updates that may introduce breaking changes. Are you sure you want to proceed?`}
-        confirmText="Apply Fixes"
-        confirmStyle="danger"
-      />
-
-      <Modal
-        isOpen={showGitResetModal}
-        onClose={cancelGitReset}
-        onConfirm={confirmGitReset}
-        title="Git Reset Warning"
-        message="Git reset is ENABLED. VulnSweep will run git reset --hard on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?"
-        confirmText="Proceed with Scan"
-        confirmStyle="danger"
-      />
-
-      <BuyModal
-        isOpen={showBuyModal}
-        onClose={() => setShowBuyModal(false)}
-        installInfo={installInfo}
-        onPaymentSuccess={async ({ licenseKey }) => {
-          try {
-            const status = await window.electronAPI.getCommercialStatus();
-            setLicStatus(status);
-            setShowBuyModal(false);
-            addLog('info', `Commercial license activated! Key: ${licenseKey}`);
-          } catch (err) {
-            addLog('error', `Failed to refresh license status: ${err.message}`);
-          }
-        }}
-      />
-    </div>
+    </>
   );
 }
 

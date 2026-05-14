@@ -425,7 +425,6 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     // This ensures fresh data for each user-initiated scan while preserving
     // cache hits across all projects in the same session
     audit.clearCache();
-    console.log('[IPC] Registry cache cleared for new scan session');
 
     const results = [];
     const total = projectPaths.length;
@@ -550,12 +549,6 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
       console.error(`[IPC] apply-fixes error: ${result.error}`);
       sendLogMessage('error', `Failed to apply fixes: ${result.error}`);
       return { success: false, error: result.error };
-    }
-
-    // Increment trial counter for unlicensed users after a successful fix application.
-    if (!isLicensed) {
-      trialStore.incrementFixCount();
-      console.log('[IPC] apply-fixes: trial fix count incremented.');
     }
 
     // Unwrap the Result object and return just the fix data
@@ -889,6 +882,22 @@ ipcMain.handle('sbom:export', async (event, { licenseResult, format, outputPath 
 // ============================================
 // IPC HANDLERS - TRIAL
 // ============================================
+
+/**
+ * Handler: Increment the trial fix counter by one, called once per user-initiated
+ * "Apply Fixes" operation (not per repository). Licensed users are silently skipped.
+ */
+ipcMain.handle('increment-trial-fix', async () => {
+  try {
+    const licStatus = await license.checkLicense();
+    if (licStatus.isLicensed === true) return { success: true, skipped: true };
+    const updated = trialStore.incrementFixCount();
+    return { success: true, fixesConsumed: updated.fixesConsumed };
+  } catch (err) {
+    console.error('[IPC] increment-trial-fix error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
 
 /**
  * Handler: Return current trial status (fixes remaining, days until price change, exhausted flag).

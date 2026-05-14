@@ -1,6 +1,6 @@
 {
   "name": "vulnsweep",
-  "version": "1.0.4",
+  "version": "1.0.0",
   "description": "Automated dependency vulnerability orchestrator for bulk npm security updates across multiple repositories",
   "main": "dist-main/main.js",
   "scripts": {
@@ -95,7 +95,7 @@
     "secure-ls": "^2.0.0",
     "semver": "^7.6.0",
     "sludge-crypt": "^1.0.5",
-    "systeminformation": "^5.31.5"
+    "systeminformation": "^5.31.6"
   },
   "build": {
     "appId": "com.vulnsweep.app",

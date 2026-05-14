@@ -1,11 +1,13 @@
+<img src="../assets/banner.png" alt="VulnSweep" width="100%" />
+
 # VulnSweep — One-Page Pitch
 
 ## The Only npm Security Platform That Does Everything. Free to Start.
 
 **Category:** DevSecOps Desktop Application — npm Security, License Compliance, SBOM Generation
-**Platform:** Windows, macOS, Linux (Electron)
+**Platform:** Windows (Electron) — macOS and Linux coming soon
 **Pricing:** Core features free. Fix-and-commit: 10 sessions free.
-**Download:** https://github.com/cgalveias/vulnsweep/releases
+**Download:** https://github.com/carlosgalveias/vulnsweep-releases
 
 ---
 
@@ -123,8 +125,8 @@ Built on Electron 41, React, and TailwindCSS. 100% local execution. Zero cloud b
 
 ## Download Now
 
-**https://github.com/cgalveias/vulnsweep/releases**
+**https://github.com/carlosgalveias/vulnsweep-releases**
 
-Windows (NSIS installer) · macOS (DMG) · Linux (AppImage / DEB)
+Windows (NSIS installer) · macOS _(coming soon)_ · Linux _(coming soon)_
 
 _VulnSweep — The npm security platform for teams who ship fast and refuse to compromise._

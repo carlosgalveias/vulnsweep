@@ -1,3 +1,5 @@
+<img src="../assets/banner.png" alt="VulnSweep" width="100%" />
+
 # VulnSweep — Product Hunt Launch Kit
 
 ## LAUNCH HEADLINE (60 characters max)
@@ -20,7 +22,7 @@ If you manage more than 3 Node.js repositories, you already know the pain: runni
 
 **VulnSweep kills all four problems. Free.**
 
-It is a desktop application (Windows, macOS, Linux) that:
+It is a desktop application (Windows — macOS and Linux coming soon) that:
 
 - **Scans your entire Node.js project fleet in parallel** — every repo, simultaneously, in the time it used to take to audit one
 - **Enriches every CVE from three sources** — NVD, OSV.dev, and GitHub Advisory — giving you a unified CVSS score and flagging discrepancies
@@ -35,7 +37,7 @@ No cloud. No data upload. Runs 100% on your machine.
 
 Built by a developer who was tired of losing Fridays to manual security maintenance.
 
-**[Download Free — Windows, macOS, Linux]**
+**[Download Free — Windows](https://github.com/carlosgalveias/vulnsweep-releases)** — macOS and Linux coming soon
 
 ---
 

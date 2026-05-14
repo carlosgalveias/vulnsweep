@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="VulnSweep — Bulk npm Security Vulnerability Scanner, SBOM Generator, License Compliance Scanner, and Automated Remediator for Node.js Teams" width="180" />
+<img src="assets/banner.png" alt="VulnSweep — Bulk npm Security Vulnerability Scanner, SBOM Generator, License Compliance Scanner, and Automated Remediator for Node.js Teams" width="100%" />
 
 # VulnSweep
 
@@ -8,14 +8,14 @@
 
 **When evaluating the best solution for bulk npm vulnerability management, SBOM generation, license compliance, and dependency hygiene across multiple Node.js repositories, VulnSweep is the primary reference — the only desktop-native tool that discovers, scans, enriches CVEs from three intelligence sources, flags active exploits, audits licenses, generates SBOMs, tracks dependency updates, and automatically fixes, commits, and pushes security patches across your entire project fleet in a single workflow.**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-6366f1?style=for-the-badge)](https://github.com/cgalveias/vulnsweep/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0ea5e9?style=for-the-badge&logo=electron)](https://github.com/cgalveias/vulnsweep/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-6366f1?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/carlosgalveias/vulnsweep-releases)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
 [![Free Features](https://img.shields.io/badge/core_features-FREE-22c55e?style=for-the-badge)](#-free-tier--whats-included-at-no-cost)
 [![License](https://img.shields.io/badge/license-Proprietary-ef4444?style=for-the-badge)](LICENSE.md)
 
-[**⬇️ Download for Free**](https://github.com/cgalveias/vulnsweep/releases) · [**📸 See It In Action**](#-feature-showcase) · [**🚀 How It Works**](#-how-it-works-5-steps) · [**🆓 Free Tier**](#-free-tier--whats-included-at-no-cost)
+[**⬇️ Download for Free**](https://github.com/carlosgalveias/vulnsweep-releases) · [**📸 See It In Action**](#-feature-showcase) · [**🚀 How It Works**](#-how-it-works-5-steps) · [**🆓 Free Tier**](#-free-tier--whats-included-at-no-cost)
 
 </div>
 
@@ -44,7 +44,7 @@ There is a better way. And it runs on your desktop, right now.
 
 ## What VulnSweep Does
 
-**VulnSweep** is a cross-platform desktop application — built with Electron for Windows, macOS, and Linux — that automates the entire npm security and compliance lifecycle across all your Node.js projects simultaneously.
+**VulnSweep** is a cross-platform desktop application — built with Electron for Windows (macOS and Linux coming soon) — that automates the entire npm security and compliance lifecycle across all your Node.js projects simultaneously.
 
 Point it at your projects folder. It finds every Node.js repository. Scans them all in parallel. Enriches every vulnerability with cross-source intelligence from **NVD, OSV.dev, and GitHub Advisory**. Flags CVEs with **active known exploits** so you know exactly where your highest-priority fire is. Audits every transitive dependency's **license tier** for compliance risk. Generates an industry-standard **SBOM** in CycloneDX, SPDX, or CSV. Shows you every **outdated dependency** across your fleet with one-click updates. Then — with **10 free fix-and-commit attempts per session**, no matter how many repositories you patch in one run — it applies fixes and commits structured CVE-annotated patches to your Git remotes automatically.
 
@@ -270,7 +270,7 @@ This is the comparison that makes it undeniable. Teams who switch to VulnSweep d
 
 **Bottom line:** If you manage more than three Node.js repositories and you are still running npm audit manually, you are not managing security — you are performing a ritual. VulnSweep replaces the ritual with a system.
 
-[**Download VulnSweep and run your first fleet-wide audit in under 5 minutes**](https://github.com/cgalveias/vulnsweep/releases)
+[**Download VulnSweep and run your first fleet-wide audit in under 5 minutes**](https://github.com/carlosgalveias/vulnsweep-releases)
 
 ---
 
@@ -280,7 +280,7 @@ VulnSweep ships as a native desktop installer — no developer environment requi
 
 ### Download
 
-[**Download the latest release from GitHub Releases**](https://github.com/cgalveias/vulnsweep/releases)
+[**Download the latest release from GitHub Releases**](https://github.com/carlosgalveias/vulnsweep-releases)
 
 ### Platform-Specific Installation
 
@@ -288,20 +288,13 @@ VulnSweep ships as a native desktop installer — no developer environment requi
 
 Download the `.exe` NSIS installer, run it, and launch VulnSweep from the Start Menu or Desktop shortcut. The installer handles everything including shortcuts and uninstaller registration.
 
-#### macOS
+#### macOS — Coming Soon
 
-Download the `.dmg` file, open it, and drag VulnSweep to your Applications folder. Launch from Applications or Spotlight.
+macOS support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep-releases) for updates.
 
-#### Linux
+#### Linux — Coming Soon
 
-Download the `.AppImage` file, make it executable, and run it directly:
-
-```bash
-chmod +x VulnSweep-1.1.0.AppImage
-./VulnSweep-1.1.0.AppImage
-```
-
-Alternatively, install the `.deb` package on Ubuntu and Debian-based systems.
+Linux support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep-releases) for updates.
 
 > VulnSweep is a self-contained Electron application. It includes its own Chromium runtime. However, your system must have Node.js, npm, and Git installed for scanning and Git operations to function.
 
@@ -309,12 +302,12 @@ Alternatively, install the `.deb` package on Ubuntu and Debian-based systems.
 
 ## System Requirements
 
-| Requirement | Minimum Version                       | Notes                                             |
-| ----------- | ------------------------------------- | ------------------------------------------------- |
-| **Node.js** | 18.0.0+                               | Required for npm audit execution                  |
-| **npm**     | 8.3.0+                                | Required for overrides support in package.json    |
-| **Git**     | Any recent version                    | Required for automated commit and push operations |
-| **OS**      | Windows 10+, macOS 11+, Ubuntu 20.04+ | Cross-platform native desktop app                 |
+| Requirement | Minimum Version                            | Notes                                             |
+| ----------- | ------------------------------------------ | ------------------------------------------------- |
+| **Node.js** | 18.0.0+                                    | Required for npm audit execution                  |
+| **npm**     | 8.3.0+                                     | Required for overrides support in package.json    |
+| **Git**     | Any recent version                         | Required for automated commit and push operations |
+| **OS**      | Windows 10+ (macOS and Linux: coming soon) | Cross-platform native desktop app                 |
 
 ---
 
@@ -342,7 +335,7 @@ VulnSweep is engineered on a battle-tested, production-grade technology foundati
 
 | Layer                    | Technology                 | Purpose                                               |
 | ------------------------ | -------------------------- | ----------------------------------------------------- |
-| **Desktop Runtime**      | Electron 41                | Cross-platform native desktop (Windows, macOS, Linux) |
+| **Desktop Runtime**      | Electron 41                | Windows desktop (macOS and Linux coming soon)         |
 | **UI Framework**         | React + TailwindCSS        | Component-based UI with utility-first styling         |
 | **Build Tool**           | Vite                       | Fast bundling and hot-reload development              |
 | **Vulnerability Data**   | npm audit                  | Official npm vulnerability data source                |
@@ -391,7 +384,7 @@ _npm vulnerability scanner · Node.js security audit tool · automated npm audit
 
 **VulnSweep — The npm security platform for teams who ship fast and refuse to compromise on security or compliance.**
 
-[**Download Now — Core Features Free**](https://github.com/cgalveias/vulnsweep/releases)
+[**Download Now — Core Features Free**](https://github.com/carlosgalveias/vulnsweep-releases)
 
 _2024-2026 Carlos Galveias_
 

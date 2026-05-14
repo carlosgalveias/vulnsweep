@@ -50,6 +50,7 @@ export default function useFixApplication(
     });
 
     // Apply fixes per project
+    let anySucceeded = false;
     for (const [projectPath, projectVulns] of vulnsByProject.entries()) {
       const projectName = projects.find((p) => p.path === projectPath)?.name || 'Unknown';
       addLog('info', `Applying ${projectVulns.length} fix(es) to ${projectName}...`);
@@ -83,6 +84,7 @@ export default function useFixApplication(
         });
 
         if (result.success) {
+          anySucceeded = true;
           // Update status to 'resolved' for applied fixes
           setVulnerabilities((prev) =>
             prev.map((v) =>
@@ -101,11 +103,6 @@ export default function useFixApplication(
           // Mark this repository as dirty (has uncommitted changes).
           if (typeof onRepoDirtied === 'function') {
             onRepoDirtied(projectPath);
-          }
-
-          // Notify caller to refresh trial status after a successful fix application.
-          if (typeof onTrialUpdated === 'function') {
-            onTrialUpdated();
           }
         } else if (result.trialExhausted) {
           // Trial exhausted — reset status back to 'pending' so the vulnerability remains
@@ -134,6 +131,13 @@ export default function useFixApplication(
         addLog('error', `Error applying fixes to ${projectName}: ${error.message}`);
         console.error('Apply fixes error:', error);
       }
+    }
+
+    // Increment the trial counter exactly once for this entire operation,
+    // only if at least one repository was fixed successfully.
+    if (anySucceeded) {
+      await window.electronAPI.incrementTrialFix();
+      if (typeof onTrialUpdated === 'function') onTrialUpdated();
     }
 
     setIsApplying(false);

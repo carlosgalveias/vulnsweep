@@ -138,17 +138,13 @@ async function getDeviceData() {
 }
 
 async function checkLicense() {
-  const isCommercial = true;
-  console.log('[License] Commercial flag:', isCommercial);
-
   // Always ensure install date is recorded
   initInstallDate();
 
   // Pure path resolution — no filesystem side effect on a read-only check path.
   const vsweepFile = getVsweepFilePath();
-  console.log('[License] Checking vsweep marker at:', vsweepFile);
   if (!fs.existsSync(vsweepFile)) {
-    console.log('[License] Marker file not found.');
+    console.log('[License] Not licensed.');
     return { isCommercial: true, isLicensed: false };
   }
 
@@ -156,19 +152,13 @@ async function checkLicense() {
   const k = storeGet('k');
 
   if (!v || !k) {
-    console.log('[License] Store keys missing.');
+    console.log('[License] Not licensed.');
     return { isCommercial: true, isLicensed: false };
   }
 
   try {
     const stat = fs.statSync(vsweepFile);
     const creationDate = Math.floor(stat.birthtimeMs || stat.ctimeMs);
-    console.log(
-      '[License] Decrypting license payload with marker date:',
-      new Date(creationDate).toISOString(),
-      '| creationDate (ms):',
-      creationDate
-    );
 
     const privateKey = JSON.parse(k);
     const decrypted = await sludge.decompose(v, privateKey, creationDate);
@@ -183,10 +173,10 @@ async function checkLicense() {
 
     const deviceData = await getDeviceData();
     if (parsed && parsed.serialNumber === deviceData.serialNumber) {
-      console.log('[License] Validation passed for serial:', deviceData.serialNumber);
+      console.log('[License] License activated.');
       return { isCommercial: true, isLicensed: true, scans: 0 };
     } else {
-      console.log('[License] Validation failed or serial mismatch.');
+      console.log('[License] Not licensed.');
       return { isCommercial: true, isLicensed: false };
     }
   } catch (err) {
@@ -274,7 +264,6 @@ async function generateLicense() {
     const tsHex = Date.now().toString(16).toUpperCase();
     const licenseKey = `VS-${serialB64}-${tsHex}`;
 
-    console.log('[License] generateLicense() succeeded, key:', licenseKey);
     return { ok: true, key: licenseKey };
   } catch (err) {
     console.error('[License] generateLicense() failed:', err);

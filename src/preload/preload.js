@@ -95,6 +95,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTrialStatus: () => ipcRenderer.invoke('get-trial-status'),
 
   /**
+   * Increments the trial fix counter by one for the current user-initiated
+   * "Apply Fixes" operation. No-op for licensed users (skipped server-side).
+   * @returns {Promise<{ success: boolean, fixesConsumed?: number, skipped?: boolean, error?: string }>}
+   */
+  incrementTrialFix: () => ipcRenderer.invoke('increment-trial-fix'),
+
+  /**
    * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
    * Resolves when the user completes payment (success URL detected) or closes
    * the window without paying.
