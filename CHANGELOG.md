@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### GitHub Advisory Authentication and Rate-Limit Resilience
+
+- **`GITHUB_TOKEN` environment variable support** — when set, VulnSweep uses an authenticated GitHub Personal Access Token for all GitHub Advisory REST API requests, raising the effective rate limit from **60 requests/hour** (unauthenticated) to **5,000 requests/hour** (authenticated, an 83× improvement); token requires no scopes
+- **Retry constants consolidated into `GIT_CONFIG`** in [`src/main/config/constants.js`](src/main/config/constants.js): `GITHUB_MAX_RETRIES: 3`, `GITHUB_RETRY_BASE_DELAY_MS: 2000`, `GITHUB_RETRY_MAX_DELAY_MS: 60000`, `GITHUB_RETRY_JITTER_MS: 1000` — replaces inline magic numbers
+- **`computeBackoffDelay(attempt)`** helper function: computes exponential backoff delay (`base × 2^attempt`, capped at max) plus random jitter — used by the GitHub Advisory source on all retry paths
+- **`Retry-After` header support**: on HTTP 429/403 responses, VulnSweep reads GitHub's `Retry-After` header and waits the server-specified duration before retrying, falling back to `computeBackoffDelay()` when the header is absent
+- **Graceful degradation**: after exhausting `GITHUB_MAX_RETRIES` attempts, the advisory record is marked `rate_limit_exceeded` and the scan continues — no crash, no data loss across other sources
+- **12 new behavioural tests** for the GitHub Advisory source covering: authenticated header injection, unauthenticated fallback, `Retry-After` respect, exponential backoff computation, jitter bounds, max-retry exhaustion, and graceful degradation
+
 - Modular vulnerability scanner with plugin-based architecture (`src/main/modules/scanner/`)
 - `package-universe-builder.js` -- complete package inventory from `package-lock.json` (lockfile v1, v2, v3 support)
 - Five scanner source plugins: OSV, NVD, GitHub Advisory, CISA KEV, npm-audit

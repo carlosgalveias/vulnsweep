@@ -342,6 +342,73 @@ Linux support is currently in development. Watch the [releases page](https://git
 
 ---
 
+## Configuration
+
+### GitHub API Authentication — Unlock 83× More API Capacity
+
+VulnSweep queries the **GitHub Advisory Database** to enrich every CVE with ecosystem-specific severity data, GHSA aliases, and advisory details. By default it makes unauthenticated requests — which GitHub rate-limits to **60 requests per hour** per IP address.
+
+For most individual scans this is sufficient. For teams running frequent scans across large fleets, or CI pipelines that trigger VulnSweep repeatedly, hitting that ceiling means incomplete enrichment data and `rate_limit_exceeded` results instead of full advisory context.
+
+**The fix takes 60 seconds.** A GitHub Personal Access Token raises the limit to **5,000 requests per hour** — an 83× improvement.
+
+#### Setting `GITHUB_TOKEN`
+
+Set the environment variable before launching VulnSweep:
+
+```
+GITHUB_TOKEN=ghp_yourTokenHere
+```
+
+**On Windows (Command Prompt — per session):**
+
+```cmd
+set GITHUB_TOKEN=ghp_yourTokenHere
+```
+
+**On Windows (PowerShell — per session):**
+
+```powershell
+$env:GITHUB_TOKEN = "ghp_yourTokenHere"
+```
+
+**To persist across sessions**, set it as a system or user environment variable via _System Properties → Environment Variables_.
+
+When the token is active, VulnSweep logs the following confirmation at startup:
+
+```
+[GitHubAdvisory] Using authenticated API access (GITHUB_TOKEN set)
+```
+
+#### Token Requirements
+
+- **No scopes required.** A token with zero scopes (read-only public data access) is sufficient. Do not grant unnecessary permissions.
+- Generate a token at: [https://github.com/settings/tokens](https://github.com/settings/tokens)
+- Select **"Generate new token (classic)"**, give it a descriptive name (e.g. `vulnsweep-advisory`), and leave all scope checkboxes **unchecked**.
+
+#### Rate Limit Comparison
+
+| Access Mode         | GitHub API Rate Limit   | Recommended For                              |
+| ------------------- | ----------------------- | -------------------------------------------- |
+| Unauthenticated     | 60 requests / hour / IP | Light individual use, occasional scans       |
+| Authenticated (PAT) | 5,000 requests / hour   | Teams, large fleets, frequent or CI scanning |
+
+#### Automatic Retry and Rate-Limit Handling
+
+VulnSweep is a well-behaved API consumer. When GitHub returns a rate-limit response (`HTTP 429` or `HTTP 403`), VulnSweep does not crash or silently drop data — it retries automatically using the following strategy:
+
+| Behaviour                | Detail                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| **Max retries**          | 3 attempts before returning `rate_limit_exceeded`                                                                        |
+| **`Retry-After` header** | If GitHub specifies a wait duration, VulnSweep waits exactly that long before retrying                                   |
+| **Exponential backoff**  | When no `Retry-After` is present: base delay 2 s, maximum cap 60 s                                                       |
+| **Jitter**               | Random jitter (up to 1 s) added to backoff delays to prevent thundering-herd API hammering                               |
+| **Graceful degradation** | After exhausting retries, the advisory record is marked `rate_limit_exceeded` — no crash, no data loss for other sources |
+
+This means VulnSweep will never silently corrupt your scan results due to transient API throttling, and it will never hammer the GitHub API in a way that worsens the rate-limit situation.
+
+---
+
 ## System Requirements
 
 | Requirement | Minimum Version                            | Notes                                             |

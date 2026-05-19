@@ -35,6 +35,35 @@ const GIT_CONFIG = {
    * @type {string}
    */
   DEFAULT_COMMIT_MESSAGE: 'fix(security): update vulnerable dependencies',
+
+  /**
+   * Maximum number of retry attempts for GitHub Advisory API rate-limit errors.
+   * On each attempt the request is retried after an exponential backoff delay.
+   * The first attempt (attempt=0) is not a retry; retries are attempts 1..GITHUB_MAX_RETRIES.
+   * @type {number}
+   */
+  GITHUB_MAX_RETRIES: 3,
+
+  /**
+   * Base delay for exponential backoff when GitHub rate-limits us (milliseconds).
+   * Actual delay = GITHUB_RETRY_BASE_DELAY_MS * 2^attempt + jitter
+   * @type {number}
+   */
+  GITHUB_RETRY_BASE_DELAY_MS: 2000,
+
+  /**
+   * Maximum backoff delay cap (milliseconds).
+   * Prevents runaway wait times on high attempt numbers.
+   * @type {number}
+   */
+  GITHUB_RETRY_MAX_DELAY_MS: 60000,
+
+  /**
+   * Maximum random jitter added to each backoff delay (milliseconds).
+   * Jitter prevents thundering-herd when multiple instances retry simultaneously.
+   * @type {number}
+   */
+  GITHUB_RETRY_JITTER_MS: 10000,
 };
 
 // ============================================
@@ -195,7 +224,8 @@ const ENRICHMENT_CONFIG = {
   NVD_API_URL: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
 
   /**
-   * GitHub Advisory REST API base endpoint (no auth required for public data)
+   * GitHub Advisory REST API base endpoint.
+   * Unauthenticated: 60 req/hr. Authenticated (GITHUB_TOKEN env var): 5,000 req/hr.
    * @type {string}
    */
   GITHUB_ADVISORY_API_URL: 'https://api.github.com/advisories',
@@ -215,6 +245,18 @@ const ENRICHMENT_CONFIG = {
    */
   get NVD_API_KEY() {
     return process.env.NVD_API_KEY || undefined;
+  },
+
+  /**
+   * Optional GitHub Personal Access Token read from environment variable.
+   * When set, GitHub API allows 5,000 req/hr instead of 60 req/hr (unauthenticated).
+   * Generate at: https://github.com/settings/tokens (no scopes required for public data)
+   * Returns undefined (not empty string) when the variable is absent or empty,
+   * so callers can safely use it as a boolean guard.
+   * @type {string|undefined}
+   */
+  get GITHUB_TOKEN() {
+    return process.env.GITHUB_TOKEN || undefined;
   },
 
   /**
@@ -243,7 +285,7 @@ const ENRICHMENT_CONFIG = {
    * GitHub API requires a non-empty User-Agent; NVD recommends one.
    * @type {string}
    */
-  USER_AGENT: 'VulnSweep/1.0 (https://github.com/vulnsweep)',
+  USER_AGENT: 'VulnSweep/1.1.0 (https://github.com/vulnsweep)',
 
   /**
    * CISA Known Exploited Vulnerabilities catalog static JSON feed.
@@ -393,7 +435,7 @@ const SCANNER_CONFIG = {
    * Max packages processed concurrently across all source plugins.
    * @type {number}
    */
-  MAX_CONCURRENT_PACKAGES: 100,
+  MAX_CONCURRENT_PACKAGES: 10,
 
   /**
    * Per-package timeout in milliseconds (applies to each source plugin call).

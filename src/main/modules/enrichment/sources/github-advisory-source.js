@@ -3,7 +3,11 @@
 /**
  * VulnSweep - GitHub Advisory Database Source Module
  *
- * Queries the public GitHub Advisory REST API (no auth required for public advisories).
+ * Queries the GitHub Advisory REST API.
+ * Authentication is optional: when the GITHUB_TOKEN environment variable is set,
+ * requests are authenticated (5,000 req/hr). Without it, unauthenticated
+ * limits apply (60 req/hr).
+ *
  * Endpoint: GET https://api.github.com/advisories?cve_id=<CVE-ID>
  *        or: GET https://api.github.com/advisories/<GHSA-ID>
  *
@@ -21,18 +25,25 @@
  */
 
 const https = require('https');
-const { ENRICHMENT_CONFIG } = require('../../../config/constants');
+const { ENRICHMENT_CONFIG, GIT_CONFIG } = require('../../../config/constants');
+
+/** @type {boolean} Tracks whether the authenticated-mode startup log has been emitted. */
+let _authLogEmitted = false;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function backoffDelay(baseDelay, attempt) {
-  return baseDelay * Math.pow(2, attempt) + Math.floor(Math.random() * 1000);
+/**
+ * Computes exponential backoff delay with jitter.
+ * @param {number} attempt - Zero-based attempt index (0 = first retry).
+ * @returns {number} Delay in milliseconds, capped at GITHUB_RETRY_MAX_DELAY_MS.
+ */
+function computeBackoffDelay(attempt) {
+  const exponential = GIT_CONFIG.GITHUB_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * GIT_CONFIG.GITHUB_RETRY_JITTER_MS;
+  return Math.min(exponential + jitter, GIT_CONFIG.GITHUB_RETRY_MAX_DELAY_MS);
 }
-
-const GH_BACKOFF_BASE_MS = 2000;
-const GH_MAX_RETRIES = 3;
 
 function httpsGet(url, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -47,6 +58,9 @@ function httpsGet(url, timeoutMs) {
           'User-Agent': ENRICHMENT_CONFIG.USER_AGENT,
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2022-11-28',
+          ...(ENRICHMENT_CONFIG.GITHUB_TOKEN
+            ? { Authorization: `Bearer ${ENRICHMENT_CONFIG.GITHUB_TOKEN}` }
+            : {}),
         },
       },
       (res) => {
@@ -61,9 +75,12 @@ function httpsGet(url, timeoutMs) {
             return;
           }
           if (res.statusCode === 429 || res.statusCode === 403) {
-            const err = new Error(`GitHub Advisory rate-limited (${res.statusCode})`);
+            const retryAfterHeader = res.headers['retry-after'];
+            const err = new Error(`GitHub API rate limit: HTTP ${res.statusCode}`);
             err.isRateLimit = true;
             err.statusCode = res.statusCode;
+            const parsedRetryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN;
+            err.retryAfterMs = !Number.isNaN(parsedRetryAfter) ? parsedRetryAfter * 1000 : null;
             reject(err);
             return;
           }
@@ -135,6 +152,11 @@ function normaliseAdvisory(advisory) {
  * @returns {Promise<{found: boolean, ghsaId: string|null, severity: string|null, patchedVersions: string[], url: string|null, error?: string}>}
  */
 async function queryGitHubAdvisory(id) {
+  if (ENRICHMENT_CONFIG.GITHUB_TOKEN && !_authLogEmitted) {
+    _authLogEmitted = true;
+    console.log('[GitHubAdvisory] Using authenticated API access (GITHUB_TOKEN set)');
+  }
+
   const empty = { found: false, ghsaId: null, severity: null, patchedVersions: [], url: null };
 
   if (!id || typeof id !== 'string') {
@@ -152,7 +174,7 @@ async function queryGitHubAdvisory(id) {
     ? `${ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL}?cve_id=${encodeURIComponent(id.toUpperCase())}`
     : `${ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL}/${encodeURIComponent(id)}`;
 
-  for (let attempt = 0; attempt <= GH_MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= GIT_CONFIG.GITHUB_MAX_RETRIES; attempt++) {
     try {
       const result = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
 
@@ -168,18 +190,20 @@ async function queryGitHubAdvisory(id) {
 
       return normaliseAdvisory(result.body);
     } catch (err) {
-      if (err.isRateLimit && attempt < GH_MAX_RETRIES) {
-        const delay = backoffDelay(GH_BACKOFF_BASE_MS, attempt);
+      if (err.isRateLimit && attempt < GIT_CONFIG.GITHUB_MAX_RETRIES) {
+        const delay = err.retryAfterMs != null ? err.retryAfterMs : computeBackoffDelay(attempt);
         console.warn(
           `[github] Rate limited (${err.statusCode || 429}), retry ${
             attempt + 1
-          }/${GH_MAX_RETRIES} after ${delay}ms`
+          }/${GIT_CONFIG.GITHUB_MAX_RETRIES} after ${delay}ms`
         );
         await sleep(delay);
         continue;
       }
       if (err.isRateLimit) {
-        console.warn(`[github] Rate limit exceeded after ${GH_MAX_RETRIES} retries for ${id}`);
+        console.warn(
+          `[github] Rate limit exceeded after ${GIT_CONFIG.GITHUB_MAX_RETRIES} retries for ${id}`
+        );
         return { ...empty, error: 'rate_limit_exceeded' };
       }
       console.warn(`[github-advisory-source] queryGitHubAdvisory error for ${id}: ${err.message}`);

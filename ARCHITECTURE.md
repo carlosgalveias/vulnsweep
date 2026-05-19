@@ -582,6 +582,53 @@ Each file in `sources/` exports an object conforming to:
 
 ---
 
+### GitHub Advisory Source — Authentication and Rate-Limit Handling
+
+**File:** `src/main/modules/scanner/sources/github-advisory-source.js`
+
+#### GITHUB_TOKEN Environment Variable
+
+The GitHub Advisory source supports optional authenticated API access via the `GITHUB_TOKEN` environment variable. When set, the token is passed as a `Bearer` authorization header on all requests to the GitHub Advisory REST API.
+
+| Configuration          | Behaviour                                                                 |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `GITHUB_TOKEN` not set | Unauthenticated requests — GitHub rate limit: **60 requests / hour / IP** |
+| `GITHUB_TOKEN` set     | Authenticated requests — GitHub rate limit: **5,000 requests / hour**     |
+
+When authenticated access is active, the source logs:
+
+```
+[GitHubAdvisory] Using authenticated API access (GITHUB_TOKEN set)
+```
+
+No scopes are required on the token. A token generated with zero scopes (read-only public data) is sufficient for advisory lookups.
+
+#### GIT_CONFIG Retry Constants
+
+The retry and backoff behaviour for GitHub Advisory requests is governed by constants defined in the `GIT_CONFIG` block in [`src/main/config/constants.js`](src/main/config/constants.js):
+
+| Constant                     | Value   | Description                                                                             |
+| ---------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| `GITHUB_MAX_RETRIES`         | `3`     | Maximum number of retry attempts on HTTP 429 / 403 rate-limit responses                 |
+| `GITHUB_RETRY_BASE_DELAY_MS` | `2000`  | Base delay in milliseconds for exponential backoff (doubles on each retry)              |
+| `GITHUB_RETRY_MAX_DELAY_MS`  | `60000` | Maximum backoff cap in milliseconds — delays are clamped to this ceiling                |
+| `GITHUB_RETRY_JITTER_MS`     | `1000`  | Maximum random jitter added to each computed delay to prevent thundering-herd behaviour |
+
+#### Retry and Backoff Algorithm
+
+When the GitHub Advisory API returns an HTTP 429 or HTTP 403 response:
+
+1. **`Retry-After` header present:** VulnSweep reads the header value (seconds) and waits exactly that duration before retrying.
+2. **`Retry-After` header absent:** VulnSweep computes the backoff delay via `computeBackoffDelay(attempt)`:
+   - `delay = min(GITHUB_RETRY_BASE_DELAY_MS × 2^attempt, GITHUB_RETRY_MAX_DELAY_MS)`
+   - `jitter = random value in [0, GITHUB_RETRY_JITTER_MS)`
+   - `finalDelay = delay + jitter`
+3. After `GITHUB_MAX_RETRIES` exhausted: the advisory record is marked `rate_limit_exceeded` and the scan continues — no crash, no data loss for other sources.
+
+This strategy ensures VulnSweep is a well-behaved API consumer that respects GitHub's rate-limiting signals and never contributes to thundering-herd amplification.
+
+---
+
 ### Scanner Orchestrator
 
 **File:** `src/main/modules/scanner/scanner-orchestrator.js`
