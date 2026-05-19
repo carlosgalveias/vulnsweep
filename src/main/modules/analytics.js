@@ -45,6 +45,9 @@ function isOptedOut() {
 }
 
 function init() {
+  if (_initialized) {
+    return;
+  }
   if (!_loadSdk()) {
     return;
   }

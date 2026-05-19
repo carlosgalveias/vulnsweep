@@ -326,6 +326,96 @@ const DEP_UPDATES_CONFIG = {
 };
 
 // ============================================
+// SCAN CACHE CONFIGURATION (Sprint 3 cache layer)
+// ============================================
+
+/**
+ * Persistent scan result cache configuration.
+ * Controls TTLs per source, debounce timing, and the enabled flag.
+ *
+ * Security note: CISA KEV uses a 2 h TTL (not 24 h) because it tracks
+ * vulnerabilities actively being exploited RIGHT NOW.  A stale "not in KEV"
+ * answer that is up to 24 h old could cause VulnSweep to report a package as
+ * safe when it is under active exploitation.
+ *
+ * @namespace SCAN_CACHE_CONFIG
+ */
+const SCAN_CACHE_CONFIG = {
+  /** Master kill-switch. Set to false to bypass all cache reads and writes. */
+  CACHE_ENABLED: true,
+
+  /**
+   * TTL per source in milliseconds.
+   * Sources not listed here fall back to DEFAULT_TTL_MS.
+   */
+  TTL_BY_SOURCE: {
+    osv: 24 * 60 * 60 * 1000, // 24 h — versioned entries change rarely
+    nvd: 24 * 60 * 60 * 1000, // 24 h — CVSS data changes rarely
+    'github-advisory': 24 * 60 * 60 * 1000, // 24 h — advisory metadata stable
+    'cisa-kev': 2 * 60 * 60 * 1000, // 2 h  — actively exploited; MUST be fresh
+  },
+
+  /** Fallback TTL for any source not listed in TTL_BY_SOURCE. */
+  DEFAULT_TTL_MS: 24 * 60 * 60 * 1000,
+
+  /**
+   * Debounce window for async disk writes (milliseconds).
+   * After a set() call the dirty source is written after this delay,
+   * unless another set() fires first and resets the timer.
+   */
+  SAVE_DEBOUNCE_MS: 2000,
+
+  /**
+   * Source IDs for which caching is active.
+   * npm-audit is intentionally absent — it reads the lockfile and must run fresh.
+   */
+  CACHEABLE_SOURCES: ['osv', 'nvd', 'github-advisory', 'cisa-kev'],
+};
+
+// ============================================
+// SCANNER CONFIGURATION (Sprint 3)
+// ============================================
+
+/**
+ * Scanner orchestration configuration for the modular vulnerability scanner.
+ * Controls which source plugins are active, concurrency limits, timeouts, and
+ * the default scan mode used when no explicit mode is requested.
+ * @namespace SCANNER_CONFIG
+ */
+const SCANNER_CONFIG = {
+  /**
+   * Which source plugins are active. Order determines display priority.
+   * @type {string[]}
+   */
+  ENABLED_SOURCES: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev'],
+
+  /**
+   * Max packages processed concurrently across all source plugins.
+   * @type {number}
+   */
+  MAX_CONCURRENT_PACKAGES: 100,
+
+  /**
+   * Per-package timeout in milliseconds (applies to each source plugin call).
+   * @type {number}
+   */
+  PER_PACKAGE_TIMEOUT_MS: 30000,
+
+  /**
+   * Pause between batches to avoid rate limiting (milliseconds).
+   * @type {number}
+   */
+  BATCH_PAUSE_MS: 100,
+
+  /**
+   * Scan mode: 'fast' (npm-audit + osv only) or 'full' (all sources).
+   * Unrecognized values fall back to 'fast' in scanner-orchestrator.js.
+   * @type {string}
+   */
+  DEFAULT_SCAN_MODE: 'full',
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -338,4 +428,6 @@ module.exports = {
   ENRICHMENT_CONFIG,
   DEP_UPDATES_CONFIG,
   LICENSE_CONFIG,
+  SCANNER_CONFIG,
+  SCAN_CACHE_CONFIG,
 };

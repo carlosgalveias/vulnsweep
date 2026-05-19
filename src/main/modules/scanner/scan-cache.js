@@ -1,0 +1,289 @@
+'use strict';
+
+/**
+ * VulnSweep - Persistent Scan Result Cache
+ *
+ * Sharded, TTL-based disk cache for vulnerability scan results.
+ * Four separate JSON files, one per source, stored in userData/scan-cache/.
+ *
+ * Design rationale (see plans/scan-cache-spec.md section 3.1):
+ *   22,000 packages x 4 sources = 88,000 entries. A single flat file would be
+ *   8-50 MB and block the Electron main process event loop on parse/serialize.
+ *   Per-source sharding: each file is ~8-12 MB, loads/saves independently,
+ *   only dirty files are written, and a corrupt file only loses one source.
+ *
+ * TTL policy (spec section 5.2):
+ *   OSV / NVD / GitHub Advisory: 24 h (advisory metadata rarely changes)
+ *   CISA KEV: 2 h (actively-exploited threat state, stale data is a security liability)
+ *
+ * npm-audit is explicitly NOT cached; it reads the lockfile and must always run fresh.
+ *
+ * @module scanner/scan-cache
+ */
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { SCAN_CACHE_CONFIG } = require('../../config/constants');
+
+// ---------------------------------------------------------------------------
+// Module-level state
+// ---------------------------------------------------------------------------
+
+/**
+ * One Map per cacheable source.
+ * Keys are buildKey() strings; values are { timestamp: number, results: Array }.
+ */
+const _caches = {
+  osv: new Map(),
+  nvd: new Map(),
+  'github-advisory': new Map(),
+  'cisa-kev': new Map(),
+};
+
+/**
+ * Per-source dirty flags. True after set() or clearAll() until save() completes.
+ */
+const _dirty = {
+  osv: false,
+  nvd: false,
+  'github-advisory': false,
+  'cisa-kev': false,
+};
+
+/**
+ * Per-source debounce timer handles for async saves.
+ */
+const _saveTimers = {
+  osv: null,
+  nvd: null,
+  'github-advisory': null,
+  'cisa-kev': null,
+};
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves the cache directory path.
+ * Uses Electron userData when available; falls back to os.tmpdir() for tests.
+ *
+ * @returns {string} Absolute path to the scan-cache directory
+ */
+function _resolveCacheDirPath() {
+  try {
+    const { app } = require('electron');
+    return path.join(app.getPath('userData'), 'scan-cache');
+  } catch {
+    return path.join(os.tmpdir(), 'vulnsweep-scan-cache-test');
+  }
+}
+
+/**
+ * Returns the full path for a source cache JSON file.
+ *
+ * @param {string} sourceId  - One of CACHEABLE_SOURCES
+ * @param {string} cacheDir  - Directory that holds the cache files
+ * @returns {string}
+ */
+function _cacheFilePath(sourceId, cacheDir) {
+  return path.join(cacheDir, `${sourceId}-cache.json`);
+}
+
+/**
+ * Debounced per-source async write. Cancels any existing timer for that
+ * sourceId, then schedules a new one. On fire, writes only this source's file.
+ *
+ * @param {string} sourceId - Cacheable source ID
+ */
+function _scheduleSave(sourceId) {
+  if (_saveTimers[sourceId]) {
+    clearTimeout(_saveTimers[sourceId]);
+  }
+  _saveTimers[sourceId] = setTimeout(() => {
+    _saveTimers[sourceId] = null;
+    _writeSingleSource(sourceId, _resolveCacheDirPath());
+  }, SCAN_CACHE_CONFIG.SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * Synchronously write a single source's cache to disk.
+ * Resets the dirty flag after a successful write.
+ * Errors are logged but do NOT throw (cache failures are non-fatal).
+ *
+ * @param {string} sourceId  - Cacheable source ID
+ * @param {string} cacheDir  - Destination directory
+ */
+function _writeSingleSource(sourceId, cacheDir) {
+  if (!_dirty[sourceId]) return;
+
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    const entries = {};
+    for (const [key, entry] of _caches[sourceId].entries()) {
+      entries[key] = entry;
+    }
+
+    const payload = JSON.stringify({ version: 1, entries });
+    fs.writeFileSync(_cacheFilePath(sourceId, cacheDir), payload, 'utf8');
+    _dirty[sourceId] = false;
+  } catch (err) {
+    console.warn(`[scan-cache] Failed to write ${sourceId} cache: ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a cache key for a (packageName, packageVersion) pair.
+ * sourceId is NOT part of the key; it is implicit from which Map is used.
+ *
+ * Scoped package names like @babel/core are percent-encoded so the key
+ * is safe for JSON object keys.
+ *
+ * @param {string} packageName    - e.g. 'express' or '@babel/core'
+ * @param {string} packageVersion - e.g. '4.18.2'
+ * @returns {string} e.g. 'express@4.18.2' or '%40babel%2Fcore@7.0.0'
+ */
+function buildKey(packageName, packageVersion) {
+  return `${encodeURIComponent(packageName)}@${packageVersion}`;
+}
+
+/**
+ * Retrieve a cached result for the given source and key.
+ * Does NOT check TTL; callers should call isValid() first.
+ *
+ * @param {string} sourceId - Cacheable source ID
+ * @param {string} key      - Cache key from buildKey()
+ * @returns {Array|undefined} Cached SourceResult array, or undefined on miss
+ */
+function get(sourceId, key) {
+  const entry = _caches[sourceId]?.get(key);
+  return entry?.results;
+}
+
+/**
+ * Store a scan result for the given source and key.
+ * Marks the source dirty and schedules a debounced async save.
+ *
+ * @param {string} sourceId - Cacheable source ID
+ * @param {string} key      - Cache key from buildKey()
+ * @param {Array}  results  - SourceResult array to cache
+ */
+function set(sourceId, key, results) {
+  if (!_caches[sourceId]) return;
+  _caches[sourceId].set(key, { timestamp: Date.now(), results });
+  _dirty[sourceId] = true;
+  _scheduleSave(sourceId);
+}
+
+/**
+ * Check whether a cached entry exists AND has not expired for the given source.
+ * Returns false if CACHE_ENABLED is false, the source is unknown, the entry is
+ * missing, or the entry has exceeded its TTL.
+ *
+ * @param {string} sourceId - Cacheable source ID
+ * @param {string} key - Cache key
+ * @returns {boolean}
+ */
+function isValid(sourceId, key) {
+  if (!SCAN_CACHE_CONFIG.CACHE_ENABLED) return false;
+  if (!_caches[sourceId]) return false;
+  const entry = _caches[sourceId].get(key);
+  if (!entry) return false;
+  const ttl = SCAN_CACHE_CONFIG.TTL_BY_SOURCE?.[sourceId] ?? SCAN_CACHE_CONFIG.DEFAULT_TTL_MS;
+  return Date.now() - entry.timestamp < ttl;
+}
+
+function getSize(sourceId) {
+  return (_caches[sourceId] && _caches[sourceId].size) || 0;
+}
+
+function load(cacheDir) {
+  if (cacheDir === undefined) cacheDir = _resolveCacheDirPath();
+  for (const sourceId of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    const filePath = _cacheFilePath(sourceId, cacheDir);
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1 || typeof parsed.entries !== 'object') {
+        console.warn(`[scan-cache] Invalid cache format for ${sourceId}, resetting.`);
+        _caches[sourceId] = new Map();
+        continue;
+      }
+      _caches[sourceId] = new Map(Object.entries(parsed.entries));
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.warn(
+          `[scan-cache] Could not load ${sourceId} cache: ${err.message}. Deleting corrupt file.`
+        );
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          /* ignore — file already gone */
+        }
+      }
+      _caches[sourceId] = new Map();
+    }
+  }
+}
+
+function save(cacheDir) {
+  if (cacheDir === undefined) cacheDir = _resolveCacheDirPath();
+  for (const sourceId of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    _writeSingleSource(sourceId, cacheDir);
+  }
+}
+
+function clear(sourceId) {
+  if (!_caches[sourceId]) return;
+  _caches[sourceId] = new Map();
+  _dirty[sourceId] = true;
+}
+
+function clearAll(cacheDir) {
+  for (const sourceId of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    _caches[sourceId] = new Map();
+    _dirty[sourceId] = true;
+  }
+  save(cacheDir);
+}
+
+function flushAndClose() {
+  for (const sourceId of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    if (_saveTimers[sourceId]) {
+      clearTimeout(_saveTimers[sourceId]);
+      _saveTimers[sourceId] = null;
+    }
+  }
+  save();
+}
+
+function getStats() {
+  const stats = {};
+  for (const sourceId of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    stats[sourceId] = { count: getSize(sourceId) };
+  }
+  return stats;
+}
+
+module.exports = {
+  buildKey,
+  load,
+  save,
+  get,
+  set,
+  isValid,
+  getSize,
+  clear,
+  clearAll,
+  flushAndClose,
+  getStats,
+  _saveTimers,
+  _dirty,
+  _caches,
+};

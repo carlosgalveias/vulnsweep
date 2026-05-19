@@ -5,6 +5,39 @@ All notable changes to VulnSweep will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] -- Sprint 3: Modular Scanner Architecture
+
+### Added
+
+- Modular vulnerability scanner with plugin-based architecture (`src/main/modules/scanner/`)
+- `package-universe-builder.js` -- complete package inventory from `package-lock.json` (lockfile v1, v2, v3 support)
+- Five scanner source plugins: OSV, NVD, GitHub Advisory, CISA KEV, npm-audit
+- `result-aggregator.js` -- CVE-based deduplication and multi-source vulnerability merging with Union-Find algorithm
+- `scanner-orchestrator.js` -- batched parallel execution with per-plugin timeouts and progress events
+- `SCANNER_CONFIG` in `constants.js` -- configurable scan modes (fast: npm-audit+OSV, full: all 5 sources)
+- `scan-project` and `scan-projects` IPC handlers for single-call complete scanning
+- Per-package `ProjectPath` injection for npm-audit source plugin
+
+### Changed
+
+- Scan pipeline: replaced two-phase `analyze-project` + `enrich-vulnerabilities` with single `scan-project` call
+- `useVulnerabilityScanner.js` hook: migrated to `scanProjects` + `onScanProgress` API
+- `App.jsx`: removed `isEnriching` state and enrichment `useEffect`
+- `VulnerabilityGrid.jsx`: removed dead `isEnriching`/`enrichmentProgress` props
+- `osv-source.js` (enrichment): added `fetchOsvRaw()`, `extractFixedIn()` with npm ecosystem filtering; `queryOSV()` now delegates to `fetchOsvRaw()`
+
+### Deprecated
+
+- `enrich-vulnerabilities` IPC channel -- removed; callers should use `scan-project` instead
+- `cve-enricher.js` -- deprecated (preserved until Sprint 4); do not add new callers
+
+### Security
+
+- Eliminated npm gate: previously only npm-flagged packages were checked against OSV/NVD/GitHub Advisory; now ALL installed packages are scanned against all enabled sources
+- Added CISA KEV and EPSS score integration into the unified scan result
+
+---
+
 ## [1.1.0] - 2026-05-14
 
 ### Added

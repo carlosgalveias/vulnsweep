@@ -8,7 +8,6 @@
 
 import { render, screen } from '@testing-library/react';
 import App from '../../src/renderer/App';
-
 // Mock all custom hooks
 jest.mock('../../src/renderer/hooks/useLogConsole', () => ({
   __esModule: true,
@@ -82,12 +81,17 @@ describe('App component', () => {
     // Mock console.error to catch any initialization errors
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
+    // Simulate that the user has already accepted the terms so FirstRunModal
+    // does not render and container.firstChild is the main app div.
+    localStorage.setItem('vulnsweep_terms_accepted', 'true');
+
     // Reset all mocks
     jest.clearAllMocks();
   });
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+    localStorage.removeItem('vulnsweep_terms_accepted');
   });
 
   describe('initialization and rendering', () => {
@@ -556,8 +560,8 @@ describe('App component', () => {
           .fn()
           .mockResolvedValue({ success: true, commitMessage: 'chore: update deps' }),
         commitAndPush: jest.fn().mockResolvedValue({ success: true }),
-        enrichVulnerabilities: jest.fn().mockResolvedValue({ success: true, content: [] }),
-        onEnrichmentProgress: jest.fn().mockReturnValue(() => {}),
+        scanProjects: jest.fn().mockResolvedValue([]),
+        onScanProgress: jest.fn().mockReturnValue(() => {}),
       };
     });
 

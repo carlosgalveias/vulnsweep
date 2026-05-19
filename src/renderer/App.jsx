@@ -49,14 +49,6 @@ function App() {
   // Composite keys (repoPath:name) of packages that have been successfully applied
   const [appliedDepPackages, setAppliedDepPackages] = useState(new Set());
 
-  // F1 — CVE enrichment state
-  const [isEnriching, setIsEnriching] = useState(false);
-  const [enrichmentProgress, setEnrichmentProgress] = useState({
-    current: 0,
-    total: 0,
-    packageName: '',
-  });
-
   const [dirtyRepos, setDirtyRepos] = useState(new Set());
 
   const handleFirstRunAccept = useCallback(() => {
@@ -234,38 +226,7 @@ function App() {
   useEffect(() => {
     vulnerabilitiesRef.current = vulnerabilities;
   }, [vulnerabilities]);
-  useEffect(() => {
-    if (!hasScanned || isScanning || vulnerabilities.length === 0 || isEnriching) return;
-    if (!vulnerabilities.some((v) => !v.enrichment)) return;
-    let unsub = null;
-    const run = async () => {
-      setIsEnriching(true);
-      setEnrichmentProgress({ current: 0, total: vulnerabilities.length, packageName: '' });
-      unsub = window.electronAPI.onEnrichmentProgress((d) => setEnrichmentProgress(d));
-      try {
-        const r = await window.electronAPI.enrichVulnerabilities(vulnerabilities);
-        if (r.success && Array.isArray(r.content)) setVulnerabilities(r.content);
-      } catch (err) {
-        console.error('CVE enrichment failed:', err);
-      } finally {
-        setIsEnriching(false);
-        setEnrichmentProgress({ current: 0, total: 0, packageName: '' });
-        if (unsub) unsub();
-      }
-    };
-    run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasScanned, isScanning, vulnerabilities.length]);
-
-  const combinedProgress = isEnriching
-    ? {
-        current: enrichmentProgress.current,
-        total: enrichmentProgress.total || vulnerabilities.length,
-        message: enrichmentProgress.packageName
-          ? `Enriching CVE data (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length}) - ${enrichmentProgress.packageName}`
-          : `Enriching with NVD/OSV data (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length})`,
-      }
-    : progress;
+  const combinedProgress = progress;
 
   const {
     isApplying,
@@ -490,18 +451,14 @@ function App() {
   const buttonsState = {
     scanAudit: isDepUpdatesTab
       ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
-      : projects.length > 0 && !isScanning && !isApplying && !isCommitting && !isEnriching,
+      : projects.length > 0 && !isScanning && !isApplying && !isCommitting,
     applyFixes: isLicensesTab
       ? false
       : isDepUpdatesTab
         ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
-        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
+        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting,
     commitPush:
-      (dirtyRepos.size > 0 || depUpdatesDirty) &&
-      !isCommitting &&
-      !isApplying &&
-      !isScanning &&
-      !isEnriching,
+      (dirtyRepos.size > 0 || depUpdatesDirty) && !isCommitting && !isApplying && !isScanning,
   };
 
   const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
@@ -575,8 +532,6 @@ function App() {
                     isLoading={isScanning}
                     hasFolder={!!selectedFolder}
                     hasScanned={hasScanned}
-                    isEnriching={isEnriching}
-                    enrichmentProgress={enrichmentProgress}
                   />
                 </ErrorBoundary>
               </div>

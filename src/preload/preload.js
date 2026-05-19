@@ -117,35 +117,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getActivePrice: () => ipcRenderer.invoke('get-active-price'),
 
   // ============================================
-  // ENRICHMENT (F1)
+  // SCANNER (Sprint 3)
   // ============================================
 
   /**
-   * Enrich an array of vulnerability objects with cross-source CVE data
-   * (OSV.dev, NVD API v2, GitHub Advisory Database).
-   * Progress events are streamed via onEnrichmentProgress().
-   *
-   * @param {Array} vulnerabilities - Array of vulnerability objects
-   * @returns {Promise<{ success: boolean, content?: Array, error?: string }>}
+   * Scan a single project for vulnerabilities using the modular scanner pipeline.
+   * @param {string} projectPath - Absolute path to the project directory
+   * @returns {Promise<{ success: boolean, content?: ScanResult, error?: string }>}
    */
-  enrichVulnerabilities: (vulnerabilities) =>
-    ipcRenderer.invoke('enrich-vulnerabilities', vulnerabilities),
+  scanProject: (projectPath) => ipcRenderer.invoke('scan-project', projectPath),
 
   /**
-   * Retrieve current enrichment configuration / status from the main process.
-   * @returns {Promise<{ success: boolean, content?: Object }>}
+   * Scan multiple projects sequentially.
+   * @param {string[]} projectPaths - Array of absolute project paths
+   * @param {boolean} [allowReset] - Passed through to the main process handler
+   * @returns {Promise<{ success: boolean, content?: ScanResult[], error?: string }>}
    */
-  getEnrichmentSettings: () => ipcRenderer.invoke('get-enrichment-settings'),
+  scanProjects: (projectPaths, allowReset) =>
+    ipcRenderer.invoke('scan-projects', projectPaths, allowReset),
 
   /**
-   * Subscribe to per-vulnerability enrichment progress events.
-   * @param {Function} callback - Called with { current, total, packageName }
+   * Retrieve current scanner configuration from the main process.
+   * @returns {Promise<{ success: boolean, content?: object }>}
+   */
+  getScanSettings: () => ipcRenderer.invoke('get-scan-settings'),
+
+  /**
+   * Subscribe to per-package scan progress events.
+   * @param {Function} callback - Called with { phase, current, total, packageName, partialResult }
    * @returns {Function} Unsubscribe function
    */
-  onEnrichmentProgress: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('enrichment-progress', subscription);
-    return () => ipcRenderer.removeListener('enrichment-progress', subscription);
+  onScanProgress: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('scan-progress', subscription);
+    return () => ipcRenderer.removeListener('scan-progress', subscription);
   },
 
   // ============================================
@@ -299,6 +304,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
    */
   licenseRestore: () => ipcRenderer.invoke('license-restore'),
+
+  // ============================================
+  // SCAN CACHE
+  // ============================================
+
+  /**
+   * Clear all scan cache entries across all sources and flush to disk synchronously.
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  clearScanCache: () => ipcRenderer.invoke('cache:clear'),
+
+  /**
+   * Return per-source entry counts for the persistent scan result cache.
+   * @returns {Promise<{ success: boolean, content?: { osv: number, nvd: number, 'github-advisory': number, 'cisa-kev': number }, error?: string }>}
+   */
+  getScanCacheStats: () => ipcRenderer.invoke('cache:getStats'),
 });
 
 // Expose app version metadata

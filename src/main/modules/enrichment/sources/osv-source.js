@@ -111,23 +111,15 @@ function extractUrl(v) {
 }
 
 /**
- * Query OSV.dev for a given npm package + version.
- *
- * @param {string} packageName
- * @param {string} version
- * @param {string} [ecosystem='npm']
- * @returns {Promise<{found: boolean, severity: string|null, aliases: string[], url: string|null, error?: string}>}
+ * Internal variant of fetchOsvRaw that propagates non-rate-limit errors instead of
+ * swallowing them. Used by queryOSV() so it can return { found: false, error: '...' }
+ * rather than silently returning an empty result on HTTP errors.
  */
-async function queryOSV(packageName, version, ecosystem) {
-  if (!packageName || typeof packageName !== 'string') {
-    return { found: false, severity: null, aliases: [], url: null, error: 'Invalid package name' };
-  }
-
+async function _fetchOsvRawOrThrow(packageName, version, ecosystem = 'npm') {
   const requestBody = {
-    package: { name: packageName, ecosystem: ecosystem || 'npm' },
+    package: { name: packageName, ecosystem },
     version: version || '',
   };
-
   for (let attempt = 0; attempt <= OSV_MAX_RETRIES; attempt++) {
     try {
       const response = await httpsPost(
@@ -135,56 +127,174 @@ async function queryOSV(packageName, version, ecosystem) {
         requestBody,
         ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS
       );
-
-      const vulns = response.vulns;
-      if (!Array.isArray(vulns) || vulns.length === 0) {
-        return { found: false, severity: null, aliases: [], url: null };
-      }
-
-      let mergedSeverity = null;
-      const allAliases = new Set();
-      let firstUrl = null;
-
-      for (const v of vulns) {
-        const sev = extractSeverity(v);
-        mergedSeverity = higherSeverity(mergedSeverity, sev);
-        extractAliases(v).forEach((a) => allAliases.add(a));
-        if (!firstUrl) firstUrl = extractUrl(v);
-      }
-
-      return {
-        found: true,
-        severity: mergedSeverity,
-        aliases: Array.from(allAliases),
-        url: firstUrl,
-      };
+      return Array.isArray(response.vulns) ? response.vulns : [];
     } catch (err) {
       if (err.isRateLimit && attempt < OSV_MAX_RETRIES) {
-        const delay = backoffDelay(OSV_BACKOFF_BASE_MS, attempt);
-        console.warn(
-          `[osv] Rate limited, retry ${attempt + 1}/${OSV_MAX_RETRIES} after ${delay}ms`
-        );
-        await sleep(delay);
+        await sleep(backoffDelay(OSV_BACKOFF_BASE_MS, attempt));
         continue;
       }
-      if (err.isRateLimit) {
-        console.warn(
-          `[osv] Rate limit exceeded after ${OSV_MAX_RETRIES} retries for ${packageName}`
-        );
-        return {
-          found: false,
-          severity: null,
-          aliases: [],
-          url: null,
-          error: 'rate_limit_exceeded',
-        };
-      }
-      console.warn(`[osv-source] queryOSV error for ${packageName}@${version}: ${err.message}`);
-      return { found: false, severity: null, aliases: [], url: null, error: err.message };
+      console.warn(`[osv-source] fetchOsvRaw error for ${packageName}@${version}: ${err.message}`);
+      throw err;
     }
   }
-  // Exhausted retries
-  return { found: false, severity: null, aliases: [], url: null, error: 'rate_limit_exceeded' };
+  return [];
 }
 
-module.exports = { queryOSV };
+/**
+ * Fetches raw vulnerability entries from the OSV API for a given package.
+ * Unlike queryOSV(), this returns the complete array of individual vulnerability
+ * objects without merging — one entry per distinct OSV vulnerability.
+ *
+ * @param {string} packageName - npm package name (e.g., "lodash" or "@babel/core")
+ * @param {string} version - exact installed version (e.g., "4.17.21")
+ * @param {string} [ecosystem='npm'] - OSV ecosystem identifier
+ * @returns {Promise<object[]>} Array of raw OSV vulnerability objects, empty if none found
+ */
+async function fetchOsvRaw(packageName, version, ecosystem = 'npm') {
+  if (!packageName || typeof packageName !== 'string') return [];
+  try {
+    return await _fetchOsvRawOrThrow(packageName, version, ecosystem);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns the minimum version from an array of version strings.
+ * Handles standard semver (1.2.3), pre-release (1.2.3-alpha.1), and
+ * non-standard strings (0.0.1-security) by treating pre-release identifiers
+ * as having lower precedence than the release version.
+ *
+ * @param {string[]} versions
+ * @returns {string|null}
+ */
+function minVersion(versions) {
+  if (!versions || versions.length === 0) return null;
+  if (versions.length === 1) return versions[0];
+
+  return versions.reduce((min, v) => {
+    // Split into numeric version and optional pre-release label
+    // e.g. "1.2.3-alpha.1" -> core="1.2.3", prerelease="alpha.1"
+    const [minCore, minPre] = min.split('-');
+    const [vCore, vPre] = v.split('-');
+
+    // Compare numeric core parts only
+    const minParts = minCore.split('.').map((p) => parseInt(p, 10) || 0);
+    const vParts = vCore.split('.').map((p) => parseInt(p, 10) || 0);
+
+    const len = Math.max(minParts.length, vParts.length);
+    for (let i = 0; i < len; i++) {
+      const a = minParts[i] || 0;
+      const b = vParts[i] || 0;
+      if (b < a) return v; // v has smaller core — v is minimum
+      if (a < b) return min; // min has smaller core — min stays
+    }
+
+    // Core versions are equal — pre-release has LOWER precedence than release
+    // If min has no pre-release and v has pre-release, v is lower (pre-release)
+    if (!minPre && vPre) return v;
+    // If min has pre-release and v does not, min is lower (min stays)
+    if (minPre && !vPre) return min;
+    // Both have pre-release or neither does — string comparison as fallback
+    if (minPre && vPre) return minPre <= vPre ? min : v;
+    // Both are equal
+    return min;
+  });
+}
+
+/**
+ * Extracts the fixed version from a single OSV vulnerability entry.
+ * Filters by npm ecosystem first; falls back to any ecosystem if no npm entry found.
+ * Returns the minimum semver value when multiple npm entries have different fixed versions.
+ *
+ * @param {object} osvVuln - A single OSV vulnerability object from fetchOsvRaw()
+ * @returns {string|null} The fixed version string, or null if not determinable
+ */
+function extractFixedIn(osvVuln) {
+  if (!Array.isArray(osvVuln.affected)) return null;
+
+  // First pass: collect fixed versions from npm ecosystem entries only
+  const npmFixed = [];
+  for (const aff of osvVuln.affected) {
+    if (!aff.package || aff.package.ecosystem !== 'npm') continue;
+    if (!Array.isArray(aff.ranges)) continue;
+    for (const range of aff.ranges) {
+      if (range.type !== 'ECOSYSTEM' && range.type !== 'SEMVER') continue;
+      if (!Array.isArray(range.events)) continue;
+      for (const ev of range.events) {
+        if (ev.fixed && typeof ev.fixed === 'string') npmFixed.push(ev.fixed);
+      }
+    }
+  }
+
+  if (npmFixed.length > 0) return minVersion(npmFixed);
+
+  // Fallback: first fixed event from any ecosystem
+  for (const aff of osvVuln.affected) {
+    if (!Array.isArray(aff.ranges)) continue;
+    for (const range of aff.ranges) {
+      if (!Array.isArray(range.events)) continue;
+      for (const ev of range.events) {
+        if (ev.fixed && typeof ev.fixed === 'string') return ev.fixed;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Query OSV.dev for a given npm package + version.
+ * Delegates all HTTP transport and retry logic to fetchOsvRaw(), then
+ * merges the raw vulnerability array into a single result object.
+ *
+ * @param {string} packageName
+ * @param {string} version
+ * @param {string} ecosystem - OSV ecosystem identifier; undefined falls back to fetchOsvRaw()'s default ('npm')
+ * @returns {Promise<{found: boolean, severity: string|null, aliases: string[], url: string|null}>}
+ */
+async function queryOSV(packageName, version, ecosystem) {
+  // Validate input early and return error shape so callers can check r.error
+  if (!packageName || typeof packageName !== 'string') {
+    return { found: false, error: 'Invalid package name', severity: null, aliases: [], url: null };
+  }
+  let vulns;
+  try {
+    vulns = await _fetchOsvRawOrThrow(packageName, version, ecosystem);
+  } catch (err) {
+    return { found: false, error: err.message, severity: null, aliases: [], url: null };
+  }
+  if (vulns.length === 0) {
+    return { found: false, severity: null, aliases: [], url: null };
+  }
+
+  let mergedSeverity = null;
+  const allAliases = new Set();
+  let firstUrl = null;
+
+  for (const vuln of vulns) {
+    const s = extractSeverity(vuln);
+    mergedSeverity = mergedSeverity === null ? s : higherSeverity(mergedSeverity, s);
+    for (const alias of extractAliases(vuln)) {
+      allAliases.add(alias);
+    }
+    if (!firstUrl) {
+      firstUrl = extractUrl(vuln);
+    }
+  }
+
+  return {
+    found: true,
+    severity: mergedSeverity,
+    aliases: Array.from(allAliases),
+    url: firstUrl,
+  };
+}
+
+module.exports = {
+  queryOSV,
+  fetchOsvRaw,
+  extractFixedIn,
+  extractSeverity,
+  extractAliases,
+  extractUrl,
+};

@@ -4,8 +4,8 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
 
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
+const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
-const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
@@ -480,6 +480,82 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
   }
 });
 
+// ============================================
+// IPC HANDLERS - SCANNER (Sprint 3)
+// ============================================
+
+/**
+ * Handler: Scan a single project for vulnerabilities using the modular scanner pipeline.
+ * Streams per-package progress events via 'scan-progress' push channel.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @returns {Promise<{ success: boolean, content?: ScanResult, error?: string }>}
+ */
+ipcMain.handle('scan-project', async (_event, projectPath) => {
+  try {
+    const sanitized = sanitizePath(projectPath);
+    const { scanProject } = require('./modules/scanner/scanner-orchestrator');
+    const result = await scanProject(sanitized, (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('scan-progress', progress);
+      }
+    });
+    return { success: true, content: result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Scan multiple projects sequentially, emitting analysis-progress between projects.
+ * Streams per-package progress events via 'scan-progress' push channel.
+ *
+ * @param {string[]} projectPaths - Array of absolute project paths
+ * @param {boolean} [allowReset] - Unused parameter kept for API symmetry with analyze-projects
+ * @returns {Promise<{ success: boolean, content?: ScanResult[], error?: string }>}
+ */
+ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
+  if (!Array.isArray(projectPaths) || projectPaths.length === 0) {
+    return { success: false, error: 'Invalid project paths array' };
+  }
+
+  try {
+    const { scanProject } = require('./modules/scanner/scanner-orchestrator');
+    const results = [];
+    for (let i = 0; i < projectPaths.length; i++) {
+      try {
+        const sanitized = sanitizePath(projectPaths[i]);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('analysis-progress', {
+            current: i + 1,
+            total: projectPaths.length,
+          });
+        }
+        const result = await scanProject(sanitized, (progress) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('scan-progress', progress);
+          }
+        });
+        results.push({ success: true, projectPath: projectPaths[i], content: result });
+      } catch (err) {
+        results.push({ success: false, projectPath: projectPaths[i], error: err.message });
+      }
+    }
+    return { success: true, content: results };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current scanner configuration.
+ * @returns {Promise<{ success: boolean, content?: object }>}
+ */
+ipcMain.handle('get-scan-settings', async () => {
+  const { SCANNER_CONFIG } = require('./config/constants');
+  return { success: true, content: SCANNER_CONFIG };
+});
+
 /**
  * Handler: Apply fixes to a project
  *
@@ -560,71 +636,6 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
     sendLogMessage('error', `Failed to apply fixes: ${error.message}`);
     return { success: false, error: error.message };
   }
-});
-
-// ============================================
-// IPC HANDLERS - ENRICHMENT (F1)
-// ============================================
-
-/**
- * Handler: Enrich an array of vulnerability objects with cross-source CVE data.
- * Streams per-vulnerability progress events back to the renderer via
- * 'enrichment-progress' push channel.
- *
- * Input:  { vulnerabilities: VulnObject[] }
- * Output: { success: boolean, content?: VulnObject[], error?: string }
- */
-ipcMain.handle('enrich-vulnerabilities', async (event, vulnerabilities) => {
-  try {
-    if (!Array.isArray(vulnerabilities) || vulnerabilities.length === 0) {
-      return { success: true, content: [] };
-    }
-
-    console.log(
-      `[IPC] enrich-vulnerabilities: enriching ${vulnerabilities.length} vulnerabilities`
-    );
-    sendLogMessage('info', `Enriching ${vulnerabilities.length} vulnerabilities with CVE data…`);
-
-    const total = vulnerabilities.length;
-
-    const enriched = await enrichVulnerabilities(
-      vulnerabilities,
-      (current, _total, packageName) => {
-        if (mainWindow && mainWindow.webContents) {
-          mainWindow.webContents.send('enrichment-progress', { current, total, packageName });
-        }
-      }
-    );
-
-    sendLogMessage(
-      'success',
-      `CVE enrichment complete: ${enriched.length} vulnerabilities enriched`
-    );
-    return { success: true, content: enriched };
-  } catch (err) {
-    console.error(`[IPC] enrich-vulnerabilities error: ${err.message}`);
-    sendLogMessage('error', `CVE enrichment failed: ${err.message}`);
-    return { success: false, error: err.message };
-  }
-});
-
-/**
- * Handler: Return current enrichment settings / status.
- */
-ipcMain.handle('get-enrichment-settings', () => {
-  const { ENRICHMENT_CONFIG } = require('./config/constants');
-  return {
-    success: true,
-    content: {
-      osvApiUrl: ENRICHMENT_CONFIG.OSV_API_URL,
-      nvdApiUrl: ENRICHMENT_CONFIG.NVD_API_URL,
-      githubAdvisoryApiUrl: ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL,
-      nvdRateLimitMs: ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS,
-      nvdApiKeyConfigured: !!ENRICHMENT_CONFIG.NVD_API_KEY,
-      timeoutMs: ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
-      cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
-    },
-  };
 });
 
 // ============================================
@@ -1157,6 +1168,38 @@ ipcMain.handle('license-restore', async () => {
 // APP LIFECYCLE
 // ============================================
 
+// ============================================
+// IPC HANDLERS - SCAN CACHE
+// ============================================
+
+/**
+ * Handler: Return per-source entry counts for the scan result cache.
+ * Used by the renderer to display cache statistics in the settings UI.
+ * @returns {{ success: boolean, content?: object }}
+ */
+ipcMain.handle('cache:getStats', () => {
+  try {
+    return { success: true, content: scanCache.getStats() };
+  } catch (err) {
+    console.error('[IPC] cache:getStats error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Clear all scan cache entries and synchronously flush to disk.
+ * @returns {{ success: boolean }}
+ */
+ipcMain.handle('cache:clear', () => {
+  try {
+    scanCache.clearAll();
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] cache:clear error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
   // Pre-warm the secure store now that app.getPath('userData') is available.
@@ -1164,6 +1207,15 @@ app.whenReady().then(() => {
   // guarantees _getInstance() binds to the correct Electron userData path rather
   // than the ~/.vsweep-store fallback that would be used if called before app.ready.
   storeGet('_init'); // triggers lazy initialization while app is ready
+
+  // Pre-load the persistent scan cache now that app.getPath('userData') is available.
+  // This warms all 4 per-source Maps before the first scanProject() call so the
+  // first scan is never slower than subsequent ones.
+  try {
+    scanCache.load();
+  } catch (err) {
+    console.warn('[main] scan cache pre-load failed (non-fatal):', err.message);
+  }
 
   // analytics.init() is called at module top-level (before app.whenReady()) — see top of file.
   analytics.trackEvent('app_initialized');
@@ -1245,6 +1297,18 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+});
+
+// Quit when all windows are closed, except on macOS
+// Flush the scan cache before the process exits so any pending debounced writes
+// are committed to disk. flushAndClose() cancels all timers and calls the
+// synchronous writeFileSync path, completing before the process shuts down.
+app.on('before-quit', () => {
+  try {
+    scanCache.flushAndClose();
+  } catch (err) {
+    console.warn('[main] scan cache flush on quit failed (non-fatal):', err.message);
+  }
 });
 
 // Quit when all windows are closed, except on macOS

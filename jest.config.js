@@ -93,6 +93,8 @@ module.exports = {
       displayName: 'backend',
       testEnvironment: 'node',
       testMatch: ['**/__tests__/main/**/*.test.js', '**/__tests__/main/**/*.spec.js'],
+      roots: ['<rootDir>'],
+      modulePaths: ['<rootDir>'],
     },
     {
       displayName: 'frontend',
