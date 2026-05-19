@@ -4,7 +4,14 @@ const semver = require('semver');
 const { determineFixStrategy } = require('../audit/strategies/fix-strategy');
 const { mergeSeverity } = require('../enrichment/severity-merger');
 
-const SOURCE_PRIORITY = Object.freeze(['nvd', 'github-advisory', 'osv', 'npm-audit', 'cisa-kev']);
+const SOURCE_PRIORITY = Object.freeze([
+  'nvd',
+  'github-advisory',
+  'osv',
+  'npm-audit',
+  'cisa-kev',
+  'epss',
+]);
 const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
 const GHSA_PATTERN = /^GHSA-/i;
 
@@ -238,6 +245,7 @@ async function mergeGroup(g, pkg) {
   const npm = find(g, 'npm-audit'),
     ck = find(g, 'cisa-kev'),
     nv = find(g, 'nvd');
+  const ep = find(g, 'epss');
   const { mergedSeverity, nvdCategory, severityDiscrepancy, discrepancyDetails } =
     mergeGroupSeverity(g);
   const cveIds = mergeCveIds(g),
@@ -250,8 +258,9 @@ async function mergeGroup(g, pkg) {
   const cvssScore = nv ? nv.cvssScore || null : null;
   const cvssVector = nv ? nv.cvssVector || null : null;
   const cisaKnownExploited = g.some((r) => r.cisaKnownExploited === true);
-  const epssScore = ck ? ck.epssScore || null : null;
-  const epssPercentile = ck ? ck.epssPercentile || null : null;
+  const epssScore = (ck ? (ck.epssScore ?? null) : null) ?? (ep ? (ep.epssScore ?? null) : null);
+  const epssPercentile =
+    (ck ? (ck.epssPercentile ?? null) : null) ?? (ep ? (ep.epssPercentile ?? null) : null);
   const description = firstByPriority(g, 'description') || null;
   const npmRaw = npm ? npm.rawData || {} : {};
   const via = npmRaw.via != null ? (Array.isArray(npmRaw.via) ? npmRaw.via : [npmRaw.via]) : null;

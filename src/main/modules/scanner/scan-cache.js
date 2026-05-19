@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * VulnSweep - Persistent Scan Result Cache
@@ -32,7 +32,7 @@ const { SCAN_CACHE_CONFIG } = require('../../config/constants');
 
 /**
  * One Map per cacheable source.
- * Keys are buildKey() strings; values are { timestamp: number, results: Array }.
+ * Keys are buildKey() strings; values are { timestamp: number, results: Array, publishedDate: string|null }.
  */
 const _caches = {
   osv: new Map(),
@@ -170,15 +170,20 @@ function get(sourceId, key) {
  * Store a scan result for the given source and key.
  * Marks the source dirty and schedules a debounced async save.
  *
- * @param {string} sourceId - Cacheable source ID
- * @param {string} key      - Cache key from buildKey()
- * @param {Array}  results  - SourceResult array to cache
+ * @param {string}      sourceId        - Cacheable source ID
+ * @param {string}      key             - Cache key from buildKey()
+ * @param {Array}       results         - SourceResult array to cache
+ * @param {string|null} [publishedDate] - ISO 8601 date string of the CVE's publication date,
+ *                                        or null when not available. Stored in the entry so
+ *                                        isCveRecent() can determine soft-refresh eligibility.
  */
-function set(sourceId, key, results) {
+function set(sourceId, key, results, publishedDate = null) {
   if (!_caches[sourceId]) return;
-  _caches[sourceId].set(key, { timestamp: Date.now(), results });
+  _caches[sourceId].set(key, { timestamp: Date.now(), results, publishedDate });
   _dirty[sourceId] = true;
   _scheduleSave(sourceId);
+  // Enforce entry count limit (best-effort — only checks total, not per-source)
+  evictOldestIfOverLimit();
 }
 
 /**
@@ -201,6 +206,132 @@ function isValid(sourceId, key) {
 
 function getSize(sourceId) {
   return (_caches[sourceId] && _caches[sourceId].size) || 0;
+}
+
+/**
+ * Returns true if the cache entry is older than HARD_INVALIDATE_AGE_MS.
+ * Hard-expired entries must be deleted before use.
+ * @param {string} sourceId
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isHardExpired(sourceId, key) {
+  if (!_caches[sourceId]) return false;
+  const entry = _caches[sourceId].get(key);
+  if (!entry) return false;
+  return Date.now() - entry.timestamp > SCAN_CACHE_CONFIG.HARD_INVALIDATE_AGE_MS;
+}
+
+/**
+ * Returns true if the entry exists, is not hard-expired, but is older than
+ * SOFT_REFRESH_AGE_MS. Callers should attempt a fresh fetch and fall back to
+ * the cached result if the network call fails.
+ * @param {string} sourceId
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isSoftStale(sourceId, key) {
+  if (!_caches[sourceId]) return false;
+  const entry = _caches[sourceId].get(key);
+  if (!entry) return false;
+  if (isHardExpired(sourceId, key)) return false;
+  return Date.now() - entry.timestamp > SCAN_CACHE_CONFIG.SOFT_REFRESH_AGE_MS;
+}
+
+/**
+ * Returns true if the cached entry's CVE publishedDate is within CVE_RECENT_AGE_MS
+ * (default: 3 months). "Recent" CVEs are still being actively updated by NVD/OSV,
+ * so they should trigger a soft-refresh attempt even when the cache entry itself
+ * is still within its normal TTL window.
+ *
+ * Returns false if the entry has no publishedDate (null) — treat as non-recent
+ * so the normal TTL logic governs the refresh decision.
+ *
+ * @param {string} sourceId
+ * @param {string} key
+ * @returns {boolean}
+ */
+function isCveRecent(sourceId, key) {
+  if (!_caches[sourceId]) return false;
+  const entry = _caches[sourceId].get(key);
+  if (!entry || !entry.publishedDate) return false;
+  const publishedMs = new Date(entry.publishedDate).getTime();
+  if (Number.isNaN(publishedMs)) return false;
+  return Date.now() - publishedMs < SCAN_CACHE_CONFIG.CVE_RECENT_AGE_MS;
+}
+
+/**
+ * Delete a single cache entry. Used for hard invalidation.
+ * @param {string} sourceId
+ * @param {string} key
+ */
+function deleteEntry(sourceId, key) {
+  if (!_caches[sourceId]) return;
+  if (_caches[sourceId].has(key)) {
+    _caches[sourceId].delete(key);
+    _dirty[sourceId] = true;
+    _scheduleSave(sourceId);
+  }
+}
+
+/**
+ * Evict oldest entries across all sources until both CACHE_MAX_ENTRIES and
+ * CACHE_MAX_SIZE_BYTES limits are satisfied. No-op if neither limit is configured.
+ */
+function evictOldestIfOverLimit() {
+  const entryLimit = SCAN_CACHE_CONFIG.CACHE_MAX_ENTRIES;
+  const byteLimit = SCAN_CACHE_CONFIG.CACHE_MAX_SIZE_BYTES;
+  if (!entryLimit && !byteLimit) return;
+
+  // Cheap entry-count gate: skip the expensive O(n log n) sort unless we are
+  // within 5% of the entry limit. Only short-circuits when there is no byte
+  // limit configured (byte limit always requires full scan to measure).
+  if (entryLimit && !byteLimit) {
+    let total = 0;
+    for (const sid of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) total += _caches[sid].size;
+    if (total <= entryLimit * 1.05) return;
+  }
+
+  // Collect all entries with their serialized byte size for dual-limit enforcement
+  const allEntries = [];
+  let totalBytes = 0;
+  for (const sid of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    for (const [key, entry] of _caches[sid]) {
+      let bytes = 0;
+      try {
+        bytes = Buffer.byteLength(JSON.stringify(entry), 'utf8');
+      } catch {
+        /* corrupt entry — count as 0 bytes */
+      }
+      totalBytes += bytes;
+      allEntries.push({ sid, key, timestamp: entry.timestamp, bytes });
+    }
+  }
+
+  const entryCount = allEntries.length;
+  const overEntries = entryLimit && entryCount > entryLimit;
+  const overBytes = byteLimit && totalBytes > byteLimit;
+  if (!overEntries && !overBytes) return;
+
+  // Sort oldest-first — evict from the front
+  allEntries.sort((a, b) => a.timestamp - b.timestamp);
+
+  let currentCount = entryCount;
+  let currentBytes = totalBytes;
+
+  for (const { sid, key, bytes } of allEntries) {
+    const stillOverEntries = entryLimit && currentCount > entryLimit;
+    const stillOverBytes = byteLimit && currentBytes > byteLimit;
+    if (!stillOverEntries && !stillOverBytes) break;
+    _caches[sid].delete(key);
+    _dirty[sid] = true;
+    currentCount--;
+    currentBytes -= bytes;
+  }
+
+  for (const sid of SCAN_CACHE_CONFIG.CACHEABLE_SOURCES) {
+    if (_dirty[sid]) _scheduleSave(sid);
+  }
 }
 
 function load(cacheDir) {
@@ -230,6 +361,8 @@ function load(cacheDir) {
       _caches[sourceId] = new Map();
     }
   }
+  // Enforce entry count limit after loading from disk
+  evictOldestIfOverLimit();
 }
 
 function save(cacheDir) {
@@ -278,6 +411,11 @@ module.exports = {
   get,
   set,
   isValid,
+  isHardExpired,
+  isSoftStale,
+  isCveRecent,
+  deleteEntry,
+  evictOldestIfOverLimit,
   getSize,
   clear,
   clearAll,

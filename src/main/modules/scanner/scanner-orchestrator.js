@@ -4,7 +4,9 @@ const { SCANNER_CONFIG } = require('../../config/constants');
 const { buildPackageUniverse, getUniqueQueryTargets } = require('./package-universe-builder');
 const { aggregate } = require('./result-aggregator');
 const scanCache = require('./scan-cache');
+const { isCveRecent } = require('./scan-cache');
 const cisaKevSource = require('./sources/cisa-kev-source');
+const epssSource = require('./sources/epss-source');
 const githubSource = require('./sources/github-advisory-source');
 const npmAuditSource = require('./sources/npm-audit-source');
 const nvdSource = require('./sources/nvd-source');
@@ -17,12 +19,13 @@ const ALL_SOURCES = Object.freeze({
   'github-advisory': githubSource,
   'cisa-kev': cisaKevSource,
   'npm-audit': npmAuditSource,
+  epss: epssSource,
 });
 
 // Source IDs per named scan mode; unknown modes fall back to 'fast'
 const SCAN_MODE_SOURCES = Object.freeze({
   fast: ['npm-audit', 'osv'],
-  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev'],
+  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
 });
 
 // Race a promise against a reject-after-ms sentinel (per plugin, inside allSettled)
@@ -194,17 +197,44 @@ async function scanProject(projectPath, options, progressCb) {
             }
 
             const cacheKey = scanCache.buildKey(pkg.name, pkg.version);
-            if (scanCache.isValid(sourceId, cacheKey)) {
-              // Cache hit — return stored results directly, no network call
+
+            // Tier 1: Hard invalidation — entry is over 1 year old → delete and fetch fresh
+            if (scanCache.isHardExpired(sourceId, cacheKey)) {
+              scanCache.deleteEntry(sourceId, cacheKey);
+              // Fall through to fresh fetch below
+            }
+            // Tier 2: Cache hit within soft-refresh window — use as-is
+            else if (
+              scanCache.isValid(sourceId, cacheKey) &&
+              !scanCache.isSoftStale(sourceId, cacheKey)
+            ) {
               return Promise.resolve(scanCache.get(sourceId, cacheKey) || []);
             }
+            // Tier 3: Soft stale — entry exists but is older than 30 days; try refresh, fallback to cache
+            else if (scanCache.isSoftStale(sourceId, cacheKey)) {
+              const cached = scanCache.get(sourceId, cacheKey) || [];
+              return withTimeout(plugin.query(pkg), timeoutMs)
+                .then((results) => {
+                  if (Array.isArray(results) && results.length > 0) {
+                    scanCache.set(sourceId, cacheKey, results);
+                    return results;
+                  }
+                  // Network returned empty — keep stale cache rather than lose data
+                  return cached;
+                })
+                .catch(() => cached); // network failure → fallback to stale cache
+            }
 
-            // Cache miss — query the source, then store result
+            // Cache miss or post-hard-invalidation → fetch fresh
             return withTimeout(plugin.query(pkg), timeoutMs).then((results) => {
-              if (Array.isArray(results)) {
+              if (
+                Array.isArray(results) &&
+                results.length > 0 &&
+                !isCveRecent(sourceId, cacheKey)
+              ) {
                 scanCache.set(sourceId, cacheKey, results);
               }
-              return results;
+              return results ?? [];
             });
           })
         );

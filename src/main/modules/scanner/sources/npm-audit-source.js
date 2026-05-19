@@ -24,6 +24,9 @@ const GHSA_EXTRACT_PATTERN = /\/(GHSA-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+)(?:[/?#]|$)/
  */
 const auditCache = new Map();
 
+/** @type {Map<string, Promise<Map<string, string[]>>>} */
+const dependentsCache = new Map();
+
 /**
  * Clears the memoization cache. Exported for use in tests to reset state
  * between test runs without requiring module re-registration, and called by
@@ -32,6 +35,7 @@ const auditCache = new Map();
  */
 function clearCache() {
   auditCache.clear();
+  dependentsCache.clear();
 }
 
 /**
@@ -80,6 +84,71 @@ function extractFixedIn(auditEntry, pkgName) {
     return auditEntry.fixAvailable.version || null;
   }
   return null;
+}
+
+/**
+ * Builds a Map of packageName → string[] listing every dependent package that
+ * pulls in that package transitively. Uses BFS over the `via` string references
+ * in the raw npm audit vulnerabilities map.
+ *
+ * @param {object} vulnerabilities - The vulnerabilities map from npm audit JSON
+ * @returns {Map<string, string[]>}
+ */
+function _buildResolvesDependentsMap(vulnerabilities) {
+  const viaStrings = new Map();
+  for (const [pkgName, entry] of Object.entries(vulnerabilities)) {
+    const via = Array.isArray(entry.via) ? entry.via : [];
+    viaStrings.set(
+      pkgName,
+      via.filter((v) => typeof v === 'string')
+    );
+  }
+  const result = new Map();
+  for (const [rootName, entry] of Object.entries(vulnerabilities)) {
+    const via = Array.isArray(entry.via) ? entry.via : [];
+    if (!via.some((v) => typeof v === 'object' && v !== null)) continue;
+    const dependents = new Set();
+    const queue = [rootName];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      for (const [pkgName, strings] of viaStrings) {
+        // `dependents` doubles as a visited set — if pkgName is already in the
+        // dependents Set it has been reached via a shorter (or equal-length) BFS path;
+        // re-queuing it would traverse the same subgraph again and loop infinitely on
+        // circular dependency graphs.
+        if (!dependents.has(pkgName) && pkgName !== rootName && strings.includes(current)) {
+          dependents.add(pkgName);
+          queue.push(pkgName);
+        }
+      }
+    }
+    result.set(rootName, [...dependents].sort());
+  }
+  return result;
+}
+
+/**
+ * Returns (or lazily builds) the resolvesDependents Map for a given project.
+ * Memoizes the computed Map so it is only built once per scan invocation.
+ *
+ * @param {string} projectPath
+ * @returns {Promise<Map<string, string[]>>}
+ */
+async function _getResolvesDependentsMap(projectPath) {
+  if (!dependentsCache.has(projectPath)) {
+    dependentsCache.set(
+      projectPath,
+      (async () => {
+        if (!auditCache.has(projectPath)) return new Map();
+        const auditRunResult = await auditCache.get(projectPath);
+        if (!auditRunResult || !auditRunResult.success) return new Map();
+        const auditData = auditRunResult.content && auditRunResult.content.auditData;
+        if (!auditData || !auditData.vulnerabilities) return new Map();
+        return _buildResolvesDependentsMap(auditData.vulnerabilities);
+      })()
+    );
+  }
+  return dependentsCache.get(projectPath);
 }
 
 /**
@@ -148,6 +217,9 @@ async function query(pkg) {
     const via = Array.isArray(auditEntry.via) ? auditEntry.via : [];
     const fixedIn = extractFixedIn(auditEntry, pkg.name);
 
+    const dependentsMap = await _getResolvesDependentsMap(projectPath);
+    const resolvesDependents = dependentsMap.get(pkg.name) || [];
+
     const results = [];
 
     for (const viaEntry of via) {
@@ -179,7 +251,7 @@ async function query(pkg) {
         epssPercentile: null,
         rawData: {
           via: viaEntry,
-          resolvesDependents: auditEntry.resolvesDependents || [],
+          resolvesDependents,
           isPromotedDependent: auditEntry.isPromotedDependent || false,
         },
       });

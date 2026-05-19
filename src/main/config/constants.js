@@ -412,6 +412,31 @@ const SCAN_CACHE_CONFIG = {
    * npm-audit is intentionally absent — it reads the lockfile and must run fresh.
    */
   CACHEABLE_SOURCES: ['osv', 'nvd', 'github-advisory', 'cisa-kev'],
+
+  /** Hard invalidation threshold: entries older than this are deleted unconditionally. */
+  HARD_INVALIDATE_AGE_MS: 365 * 24 * 60 * 60 * 1000, // 1 year
+
+  /** Soft refresh threshold: entries older than this trigger a refresh attempt. */
+  SOFT_REFRESH_AGE_MS: 30 * 24 * 60 * 60 * 1000, // 30 days
+
+  /**
+   * Maximum total number of entries across ALL sources before LRU eviction.
+   * 22,000 packages x 4 sources = 88,000 max theoretical entries.
+   * Setting a hard cap at 50,000 entries prevents unbounded disk growth.
+   * Set to 0 to disable size-based eviction.
+   */
+  CACHE_MAX_ENTRIES: 50000,
+
+  /**
+   * Maximum total size in bytes across all cache files before eviction.
+   * Default: 2 GB. Set to 0 to disable size-based eviction.
+   */
+  CACHE_MAX_SIZE_BYTES: 2 * 1024 * 1024 * 1024,
+
+  /** Entries whose CVE publishedDate is within this window are treated as "recent"
+   *  and trigger a soft-refresh attempt even if the cache entry itself is still fresh.
+   *  Default: 3 months. */
+  CVE_RECENT_AGE_MS: 90 * 24 * 60 * 60 * 1000, // 3 months in ms
 };
 
 // ============================================
