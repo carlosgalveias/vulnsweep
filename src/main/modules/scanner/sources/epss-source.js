@@ -1,6 +1,6 @@
 'use strict';
 
-const { queryEPSS } = require('../../enrichment/sources/epss-source');
+const { queryEPSS, prefetchEPSS, clearEpssCache } = require('../../enrichment/sources/epss-source');
 const { fetchOsvRaw, extractAliases } = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'epss';
@@ -114,4 +114,4 @@ async function query(pkg) {
   }
 }
 
-module.exports = { query, SOURCE_ID };
+module.exports = { query, SOURCE_ID, prefetchEPSS, clearEpssCache };

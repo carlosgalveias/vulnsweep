@@ -4,7 +4,7 @@
  * VulnSweep - Persistent Scan Result Cache
  *
  * Sharded, TTL-based disk cache for vulnerability scan results.
- * Four separate JSON files, one per source, stored in userData/scan-cache/.
+ * Five separate JSON files, one per source, stored in userData/scan-cache/.
  *
  * Design rationale (see plans/scan-cache-spec.md section 3.1):
  *   22,000 packages x 4 sources = 88,000 entries. A single flat file would be
@@ -39,6 +39,7 @@ const _caches = {
   nvd: new Map(),
   'github-advisory': new Map(),
   'cisa-kev': new Map(),
+  epss: new Map(),
 };
 
 /**
@@ -49,6 +50,7 @@ const _dirty = {
   nvd: false,
   'github-advisory': false,
   'cisa-kev': false,
+  epss: false,
 };
 
 /**
@@ -59,6 +61,7 @@ const _saveTimers = {
   nvd: null,
   'github-advisory': null,
   'cisa-kev': null,
+  epss: null,
 };
 
 // ---------------------------------------------------------------------------

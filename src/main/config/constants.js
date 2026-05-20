@@ -239,6 +239,15 @@ const ENRICHMENT_CONFIG = {
   NVD_RATE_LIMIT_MS: 6000,
 
   /**
+   * Minimum delay between consecutive NVD API calls when using an API key (ms).
+   * NVD API key allows 50 req/30s. 600ms between calls = 100 req/60s, safely within limit.
+   * The previous value of 500ms (120 req/min) exceeded the limit and caused 429 responses
+   * with exponential backoff retries adding 12-25s per retry.
+   * @type {number}
+   */
+  NVD_RATE_LIMIT_WITH_KEY_MS: 600,
+
+  /**
    * Optional NVD API key read from environment variable.
    * When set, NVD allows 50 req/30s instead of 5 req/30s.
    * @type {string|undefined}
@@ -395,6 +404,7 @@ const SCAN_CACHE_CONFIG = {
     nvd: 24 * 60 * 60 * 1000, // 24 h — CVSS data changes rarely
     'github-advisory': 24 * 60 * 60 * 1000, // 24 h — advisory metadata stable
     'cisa-kev': 2 * 60 * 60 * 1000, // 2 h  — actively exploited; MUST be fresh
+    epss: 24 * 60 * 60 * 1000, // 24 h — EPSS scores change daily at most
   },
 
   /** Fallback TTL for any source not listed in TTL_BY_SOURCE. */
@@ -411,7 +421,7 @@ const SCAN_CACHE_CONFIG = {
    * Source IDs for which caching is active.
    * npm-audit is intentionally absent — it reads the lockfile and must run fresh.
    */
-  CACHEABLE_SOURCES: ['osv', 'nvd', 'github-advisory', 'cisa-kev'],
+  CACHEABLE_SOURCES: ['osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
 
   /** Hard invalidation threshold: entries older than this are deleted unconditionally. */
   HARD_INVALIDATE_AGE_MS: 365 * 24 * 60 * 60 * 1000, // 1 year

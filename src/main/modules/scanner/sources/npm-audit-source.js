@@ -280,4 +280,20 @@ async function query(pkg) {
   }
 }
 
-module.exports = { query, clearCache, SOURCE_ID };
+/**
+ * Pre-warms the audit cache for a project before the per-package batch loop.
+ * Ensures all query() calls get an already-resolved Promise rather than waiting
+ * for npm audit to complete mid-batch, eliminating first-batch latency spikes.
+ *
+ * @param {string} projectPath - Absolute path to project root
+ * @returns {Promise<void>}
+ */
+async function prewarmCache(projectPath) {
+  if (!projectPath) return;
+  if (!auditCache.has(projectPath)) {
+    auditCache.set(projectPath, runNpmAudit(projectPath));
+  }
+  await auditCache.get(projectPath);
+}
+
+module.exports = { query, clearCache, prewarmCache, SOURCE_ID };

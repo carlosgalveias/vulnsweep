@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
 
 // Import backend modules
 const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
+const scanTelemetry = require('./utils/scan-telemetry');
 const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
 const discovery = require('./modules/discovery');
@@ -519,6 +520,13 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
     return { success: false, error: 'Invalid project paths array' };
   }
 
+  // [dev-telemetry] Log that telemetry is active for this batch scan
+  if (scanTelemetry.isEnabled()) {
+    console.log(
+      `[scan-telemetry] Dev mode active — timing data will be written to tmp/ after each repo scan (${projectPaths.length} repo(s) queued)`
+    );
+  }
+
   try {
     const { scanProject } = require('./modules/scanner/scanner-orchestrator');
     const results = [];
@@ -540,6 +548,16 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
       } catch (err) {
         results.push({ success: false, projectPath: projectPaths[i], error: err.message });
       }
+    }
+    // Emit a single batch-level sentinel after ALL repositories have been scanned.
+    // The renderer's onScanProgress handler responds to this phase (not the per-repo
+    // 'complete' phase) to show "Finalizing results..." at the correct moment —
+    // once all repos are truly done, not after each individual repo completes.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('scan-progress', {
+        phase: 'batch-complete',
+        total: projectPaths.length,
+      });
     }
     return { success: true, content: results };
   } catch (err) {

@@ -38,9 +38,9 @@ function getDiskCachePath() {
  * Using a const object (instead of separate `let` vars) keeps property mutations
  * out of scope for the `require-atomic-updates` ESLint rule, which only flags
  * assignments to `let`/`var` identifiers after an `await`.
- * @type {{ kevSet: Set<string>|null, fetchedAt: number }}
+ * @type {{ kevSet: Set<string>|null, fetchedAt: number, inFlight: Promise<void>|null }}
  */
-const _kevCache = { kevSet: null, fetchedAt: 0 };
+const _kevCache = { kevSet: null, fetchedAt: 0, inFlight: null };
 
 // ─── HTTP helper (identical pattern to nvd-source.js) ────────────────────────
 
@@ -189,17 +189,22 @@ async function isCisaKnownExploited(cveId) {
     return _kevCache.kevSet.has(upperCveId);
   }
 
-  // Step 4 — Network fetch via dedicated helper. The two assignments below
-  // are genuine false positives for require-atomic-updates: we are writing
-  // a freshly resolved value, not reading-then-writing the same variable.
-  const result = await fetchKevFromNetwork();
-  // eslint-disable-next-line require-atomic-updates
-  _kevCache.kevSet = result.kevSet;
-  // eslint-disable-next-line require-atomic-updates
-  _kevCache.fetchedAt = result.fetchedAt;
+  // Step 4 — Cold start: ONE shared Promise; all concurrent callers await the same fetch.
+  // Storing the Promise (not the resolved value) is the correct async singleton pattern.
+  // Without this, all 10 packages in the first concurrent batch each fire an independent
+  // network fetch of the same static catalog — the classic async-singleton mistake.
+  if (!_kevCache.inFlight) {
+    _kevCache.inFlight = fetchKevFromNetwork().then((result) => {
+      _kevCache.kevSet = result.kevSet;
+      _kevCache.fetchedAt = result.fetchedAt;
+      _kevCache.inFlight = null;
+    });
+  }
 
-  // Step 5 — Return lookup result
-  return _kevCache.kevSet.has(upperCveId);
+  await _kevCache.inFlight;
+
+  // Step 5 — Return lookup result (kevSet may be null if fetch failed; default to empty Set)
+  return (_kevCache.kevSet ?? new Set()).has(upperCveId);
 }
 
 /**
@@ -209,6 +214,7 @@ async function isCisaKnownExploited(cveId) {
 function clearKevCache() {
   _kevCache.kevSet = null;
   _kevCache.fetchedAt = 0;
+  _kevCache.inFlight = null;
 }
 
 module.exports = { isCisaKnownExploited, clearKevCache };

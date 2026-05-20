@@ -1,7 +1,6 @@
 'use strict';
 
 const { isCisaKnownExploited } = require('../../enrichment/sources/cisa-kev-source');
-const { queryEPSS } = require('../../enrichment/sources/epss-source');
 const { fetchOsvRaw, extractAliases } = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'cisa-kev';
@@ -36,8 +35,10 @@ function collectAllCveIds(vulns) {
  * The CISA KEV catalog is fetched once and cached for 24 hours by the existing
  * isCisaKnownExploited() function — no additional caching is needed here.
  *
- * Both isCisaKnownExploited() and queryEPSS() are called in parallel via
- * Promise.allSettled() to minimise latency per CVE ID.
+ * epssScore and epssPercentile are intentionally set to null here. The standalone
+ * epss-source plugin runs concurrently and handles all EPSS lookups. The
+ * result-aggregator merges EPSS scores from the epss plugin into final results.
+ * Having cisa-kev also call queryEPSS() was pure duplication (OPT-1 bonus fix).
  *
  * @param {object} pkg - PackageDescriptor from package-universe-builder
  * @param {string} pkg.name - Package name
@@ -52,16 +53,16 @@ function collectAllCveIds(vulns) {
  * @property {'critical'} severity           - Always 'critical' for CISA KEV results
  * @property {string[]} cveIds               - Single CVE ID that matched CISA KEV
  * @property {string[]} aliases              - Always [] for CISA KEV results
- * @property {string}   title                - 'CISA KEV: <cveId>'
+ * @property {string}   title                - 'CISA KEV: cveId'
  * @property {null}     description          - Not provided by CISA KEV source
  * @property {null}     fixedIn              - Not provided by CISA KEV source
  * @property {string}   url                  - CISA KEV catalog URL
  * @property {null}     cvssScore            - Not provided by CISA KEV source
  * @property {null}     cvssVector           - Not provided by CISA KEV source
  * @property {true}     cisaKnownExploited   - Always true
- * @property {number|null} epssScore         - EPSS exploitation probability score
- * @property {number|null} epssPercentile    - EPSS percentile ranking
- * @property {object}   rawData              - { cveId, epss: epssResult }
+ * @property {null}     epssScore            - Populated by epss plugin via result-aggregator
+ * @property {null}     epssPercentile       - Populated by epss plugin via result-aggregator
+ * @property {object}   rawData              - { cveId, epss: null }
  */
 async function query(pkg) {
   if (!pkg || !pkg.name || !pkg.version) return [];
@@ -78,16 +79,10 @@ async function query(pkg) {
     const results = [];
 
     for (const cveId of cveIds) {
-      // Run CISA KEV check and EPSS query in parallel for this CVE ID
-      const [kevSettled, epssSettled] = await Promise.allSettled([
-        isCisaKnownExploited(cveId),
-        queryEPSS(cveId),
-      ]);
-
-      const isKnownExploited = kevSettled.status === 'fulfilled' ? kevSettled.value : false;
+      // OPT-1 bonus: removed redundant queryEPSS() call that duplicated epss-source plugin.
+      // epssScore/epssPercentile are set to null; the epss plugin covers all EPSS lookups.
+      const isKnownExploited = await isCisaKnownExploited(cveId);
       if (!isKnownExploited) continue;
-
-      const epssResult = epssSettled.status === 'fulfilled' ? epssSettled.value : null;
 
       results.push({
         sourceId: SOURCE_ID,
@@ -103,9 +98,9 @@ async function query(pkg) {
         cvssScore: null,
         cvssVector: null,
         cisaKnownExploited: true,
-        epssScore: epssResult?.epssScore ?? null,
-        epssPercentile: epssResult?.epssPercentile ?? null,
-        rawData: { cveId, epss: epssResult },
+        epssScore: null,
+        epssPercentile: null,
+        rawData: { cveId, epss: null },
       });
     }
 

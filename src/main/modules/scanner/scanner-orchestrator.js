@@ -1,6 +1,8 @@
 'use strict';
 
 const { SCANNER_CONFIG } = require('../../config/constants');
+const scanTelemetry = require('../../utils/scan-telemetry');
+const { clearNvdSessionCache } = require('../enrichment/sources/nvd-source');
 const { buildPackageUniverse, getUniqueQueryTargets } = require('./package-universe-builder');
 const { aggregate } = require('./result-aggregator');
 const scanCache = require('./scan-cache');
@@ -132,12 +134,19 @@ async function scanProject(projectPath, options, progressCb) {
   }
   if (options == null) options = {};
 
-  // Reset the npm-audit memoization cache at the start of every scan so stale
-  // data from a previous scanProject() invocation cannot bleed into this one.
-  // Guard: test mocks may not include clearCache.
+  // [telemetry] Reset all counters and start the total-scan wall-clock timer
+  scanTelemetry.reset();
+  const tlTotal = scanTelemetry.start('scan:total');
+
+  // Reset caches at the start of every scan so stale data from a previous
+  // scanProject() invocation cannot bleed into this one.
+  // Guards: test mocks may not include all cache functions.
   if (typeof npmAuditSource.clearCache === 'function') {
     npmAuditSource.clearCache();
   }
+  // OPT-4: Clear NVD session cache so duplicate CVE lookups within a scan are served
+  // from the new per-scan Map rather than a populated Map from the previous scan.
+  clearNvdSessionCache();
 
   // Load the persistent scan cache (idempotent — only reads files on first call)
   scanCache.load();
@@ -150,20 +159,34 @@ async function scanProject(projectPath, options, progressCb) {
 
   // Phase 1: Build package universe (called exactly once per scanProject invocation)
   let universe;
+  const tlUniverse = scanTelemetry.start('scan:phase:universe-build');
   try {
     universe = await buildPackageUniverse(projectPath);
   } catch (err) {
     console.error('[scanner-orchestrator] buildPackageUniverse failed:', err.message);
+    scanTelemetry.end(tlUniverse, 'scan:phase:universe-build');
+    scanTelemetry.end(tlTotal, 'scan:total');
     throw err;
   }
+  scanTelemetry.end(tlUniverse, 'scan:phase:universe-build');
 
   const targets = getUniqueQueryTargets(universe);
   const total = targets.length;
 
+  scanTelemetry.count('packages:total', universe.length);
+
   emit(progressCb, { phase: 'universe', total });
 
   if (total === 0) {
+    scanTelemetry.end(tlTotal, 'scan:total');
     return buildEmptyScanResult(projectPath, sourceIds, universe.length);
+  }
+
+  // OPT-3: NPM-Audit Pre-warm — run npm audit once BEFORE the concurrent batch loop
+  // so all query() calls find a fully resolved Promise in the cache, eliminating the
+  // first-batch blocking wait that previously added ~1-5s latency to each first-batch call.
+  if (typeof npmAuditSource.prewarmCache === 'function') {
+    await npmAuditSource.prewarmCache(projectPath);
   }
 
   // Enrich each unique query target with the full PackageDescriptor metadata
@@ -190,10 +213,20 @@ async function scanProject(projectPath, options, progressCb) {
         const pluginSettled = await Promise.allSettled(
           plugins.map((plugin) => {
             const sourceId = plugin.SOURCE_ID;
+            const tlabel = `scan:source:${sourceId}`;
 
             // npm-audit always runs fresh — never cached
             if (sourceId === 'npm-audit') {
-              return withTimeout(plugin.query(pkg), timeoutMs);
+              const tlToken = scanTelemetry.start(tlabel);
+              return withTimeout(plugin.query(pkg), timeoutMs)
+                .then((r) => {
+                  scanTelemetry.end(tlToken, tlabel);
+                  return r;
+                })
+                .catch((e) => {
+                  scanTelemetry.end(tlToken, tlabel);
+                  throw e;
+                });
             }
 
             const cacheKey = scanCache.buildKey(pkg.name, pkg.version);
@@ -208,34 +241,49 @@ async function scanProject(projectPath, options, progressCb) {
               scanCache.isValid(sourceId, cacheKey) &&
               !scanCache.isSoftStale(sourceId, cacheKey)
             ) {
+              scanTelemetry.count('cache:hits', 1);
               return Promise.resolve(scanCache.get(sourceId, cacheKey) || []);
             }
             // Tier 3: Soft stale — entry exists but is older than 30 days; try refresh, fallback to cache
             else if (scanCache.isSoftStale(sourceId, cacheKey)) {
               const cached = scanCache.get(sourceId, cacheKey) || [];
+              // T8: capture token in outer closure so .catch() can reach it
+              const tlToken = scanTelemetry.start(tlabel);
               return withTimeout(plugin.query(pkg), timeoutMs)
                 .then((results) => {
+                  scanTelemetry.end(tlToken, tlabel);
                   if (Array.isArray(results) && results.length > 0) {
                     scanCache.set(sourceId, cacheKey, results);
+                    scanTelemetry.count('cache:soft-refreshed', 1);
                     return results;
                   }
                   // Network returned empty — keep stale cache rather than lose data
                   return cached;
                 })
-                .catch(() => cached); // network failure → fallback to stale cache
+                .catch(() => {
+                  scanTelemetry.end(tlToken, tlabel);
+                  return cached;
+                });
             }
 
             // Cache miss or post-hard-invalidation → fetch fresh
-            return withTimeout(plugin.query(pkg), timeoutMs).then((results) => {
-              if (
-                Array.isArray(results) &&
-                results.length > 0 &&
-                !isCveRecent(sourceId, cacheKey)
-              ) {
-                scanCache.set(sourceId, cacheKey, results);
-              }
-              return results ?? [];
-            });
+            const tlToken = scanTelemetry.start(tlabel);
+            scanTelemetry.count('cache:fresh-fetched', 1);
+            return withTimeout(plugin.query(pkg), timeoutMs)
+              .then((results) => {
+                scanTelemetry.end(tlToken, tlabel);
+                // Cache both non-empty AND empty arrays — an empty result ([]) is a valid,
+                // cacheable fact: "this package has no vulnerabilities from this source".
+                // Only skip caching when results is null/undefined (fetch genuinely failed).
+                if (Array.isArray(results) && !isCveRecent(sourceId, cacheKey)) {
+                  scanCache.set(sourceId, cacheKey, results);
+                }
+                return results ?? [];
+              })
+              .catch((e) => {
+                scanTelemetry.end(tlToken, tlabel);
+                throw e;
+              });
           })
         );
 
@@ -280,6 +328,16 @@ async function scanProject(projectPath, options, progressCb) {
   // established in T9 (result-aggregator) is preserved here at the top level.
   const vulnerabilities = packageResults.flatMap((pr) => pr.vulnerabilities);
   const strategies = vulnerabilities.map((v) => v.strategy ?? null);
+
+  // [telemetry] Record vulnerable package count + stop total timer + write report
+  scanTelemetry.count(
+    'packages:vulnerable',
+    packageResults.filter((p) => p.vulnerabilities.length > 0).length
+  );
+  scanTelemetry.end(tlTotal, 'scan:total');
+  // report() is async but we don't await it — fire-and-forget so the scan result
+  // is returned to the caller immediately without waiting for disk I/O.
+  scanTelemetry.report().catch(() => {});
 
   return {
     projectPath,

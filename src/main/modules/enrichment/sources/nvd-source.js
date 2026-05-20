@@ -37,13 +37,39 @@ function sleep(ms) {
 }
 
 function enqueueNvd(fn) {
-  const delayMs = ENRICHMENT_CONFIG.NVD_API_KEY ? 500 : ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS;
+  // OPT-4: Use NVD_RATE_LIMIT_WITH_KEY_MS (600ms) when an API key is present.
+  // The previous 500ms delay = 120 req/min exceeded NVD's 50 req/30s (100 req/min)
+  // limit and caused 429 responses + exponential backoff retries (~12-25s each).
+  // 600ms = ~100 req/min, safely within the NVD API key allowance.
+  const delayMs = ENRICHMENT_CONFIG.NVD_API_KEY
+    ? ENRICHMENT_CONFIG.NVD_RATE_LIMIT_WITH_KEY_MS
+    : ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS;
   const result = _nvdQueue.then(fn);
   _nvdQueue = result.then(
     () => sleep(delayMs),
     () => sleep(delayMs)
   );
   return result;
+}
+
+// ─── In-process session cache ─────────────────────────────────────────────────
+
+/**
+ * Per-scan session cache for NVD results.
+ * Key: uppercase CVE ID. Value: NVD result object.
+ * Eliminates duplicate NVD API calls when multiple packages share the same CVE
+ * (common with transitive deps). Cleared at scan start via clearNvdSessionCache().
+ *
+ * @type {Map<string, object>}
+ */
+const _nvdSessionCache = new Map();
+
+/**
+ * Clears the per-scan NVD session cache. Called by the orchestrator at scan start.
+ * @returns {void}
+ */
+function clearNvdSessionCache() {
+  _nvdSessionCache.clear();
 }
 
 // ─── Exponential backoff helper ───────────────────────────────────────────────
@@ -204,14 +230,22 @@ async function queryNVD(cveId) {
     };
   }
 
-  const url = `${ENRICHMENT_CONFIG.NVD_API_URL}?cveId=${encodeURIComponent(cveId.toUpperCase())}`;
+  const upperCveId = cveId.toUpperCase();
+
+  // OPT-4: Session cache check — avoids duplicate NVD requests for shared CVEs
+  // (e.g. the same CVE appearing across many transitive dependencies).
+  if (_nvdSessionCache.has(upperCveId)) {
+    return _nvdSessionCache.get(upperCveId);
+  }
+
+  const url = `${ENRICHMENT_CONFIG.NVD_API_URL}?cveId=${encodeURIComponent(upperCveId)}`;
 
   return enqueueNvd(async () => {
     for (let attempt = 0; attempt <= NVD_MAX_RETRIES; attempt++) {
       try {
         const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
         if (json === null) {
-          return {
+          const notFound = {
             found: false,
             cvssScore: null,
             cvssVector: null,
@@ -219,8 +253,12 @@ async function queryNVD(cveId) {
             cweIds: [],
             url: null,
           };
+          _nvdSessionCache.set(upperCveId, notFound);
+          return notFound;
         }
-        return parseNvdResponse(json, cveId);
+        const parsed = parseNvdResponse(json, cveId);
+        _nvdSessionCache.set(upperCveId, parsed);
+        return parsed;
       } catch (err) {
         if (err.isRateLimit && attempt < NVD_MAX_RETRIES) {
           const delay = backoffDelay(NVD_BACKOFF_BASE_MS, attempt);
@@ -267,4 +305,4 @@ async function queryNVD(cveId) {
   });
 }
 
-module.exports = { queryNVD, scoreToCvssCategory };
+module.exports = { queryNVD, scoreToCvssCategory, clearNvdSessionCache };
