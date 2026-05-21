@@ -11,11 +11,13 @@ import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
 import LicensesTab from './components/LicensesTab';
 import AboutTab from './components/AboutTab';
+import SettingsTab from './components/SettingsTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
 import useLogConsole from './hooks/useLogConsole';
 import useProjectDiscovery from './hooks/useProjectDiscovery';
+import useSettings from './hooks/useSettings';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
 
 function App() {
@@ -152,13 +154,31 @@ function App() {
     commitAndPush: commitAndPushVulns,
   } = useGitOperations(addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo);
 
+  // useSettings — load persisted scan option values once on mount for initial hydration.
+  // SettingsTab owns its own useSettings instance and auto-saves every change;
+  // this instance is read-only and only used for the initial state hydration.
+  const { settings: appSettings } = useSettings();
+
+  // Hydrate the four scan option state variables whenever useSettings loads/updates them.
+  useEffect(() => {
+    if (!appSettings) return;
+    if (typeof appSettings.bumpVersion === 'boolean') setBumpVersion(appSettings.bumpVersion);
+    if (typeof appSettings.removePackageLock === 'boolean')
+      setRemovePackageLock(appSettings.removePackageLock);
+    if (typeof appSettings.removeOverrides === 'boolean')
+      setRemoveOverrides(appSettings.removeOverrides);
+    if (typeof appSettings.allowReset === 'boolean') handleAllowResetChange(appSettings.allowReset);
+  }, [appSettings, handleAllowResetChange]);
+
   const {
     vulnerabilities,
     selectedVulns,
     progress,
     isScanning,
+    isCancelling,
     hasScanned,
     scanProjects,
+    cancelScan,
     toggleVulnerability,
     toggleAll,
     resetVulnerabilities,
@@ -423,6 +443,11 @@ function App() {
   };
 
   const handleScanAudit = async () => {
+    // If a vulnerability scan is in progress, this button acts as Cancel
+    if (isScanning) {
+      await cancelScan();
+      return;
+    }
     if (activeTab === 'dep-updates') {
       await handleDepScan();
       return;
@@ -445,13 +470,24 @@ function App() {
 
   const isDepUpdatesTab = activeTab === 'dep-updates';
   const isLicensesTab = activeTab === 'licenses';
-  const scanButtonLabel = isDepUpdatesTab ? 'Scan for Updates' : 'Scan & Audit';
+  // When a vulnerability scan is active, show Cancel / Cancelling... instead of the normal label
+  const scanButtonLabel = isScanning
+    ? isCancelling
+      ? 'Cancelling...'
+      : 'Cancel'
+    : isDepUpdatesTab
+      ? 'Scan for Updates'
+      : 'Scan & Audit';
   const applyButtonLabel = isDepUpdatesTab ? 'Apply Updates' : 'Apply Selected Fixes';
 
   const buttonsState = {
-    scanAudit: isDepUpdatesTab
-      ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
-      : projects.length > 0 && !isScanning && !isApplying && !isCommitting,
+    // Cancel button enabled unless cancellation is already in-flight.
+    // Normal scan-start conditions apply only when no scan is running.
+    scanAudit: isScanning
+      ? !isCancelling
+      : isDepUpdatesTab
+        ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
+        : projects.length > 0 && !isApplying && !isCommitting,
     applyFixes: isLicensesTab
       ? false
       : isDepUpdatesTab
@@ -481,17 +517,11 @@ function App() {
             buttonsState={buttonsState}
             scanButtonLabel={scanButtonLabel}
             applyButtonLabel={applyButtonLabel}
-            allowReset={allowReset}
-            onAllowResetChange={handleAllowResetChange}
-            bumpVersion={bumpVersion}
-            onBumpVersionChange={setBumpVersion}
-            removePackageLock={removePackageLock}
-            onRemovePackageLockChange={setRemovePackageLock}
-            removeOverrides={removeOverrides}
-            onRemoveOverridesChange={setRemoveOverrides}
             licStatus={licStatus}
             trialStatus={trialStatus}
             onBuyNow={() => setShowBuyModal(true)}
+            isScanning={isScanning}
+            isCancelling={isCancelling}
           />
         </ErrorBoundary>
 
@@ -511,6 +541,16 @@ function App() {
             </button>
           ))}
           <div className="flex-1" />
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${
+              activeTab === 'settings'
+                ? 'bg-surface text-white border-blue-500'
+                : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'
+            }`}
+          >
+            Settings
+          </button>
           <button
             onClick={() => setActiveTab('about')}
             className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 border-b-2 ${activeTab === 'about' ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
@@ -596,6 +636,18 @@ function App() {
                   onAnalyticsOptOutChange={handleAnalyticsOptOutChange}
                   onLicenseRestored={handleLicenseRestored}
                   appVersion={appVersion}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
+          {activeTab === 'settings' && (
+            <div className="flex-1 overflow-auto p-6">
+              <ErrorBoundary fallbackMessage="Failed to load Settings tab">
+                <SettingsTab
+                  onAllowResetChange={handleAllowResetChange}
+                  onBumpVersionChange={setBumpVersion}
+                  onRemovePackageLockChange={setRemovePackageLock}
+                  onRemoveOverridesChange={setRemoveOverrides}
                 />
               </ErrorBoundary>
             </div>

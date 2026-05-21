@@ -320,6 +320,62 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * @returns {Promise<{ success: boolean, content?: { osv: number, nvd: number, 'github-advisory': number, 'cisa-kev': number }, error?: string }>}
    */
   getScanCacheStats: () => ipcRenderer.invoke('cache:getStats'),
+
+  // ============================================
+  // CREDENTIALS (Sprint 5 Feature B)
+  // ============================================
+
+  /**
+   * Returns configured status + masked hint for all known credential sources.
+   * NEVER returns the plaintext credential — only a boolean and last-4-char hint.
+   * @returns {Promise<{ success: boolean, content?: Record<string, { configured: boolean, maskedHint: string|null }>, error?: string }>}
+   */
+  getCredentialStatus: () => ipcRenderer.invoke('credentials:getStatus'),
+
+  /**
+   * Stores a credential in the encrypted store.
+   * Returns only a masked hint — the plaintext is never echoed back to the renderer.
+   * @param {string} sourceId - Credential source identifier (e.g. 'github-advisory')
+   * @param {string} plaintext - The credential value to store
+   * @returns {Promise<{ success: boolean, maskedHint?: string, error?: string }>}
+   */
+  setCredential: (sourceId, plaintext) =>
+    ipcRenderer.invoke('credentials:set', sourceId, plaintext),
+
+  /**
+   * Deletes a stored credential from the encrypted store.
+   * @param {string} sourceId - Credential source identifier
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  deleteCredential: (sourceId) => ipcRenderer.invoke('credentials:delete', sourceId),
+
+  // ============================================
+  // SETTINGS (Sprint 5 Feature A)
+  // ============================================
+
+  /**
+   * Retrieve persisted app settings (scanMode, enabledSources).
+   * @returns {Promise<{ success: boolean, content?: { scanMode: string, enabledSources: string[] }, error?: string }>}
+   */
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+
+  /**
+   * Persist app settings (scanMode, enabledSources).
+   * @param {{ scanMode: string, enabledSources: string[] }} settings
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  setSettings: (settings) => ipcRenderer.invoke('settings:set', settings),
+
+  // ============================================
+  // CANCEL SCAN (Sprint 5 Feature D)
+  // ============================================
+
+  /**
+   * Abort the currently running scan-projects operation.
+   * No-op if no scan is active (the main process checks _activeScanAbortController).
+   * @returns {Promise<{ success: boolean, error?: string }>}
+   */
+  cancelScan: () => ipcRenderer.invoke('scan:cancel'),
 });
 
 // Expose app version metadata

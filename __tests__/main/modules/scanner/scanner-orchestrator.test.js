@@ -129,13 +129,24 @@ describe('scanner-orchestrator scanProject()', () => {
     expect(calls.some((c) => c.phase === 'universe')).toBe(true);
   });
 
-  it('mode fast uses only npm-audit and osv plugins', async () => {
+  it('enabledSources fast-preset uses only npm-audit and osv plugins', async () => {
     buildPackageUniverse.mockResolvedValue([]);
     getUniqueQueryTargets.mockReturnValue([]);
-    const result = await scanProject(PROJECT, { mode: 'fast' });
+    // Fast preset: UI writes enabledSources directly; scanner reads only that
+    const result = await scanProject(PROJECT, { enabledSources: ['npm-audit', 'osv'] });
     expect(result.sources).toContain('npm-audit');
     expect(result.sources).toContain('osv');
     expect(result.sources).not.toContain('nvd');
+  });
+
+  it('unknown mode option falls back to all sources (mode is no longer handled)', async () => {
+    buildPackageUniverse.mockResolvedValue([]);
+    getUniqueQueryTargets.mockReturnValue([]);
+    // Passing a legacy mode option without enabledSources triggers full fallback
+    const result = await scanProject(PROJECT, { mode: 'fast' });
+    expect(result.sources).toContain('npm-audit');
+    expect(result.sources).toContain('osv');
+    expect(result.sources).toContain('nvd');
   });
 
   it('legacy: progress callback as second arg (no options)', async () => {

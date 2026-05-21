@@ -147,16 +147,14 @@ function AboutTab({
 
       <div className={card}>
         <h2 className={hd}>Support</h2>
-        <button
-          className={lk}
-          onClick={() =>
-            window.electronAPI.openExternal(
-              'https://github.com/carlosgalveias/vulnsweep-releases/issues'
-            )
-          }
+        <a
+          href="https://github.com/carlosgalveias/vulnsweep-releases/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 text-sm underline"
         >
           Report an issue on GitHub
-        </button>
+        </a>
       </div>
 
       <div className={card}>

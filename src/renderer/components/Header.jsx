@@ -9,17 +9,11 @@ function Header({
   buttonsState,
   scanButtonLabel = 'Scan & Audit',
   applyButtonLabel = 'Apply Selected Fixes',
-  allowReset,
-  onAllowResetChange,
-  bumpVersion,
-  onBumpVersionChange,
-  removePackageLock,
-  onRemovePackageLockChange,
-  removeOverrides,
-  onRemoveOverridesChange,
   licStatus,
   trialStatus,
   onBuyNow,
+  isScanning = false,
+  isCancelling = false,
 }) {
   const showProgress = progress && progress.total > 0;
   const isUnlicensedCommercial = licStatus?.isCommercial && !licStatus?.isLicensed;
@@ -40,10 +34,21 @@ function Header({
       ? 'Requires commercial license or active trial'
       : '';
 
+  // Derive scan button appearance based on scanning/cancelling state:
+  //   - Cancelling (in-flight abort): muted grey, disabled
+  //   - Scanning (cancel available):  red, active
+  //   - Idle:                         blue, normal
+  const scanBtnDisabled = !buttonsState.scanAudit;
+  const scanBtnClass = isCancelling
+    ? 'compact-btn rounded transition-colors duration-200 whitespace-nowrap bg-gray-600 text-gray-400 cursor-not-allowed'
+    : isScanning
+      ? 'compact-btn rounded transition-colors duration-200 whitespace-nowrap bg-red-600 hover:bg-red-700 text-white'
+      : 'compact-btn rounded transition-colors duration-200 whitespace-nowrap bg-blue-600 hover:bg-blue-700 text-white';
+
   return (
     <header className="bg-surface-raised border-b border-gray-700 compact-header">
       <div className="flex items-center justify-between compact-gap">
-        {/* Left Section: Folder Selector & Settings */}
+        {/* Left Section: Folder Selector */}
         <div className="flex flex-col compact-gap-sm flex-1 max-w-md">
           {/* Folder Selector */}
           <div className="flex items-center compact-gap-sm">
@@ -60,79 +65,6 @@ function Header({
             >
               Browse
             </button>
-          </div>
-
-          {/* Git Reset Toggle */}
-          <div className="flex items-center gap-2 px-2">
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={allowReset}
-                onChange={(e) => onAllowResetChange(e.target.checked)}
-                className="w-3.5 h-3.5 text-red-600 bg-surface-overlay border-gray-600 rounded focus:ring-red-500 focus:ring-2 cursor-pointer"
-              />
-              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
-                Allow Git Reset
-              </span>
-              <span
-                className="text-yellow-400 hover:text-yellow-300 transition-colors"
-                title="When enabled, VulnSweep will run 'git reset --hard' before pulling. This is DESTRUCTIVE and will discard any uncommitted changes in the repository."
-              >
-                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </span>
-            </label>
-            <span className="text-xs text-red-400 font-medium">(Destructive)</span>
-          </div>
-
-          {/* Bump Version Toggle */}
-          <div className="flex items-center gap-2 px-2">
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={bumpVersion}
-                onChange={(e) => onBumpVersionChange(e.target.checked)}
-                className="w-3.5 h-3.5 text-blue-600 bg-surface-overlay border-gray-600 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
-              />
-              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
-                Bump patch version on fix
-              </span>
-            </label>
-          </div>
-
-          {/* Remove package-lock.json Toggle */}
-          <div className="flex items-center gap-2 px-2">
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={removePackageLock}
-                onChange={(e) => onRemovePackageLockChange(e.target.checked)}
-                className="w-3.5 h-3.5 text-yellow-600 bg-surface-overlay border-gray-600 rounded focus:ring-yellow-500 focus:ring-2 cursor-pointer"
-              />
-              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
-                Remove package-lock.json
-              </span>
-            </label>
-          </div>
-
-          {/* Remove overrides Toggle */}
-          <div className="flex items-center gap-2 px-2">
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={removeOverrides}
-                onChange={(e) => onRemoveOverridesChange(e.target.checked)}
-                className="w-3.5 h-3.5 text-yellow-600 bg-surface-overlay border-gray-600 rounded focus:ring-yellow-500 focus:ring-2 cursor-pointer"
-              />
-              <span className="text-xs text-gray-300 group-hover:text-gray-100 transition-colors">
-                Remove overrides
-              </span>
-            </label>
           </div>
         </div>
 
@@ -162,10 +94,7 @@ function Header({
 
         {/* Right Section: Action Buttons */}
         <div className="flex items-center compact-gap-sm">
-          <button
-            onClick={onScanAudit}
-            className="compact-btn bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors duration-200 whitespace-nowrap"
-          >
+          <button onClick={onScanAudit} disabled={scanBtnDisabled} className={scanBtnClass}>
             {scanButtonLabel}
           </button>
           <button
@@ -190,7 +119,7 @@ function Header({
                 : 'bg-surface-overlay text-text-muted cursor-not-allowed'
             }`}
           >
-            Commit & Push
+            Commit &amp; Push
           </button>
           {licStatus?.isCommercial && !licStatus?.isLicensed && (
             <button
@@ -202,7 +131,7 @@ function Header({
           )}
           {licStatus?.isCommercial && licStatus?.isLicensed && (
             <span className="compact-btn bg-green-700 text-green-100 rounded whitespace-nowrap font-bold tracking-wide cursor-default select-none">
-              ✓ LICENSED
+              &#10003; LICENSED
             </span>
           )}
         </div>

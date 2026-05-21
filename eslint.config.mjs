@@ -109,9 +109,13 @@ export default [
     },
   },
 
-  // Test files
+  // Test files and manual mocks (both use jest globals)
   {
-    files: ['**/__tests__/**/*.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
+    files: [
+      '**/__tests__/**/*.[jt]s?(x)',
+      '**/?(*.)+(spec|test).[jt]s?(x)',
+      '**/__mocks__/**/*.[jt]s?(x)',
+    ],
     plugins: {
       jest,
     },

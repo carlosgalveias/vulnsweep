@@ -24,12 +24,6 @@ const ALL_SOURCES = Object.freeze({
   epss: epssSource,
 });
 
-// Source IDs per named scan mode; unknown modes fall back to 'fast'
-const SCAN_MODE_SOURCES = Object.freeze({
-  fast: ['npm-audit', 'osv'],
-  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
-});
-
 // Race a promise against a reject-after-ms sentinel (per plugin, inside allSettled)
 function withTimeout(promise, ms) {
   let timerId;
@@ -53,13 +47,14 @@ function emit(cb, payload) {
   }
 }
 
-// Resolve active plugins from options. Priority: enabledSources > mode > DEFAULT_SCAN_MODE
+// Resolve active source plugins from options.enabledSources.
+// Fast/Full presets in the UI write enabledSources directly; the scanner reads only that.
 function resolvePlugins(options) {
-  if (Array.isArray(options.enabledSources) && options.enabledSources.length > 0) {
-    return options.enabledSources.filter((id) => ALL_SOURCES[id]).map((id) => ALL_SOURCES[id]);
-  }
-  const mode = options.mode != null ? options.mode : SCANNER_CONFIG.DEFAULT_SCAN_MODE || 'fast';
-  const ids = SCAN_MODE_SOURCES[mode] != null ? SCAN_MODE_SOURCES[mode] : SCAN_MODE_SOURCES.fast;
+  const FALLBACK_IDS = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
+  const ids =
+    Array.isArray(options.enabledSources) && options.enabledSources.length > 0
+      ? options.enabledSources
+      : FALLBACK_IDS;
   return ids.filter((id) => ALL_SOURCES[id]).map((id) => ALL_SOURCES[id]);
 }
 

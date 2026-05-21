@@ -2,6 +2,8 @@
 
 const { GIT_CONFIG } = require('../../../../../src/main/config/constants');
 
+jest.mock('../../../../../src/main/utils/github-rate-limiter');
+
 function mockMake(sc, body, hdrs, onOpts) {
   const { EventEmitter } = require('events');
   return jest.fn((opts, cb) => {
@@ -185,9 +187,7 @@ describe('Group 4: one-time authenticated-mode log', () => {
     const mod = require('../../../../../src/main/modules/enrichment/sources/github-advisory-source');
     await mod.queryGitHubAdvisory('CVE-2021-23337');
     await mod.queryGitHubAdvisory('CVE-2021-23337');
-    const al = logSpy.mock.calls.filter((aa) =>
-      aa.join(' ').includes('Using authenticated API access')
-    );
+    const al = logSpy.mock.calls.filter((aa) => aa.join(' ').includes('Authenticated API access'));
     expect(al.length).toBe(1);
   });
   it('4.2 does not log auth message when GITHUB_TOKEN is absent', async () => {

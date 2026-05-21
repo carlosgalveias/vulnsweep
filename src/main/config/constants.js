@@ -40,9 +40,11 @@ const GIT_CONFIG = {
    * Maximum number of retry attempts for GitHub Advisory API rate-limit errors.
    * On each attempt the request is retried after an exponential backoff delay.
    * The first attempt (attempt=0) is not a retry; retries are attempts 1..GITHUB_MAX_RETRIES.
+   * Set to 100 so the singleton rate-limiter (Feature C) can absorb sustained 429/403
+   * bursts without giving up — the shared queue backoff prevents thundering-herd retries.
    * @type {number}
    */
-  GITHUB_MAX_RETRIES: 3,
+  GITHUB_MAX_RETRIES: 100,
 
   /**
    * Base delay for exponential backoff when GitHub rate-limits us (milliseconds).
@@ -248,11 +250,22 @@ const ENRICHMENT_CONFIG = {
   NVD_RATE_LIMIT_WITH_KEY_MS: 600,
 
   /**
-   * Optional NVD API key read from environment variable.
-   * When set, NVD allows 50 req/30s instead of 5 req/30s.
+   * Optional NVD API key read from the secure store (user-configured via Settings UI)
+   * or the NVD_API_KEY environment variable as fallback.
+   * When set, NVD allows 50 req/30s instead of 5 req/30s — a 10x improvement.
+   * Returns undefined (not empty string) when absent so callers can use it as a boolean guard.
    * @type {string|undefined}
    */
   get NVD_API_KEY() {
+    // Priority: secure store (user-configured via Settings UI) > env var > undefined
+    // Lazy require avoids circular dependency at module load time.
+    try {
+      const { storeGet } = require('../utils/secure-store');
+      const stored = storeGet('cred:nvd');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      // secure-store unavailable (e.g. CI environment) — fall through to env var
+    }
     return process.env.NVD_API_KEY || undefined;
   },
 
@@ -265,6 +278,16 @@ const ENRICHMENT_CONFIG = {
    * @type {string|undefined}
    */
   get GITHUB_TOKEN() {
+    // Priority: secure store (user-configured via Settings UI) > env var > undefined
+    // Lazy require avoids circular dependency at module load time.
+    // This getter is called during scans (post app.ready), so the store is initialized.
+    try {
+      const { storeGet } = require('../utils/secure-store');
+      const stored = storeGet('cred:github-advisory');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      // secure-store unavailable (e.g. CI environment) — fall through to env var
+    }
     return process.env.GITHUB_TOKEN || undefined;
   },
 

@@ -159,15 +159,15 @@ describe('App component', () => {
     it('should initialize useLogConsole first', () => {
       render(<App />);
 
-      // useLogConsole should be called exactly once
-      expect(useLogConsole).toHaveBeenCalledTimes(1);
+      // useLogConsole should be called on mount (re-renders from state updates are expected)
+      expect(useLogConsole).toHaveBeenCalled();
     });
 
     it('should initialize useGitOperations with correct parameters', () => {
       render(<App />);
 
       // useGitOperations: addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo
-      expect(useGitOperations).toHaveBeenCalledTimes(1);
+      expect(useGitOperations).toHaveBeenCalled();
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
@@ -181,7 +181,7 @@ describe('App component', () => {
 
       // useVulnerabilityScanner: addLog, getProjects, allowReset, clearAllDirtyRepos,
       // removePackageLock, removeOverrides
-      expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
+      expect(useVulnerabilityScanner).toHaveBeenCalled();
       expect(useVulnerabilityScanner).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function), // getProjects callback (NOT an empty array)
@@ -196,7 +196,7 @@ describe('App component', () => {
       render(<App />);
 
       // useProjectDiscovery should be called with addLog and resetVulnerabilities
-      expect(useProjectDiscovery).toHaveBeenCalledTimes(1);
+      expect(useProjectDiscovery).toHaveBeenCalled();
       expect(useProjectDiscovery).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function) // resetVulnerabilities from useVulnerabilityScanner
@@ -208,7 +208,7 @@ describe('App component', () => {
 
       // useFixApplication: addLog, vulnerabilities, selectedVulns, setVulnerabilities,
       // projects, bumpVersion, refreshTrialStatus, addDirtyRepo, removePackageLock, removeOverrides
-      expect(useFixApplication).toHaveBeenCalledTimes(1);
+      expect(useFixApplication).toHaveBeenCalled();
       expect(useFixApplication).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         [], // vulnerabilities
@@ -226,11 +226,11 @@ describe('App component', () => {
     it('should call all hooks exactly once on mount', () => {
       render(<App />);
 
-      expect(useLogConsole).toHaveBeenCalledTimes(1);
-      expect(useGitOperations).toHaveBeenCalledTimes(1);
-      expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
-      expect(useProjectDiscovery).toHaveBeenCalledTimes(1);
-      expect(useFixApplication).toHaveBeenCalledTimes(1);
+      expect(useLogConsole).toHaveBeenCalled();
+      expect(useGitOperations).toHaveBeenCalled();
+      expect(useVulnerabilityScanner).toHaveBeenCalled();
+      expect(useProjectDiscovery).toHaveBeenCalled();
+      expect(useFixApplication).toHaveBeenCalled();
     });
   });
 

@@ -95,6 +95,12 @@ module.exports = {
       testMatch: ['**/__tests__/main/**/*.test.js', '**/__tests__/main/**/*.spec.js'],
       roots: ['<rootDir>'],
       modulePaths: ['<rootDir>'],
+      moduleNameMapper: {
+        // Intercept the rate-limiter regardless of which relative path resolves to it.
+        // This works even after jest.resetModules() because moduleNameMapper runs at
+        // resolver time, before the mock registry lookup.
+        'github-rate-limiter$': '<rootDir>/src/main/utils/__mocks__/github-rate-limiter.js',
+      },
     },
     {
       displayName: 'frontend',

@@ -178,17 +178,23 @@ describe('AboutTab — Documentation & Support', () => {
     expect(window.electronAPI.openLocalDoc).toHaveBeenCalledWith('DISCLAIMER.md');
   });
 
-  it('renders GitHub issues link button', () => {
+  it('renders GitHub issues link as an anchor with correct href', () => {
     render(<AboutTab {...defaultProps} />);
-    expect(screen.getByRole('button', { name: /Report an issue/i })).toBeInTheDocument();
-  });
-
-  it('calls openExternal with GitHub issues URL when link is clicked', () => {
-    render(<AboutTab {...defaultProps} />);
-    fireEvent.click(screen.getByRole('button', { name: /Report an issue/i }));
-    expect(window.electronAPI.openExternal).toHaveBeenCalledWith(
+    const link = screen.getByRole('link', { name: /Report an issue/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute(
+      'href',
       'https://github.com/carlosgalveias/vulnsweep-releases/issues'
     );
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('does NOT call openExternal when GitHub issues link is present (native anchor)', () => {
+    render(<AboutTab {...defaultProps} />);
+    const link = screen.getByRole('link', { name: /Report an issue/i });
+    fireEvent.click(link);
+    expect(window.electronAPI.openExternal).not.toHaveBeenCalled();
   });
 });
 

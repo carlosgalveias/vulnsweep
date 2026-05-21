@@ -23,12 +23,27 @@ if (!isDevelopment) {
 }
 // Imported at top level — pre-warm call happens inside app.whenReady() after
 // app.getPath('userData') is available, ensuring the correct store path is used.
-const { storeGet, storeSet } = require('./utils/secure-store');
+const { storeGet, storeSet, storeRemove } = require('./utils/secure-store');
 const trialStore = require('./utils/trial-store');
+
+// ============================================
+// CREDENTIALS (Sprint 5 Feature B)
+// Allowlist of source IDs that may have credentials stored.
+// Add new sources here as they are integrated.
+// ============================================
+const ALLOWED_CREDENTIAL_SOURCES = new Set(['github-advisory', 'nvd']);
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
 let splashWindow;
+
+// ============================================
+// CANCEL SCAN (Sprint 5 Feature D)
+// Holds the AbortController for the currently active scan-projects invocation.
+// Set at the start of each scan, cleared in the finally block (or on cancel).
+// ============================================
+/** @type {AbortController|null} */
+let _activeScanAbortController = null;
 
 /**
  * Sends a log message to the renderer process
@@ -42,6 +57,23 @@ function sendLogMessage(level, message) {
       level,
       message,
     });
+  }
+}
+
+/**
+ * Retrieves a stored credential for internal main-process use ONLY.
+ * This function is intentionally NOT registered as an IPC handler and NOT exported.
+ * The renderer process has no path to invoke it — by design.
+ * Prefixed with _ to satisfy no-unused-vars (called from scanner modules, not this file).
+ *
+ * @param {string} sourceId - Credential source identifier (e.g. 'github-advisory')
+ * @returns {string|null} Decrypted credential value, or null if not set
+ */
+function _getCredential(sourceId) {
+  try {
+    return storeGet(`cred:${sourceId}`) || null;
+  } catch {
+    return null;
   }
 }
 
@@ -496,7 +528,18 @@ ipcMain.handle('scan-project', async (_event, projectPath) => {
   try {
     const sanitized = sanitizePath(projectPath);
     const { scanProject } = require('./modules/scanner/scanner-orchestrator');
-    const result = await scanProject(sanitized, (progress) => {
+    // Read persisted settings and pass to scanner
+    const scanOptions = {};
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      if (Array.isArray(saved.enabledSources) && saved.enabledSources.length > 0) {
+        scanOptions.enabledSources = saved.enabledSources;
+      }
+    } catch {
+      /* use defaults */
+    }
+    const result = await scanProject(sanitized, scanOptions, (progress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('scan-progress', progress);
       }
@@ -527,10 +570,34 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
     );
   }
 
+  // Create an AbortController for this scan session so the scan:cancel handler
+  // can stop the loop between project iterations without leaving it running.
+  // Use globalThis.AbortController so the ESLint no-undef rule (which doesn't
+  // include Node.js 15+ globals by default) does not flag this call.
+  const scanAbortController = new globalThis.AbortController();
+  _activeScanAbortController = scanAbortController;
+  const { signal } = scanAbortController;
+
   try {
     const { scanProject } = require('./modules/scanner/scanner-orchestrator');
+    // Read persisted settings once for the entire batch scan
+    const scanOptions = {};
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      if (Array.isArray(saved.enabledSources) && saved.enabledSources.length > 0) {
+        scanOptions.enabledSources = saved.enabledSources;
+      }
+    } catch {
+      /* use defaults */
+    }
     const results = [];
     for (let i = 0; i < projectPaths.length; i++) {
+      // Check for cancellation before processing each project
+      if (signal.aborted) {
+        console.log(`[scan-projects] Scan cancelled before project ${i + 1}`);
+        return { success: false, cancelled: true };
+      }
       try {
         const sanitized = sanitizePath(projectPaths[i]);
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -539,13 +606,19 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
             total: projectPaths.length,
           });
         }
-        const result = await scanProject(sanitized, (progress) => {
+        const result = await scanProject(sanitized, scanOptions, (progress) => {
+          if (signal.aborted) return; // drop progress events after cancel
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('scan-progress', progress);
           }
         });
+        // Re-check after each project completes in case cancel arrived mid-scan
+        if (signal.aborted) {
+          return { success: false, cancelled: true };
+        }
         results.push({ success: true, projectPath: projectPaths[i], content: result });
       } catch (err) {
+        if (signal.aborted) return { success: false, cancelled: true };
         results.push({ success: false, projectPath: projectPaths[i], error: err.message });
       }
     }
@@ -561,6 +634,40 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
     }
     return { success: true, content: results };
   } catch (err) {
+    return { success: false, error: err.message };
+  } finally {
+    // Always clear the controller reference when the scan ends (normal or cancelled).
+    // This ensures scan:cancel cannot call .abort() on a stale controller.
+    _activeScanAbortController = null;
+  }
+});
+
+// ============================================
+// IPC HANDLERS - CANCEL SCAN (Sprint 5 Feature D)
+// ============================================
+
+/**
+ * Handler: Abort the currently running scan-projects operation.
+ * Signals the active AbortController so the project iteration loop exits cleanly.
+ * Also resets the GitHub rate-limiter queue to prevent a cancelled scan's
+ * rate-limit backoff from blocking the next scan session.
+ *
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('scan:cancel', () => {
+  try {
+    if (_activeScanAbortController) {
+      _activeScanAbortController.abort();
+      _activeScanAbortController = null;
+      console.log('[IPC] scan:cancel — abort signal sent');
+    }
+    // Reset the rate-limiter queue so queued GitHub requests from the cancelled
+    // scan do not continue executing or block the next scan session.
+    const rateLimiter = require('./utils/github-rate-limiter');
+    rateLimiter.resetQueue();
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] scan:cancel error:', err.message);
     return { success: false, error: err.message };
   }
 });
@@ -964,6 +1071,171 @@ ipcMain.handle('get-analytics-opt-out', () => {
     return { optOut: storeGet('ao') === '1' };
   } catch {
     return { optOut: false };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - CREDENTIALS (Sprint 5 Feature B)
+// Security contract:
+//   - credentials:set   → stores encrypted credential, returns masked hint only
+//   - credentials:delete → removes credential, returns ok
+//   - credentials:getStatus → returns configured boolean + masked hint; NEVER plaintext
+//   - getCredential() internal function is the ONLY read path for plaintext
+// ============================================
+
+/**
+ * Handler: Store an encrypted credential for a known source.
+ * Returns only a masked hint — the plaintext is never echoed back.
+ *
+ * @param {string} sourceId - Must be in ALLOWED_CREDENTIAL_SOURCES
+ * @param {string} plaintext - The credential value (e.g. GitHub PAT)
+ * @returns {{ success: boolean, maskedHint?: string, error?: string }}
+ */
+ipcMain.handle('credentials:set', (_event, sourceId, plaintext) => {
+  try {
+    if (!ALLOWED_CREDENTIAL_SOURCES.has(sourceId)) {
+      return { success: false, error: 'Unknown source' };
+    }
+    if (!plaintext || typeof plaintext !== 'string' || !plaintext.trim()) {
+      return { success: false, error: 'Invalid credential value' };
+    }
+    if (plaintext.length > 500) {
+      return { success: false, error: 'Credential value too long' };
+    }
+    const trimmed = plaintext.trim();
+    const maskedHint = trimmed.slice(-4);
+    storeSet(`cred:${sourceId}`, trimmed);
+    storeSet(`cred:${sourceId}:hint`, maskedHint);
+    return { success: true, maskedHint };
+  } catch (err) {
+    console.error('[IPC] credentials:set error:', err.message);
+    return { success: false, error: 'Failed to save credential' };
+  }
+});
+
+/**
+ * Handler: Delete a stored credential and its hint.
+ *
+ * @param {string} sourceId - Must be in ALLOWED_CREDENTIAL_SOURCES
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('credentials:delete', (_event, sourceId) => {
+  try {
+    if (!ALLOWED_CREDENTIAL_SOURCES.has(sourceId)) {
+      return { success: false, error: 'Unknown source' };
+    }
+    storeRemove(`cred:${sourceId}`);
+    storeRemove(`cred:${sourceId}:hint`);
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] credentials:delete error:', err.message);
+    return { success: false, error: 'Failed to delete credential' };
+  }
+});
+
+/**
+ * Handler: Return configured status and masked hint for all known sources.
+ * NEVER returns the plaintext credential — only a boolean and the last-4-char hint.
+ *
+ * @returns {{ success: boolean, content?: Record<string, { configured: boolean, maskedHint: string|null }>, error?: string }}
+ */
+ipcMain.handle('credentials:getStatus', () => {
+  try {
+    const content = {};
+    for (const sourceId of ALLOWED_CREDENTIAL_SOURCES) {
+      const value = storeGet(`cred:${sourceId}`);
+      const hint = storeGet(`cred:${sourceId}:hint`);
+      content[sourceId] = {
+        configured: Boolean(value && value.trim()),
+        maskedHint: hint || null,
+      };
+    }
+    return { success: true, content };
+  } catch (err) {
+    console.error('[IPC] credentials:getStatus error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - SETTINGS (Sprint 5 Feature A)
+// ============================================
+
+const VALID_SETTING_SOURCES = new Set([
+  'npm-audit',
+  'osv',
+  'nvd',
+  'github-advisory',
+  'cisa-kev',
+  'epss',
+]);
+
+/**
+ * Handler: Retrieve persisted app settings.
+ * Returns defaults if no settings have been saved yet or JSON is corrupt.
+ * @returns {{ success: boolean, content?: { scanMode: string, enabledSources: string[] } }}
+ */
+ipcMain.handle('settings:get', () => {
+  try {
+    const raw = storeGet('app:settings');
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { success: true, content: parsed };
+  } catch (err) {
+    console.error('[IPC] settings:get error:', err.message);
+    return { success: true, content: {} }; // safe default — caller uses DEFAULTS
+  }
+});
+
+/**
+ * Handler: Persist app settings.
+ * Validates enabledSources and boolean scan option fields before writing.
+ * Enforces npm-audit as always-present in enabledSources.
+ * Silently passes through unknown keys (e.g. legacy scanMode) for backward compatibility.
+ * @param {{ scanMode?: string, enabledSources?: string[], allowReset?: boolean,
+ *           bumpVersion?: boolean, removePackageLock?: boolean, removeOverrides?: boolean }} settingsObj
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('settings:set', (_event, settingsObj) => {
+  try {
+    if (!settingsObj || typeof settingsObj !== 'object' || Array.isArray(settingsObj)) {
+      return { success: false, error: 'Invalid settings object' };
+    }
+    if (settingsObj.enabledSources !== undefined) {
+      if (!Array.isArray(settingsObj.enabledSources)) {
+        return { success: false, error: 'enabledSources must be an array' };
+      }
+      if (settingsObj.enabledSources.length === 0) {
+        return { success: false, error: 'At least one source must be enabled' };
+      }
+      for (const s of settingsObj.enabledSources) {
+        if (!VALID_SETTING_SOURCES.has(s)) {
+          return { success: false, error: `Unknown source: ${s}` };
+        }
+      }
+      // Enforce npm-audit as always present
+      if (!settingsObj.enabledSources.includes('npm-audit')) {
+        settingsObj = {
+          ...settingsObj,
+          enabledSources: ['npm-audit', ...settingsObj.enabledSources],
+        };
+      }
+    }
+    const BOOLEAN_SETTING_KEYS = [
+      'allowReset',
+      'bumpVersion',
+      'removePackageLock',
+      'removeOverrides',
+    ];
+    for (const key of BOOLEAN_SETTING_KEYS) {
+      if (key in settingsObj && typeof settingsObj[key] !== 'boolean') {
+        return { success: false, error: `${key} must be a boolean` };
+      }
+    }
+    storeSet('app:settings', JSON.stringify(settingsObj));
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] settings:set error:', err.message);
+    return { success: false, error: 'Failed to save settings' };
   }
 });
 

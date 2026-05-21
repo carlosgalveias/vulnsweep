@@ -166,6 +166,17 @@ _The VulnSweep PDF Security Report: a dated A4 landscape document containing sev
 
 ### Complete Feature Matrix
 
+#### Discovery, Scanning, and Control
+
+| Feature                  | Description                                                                                    | Free |
+| ------------------------ | ---------------------------------------------------------------------------------------------- | ---- |
+| **Cancel Scan**          | Abort any in-progress scan with a single click — all operations halted, UI reset immediately   | Yes  |
+| **Settings Tab**         | Persistent tab for scan mode selection, source toggles, API credentials, and scan options      | Yes  |
+| **Scan Mode: Fast**      | Runs only npm-audit + OSV — dramatically faster for quick vulnerability checks                 | Yes  |
+| **Scan Mode: Full**      | Runs all 6 sources (OSV, NVD, GitHub Advisory, npm-audit, CISA-KEV, EPSS) — maximum coverage   | Yes  |
+| **Per-Source Toggles**   | Enable or disable individual vulnerability sources (OSV, NVD, GitHub Advisory, CISA-KEV, EPSS) | Yes  |
+| **Settings Persistence** | All scan mode and source preferences auto-saved on change — survive app restarts               | Yes  |
+
 #### Discovery and Scanning
 
 | Feature                    | Description                                                                                    | Free |
@@ -344,21 +355,59 @@ Linux support is currently in development. Watch the [releases page](https://git
 
 ## Configuration
 
-### GitHub API Authentication — Unlock 83× More API Capacity
+### Settings Tab — Scan Mode, Sources, and Credentials
 
-VulnSweep queries the **GitHub Advisory Database** to enrich every CVE with ecosystem-specific severity data, GHSA aliases, and advisory details. By default it makes unauthenticated requests — which GitHub rate-limits to **60 requests per hour** per IP address.
+VulnSweep v1.1.0 introduces a **Settings tab** (to the left of the About tab) that consolidates all scan configuration. No environment variables are required — everything is configurable through the UI and auto-persists on change.
 
-For most individual scans this is sufficient. For teams running frequent scans across large fleets, or CI pipelines that trigger VulnSweep repeatedly, hitting that ceiling means incomplete enrichment data and `rate_limit_exceeded` results instead of full advisory context.
+#### Scan Mode
 
-**The fix takes 60 seconds.** A GitHub Personal Access Token raises the limit to **5,000 requests per hour** — an 83× improvement.
+| Mode     | Sources Used                                                | Best For                                   |
+| -------- | ----------------------------------------------------------- | ------------------------------------------ |
+| **Fast** | npm-audit + OSV only                                        | Quick checks, frequent scans, large fleets |
+| **Full** | All 6: OSV, NVD, GitHub Advisory, npm-audit, CISA-KEV, EPSS | Thorough audits, compliance scanning       |
 
-#### Setting `GITHUB_TOKEN`
+Select your scan mode in **Settings → Scan Mode**. The selection persists across app restarts automatically.
 
-Set the environment variable before launching VulnSweep:
+#### API Credentials — Encrypted Local Storage
+
+VulnSweep stores API credentials using **AES-256 encryption** in the local app data store. Credentials are stored locally, never transmitted, and displayed only as masked hints (`••••••••••••<last4>`) after initial entry. Plaintext is cleared from app memory immediately after submission.
+
+**To configure credentials:**
+
+1. Open the **Settings tab**
+2. Scroll to the **API Credentials** panel
+3. Enter your token in the password field and click **Save**
+
+**Why credentials matter:**
+
+| Source          | Without Credentials | With Credentials | Improvement |
+| --------------- | ------------------- | ---------------- | ----------- |
+| GitHub Advisory | 60 req / hour / IP  | 5,000 req / hour | 83x         |
+| NVD             | 5 req / 30s         | 50 req / 30s     | 10x         |
+
+### GitHub Advisory Token
+
+VulnSweep queries the **GitHub Advisory Database** to enrich every CVE with ecosystem-specific severity data, GHSA aliases, and advisory details. A GitHub Personal Access Token raises the rate limit from **60 to 5,000 requests per hour** — an 83x improvement.
+
+- **No scopes required.** A token with zero scopes (read-only public data access) is sufficient.
+- Generate at: [https://github.com/settings/tokens](https://github.com/settings/tokens)
+- Select **"Generate new token (classic)"**, give it a descriptive name (e.g. `vulnsweep-advisory`), and leave all scope checkboxes **unchecked**
+
+When the token is active, VulnSweep logs:
 
 ```
-GITHUB_TOKEN=ghp_yourTokenHere
+[GitHubAdvisory] Authenticated API access active (5,000 req/hr limit)
 ```
+
+### NVD API Key
+
+An NVD API key increases the NVD rate limit from 5 to 50 requests per 30 seconds — a 10x improvement that speeds up Full-mode scans on large projects.
+
+- Request a free key at: [https://nvd.nist.gov/developers/request-an-api-key](https://nvd.nist.gov/developers/request-an-api-key)
+
+### GitHub Advisory — Environment Variable Fallback
+
+For CI or server environments where the Settings tab is not available, VulnSweep accepts `GITHUB_TOKEN` as an environment variable. The encrypted store credential takes precedence when both are present.
 
 **On Windows (Command Prompt — per session):**
 
@@ -374,32 +423,13 @@ $env:GITHUB_TOKEN = "ghp_yourTokenHere"
 
 **To persist across sessions**, set it as a system or user environment variable via _System Properties → Environment Variables_.
 
-When the token is active, VulnSweep logs the following confirmation at startup:
-
-```
-[GitHubAdvisory] Using authenticated API access (GITHUB_TOKEN set)
-```
-
-#### Token Requirements
-
-- **No scopes required.** A token with zero scopes (read-only public data access) is sufficient. Do not grant unnecessary permissions.
-- Generate a token at: [https://github.com/settings/tokens](https://github.com/settings/tokens)
-- Select **"Generate new token (classic)"**, give it a descriptive name (e.g. `vulnsweep-advisory`), and leave all scope checkboxes **unchecked**.
-
-#### Rate Limit Comparison
-
-| Access Mode         | GitHub API Rate Limit   | Recommended For                              |
-| ------------------- | ----------------------- | -------------------------------------------- |
-| Unauthenticated     | 60 requests / hour / IP | Light individual use, occasional scans       |
-| Authenticated (PAT) | 5,000 requests / hour   | Teams, large fleets, frequent or CI scanning |
-
 #### Automatic Retry and Rate-Limit Handling
 
-VulnSweep is a well-behaved API consumer. When GitHub returns a rate-limit response (`HTTP 429` or `HTTP 403`), VulnSweep does not crash or silently drop data — it retries automatically using the following strategy:
+VulnSweep is a well-behaved API consumer. When GitHub returns a rate-limit response (`HTTP 429` or `HTTP 403`), VulnSweep does not crash or silently drop data — it retries automatically through a **shared singleton queue** (all concurrent requests wait together, not independently) using the following strategy:
 
 | Behaviour                | Detail                                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| **Max retries**          | 3 attempts before returning `rate_limit_exceeded`                                                                        |
+| **Max retries**          | 100 attempts with exponential backoff + shared singleton queue before returning `rate_limit_exceeded`                    |
 | **`Retry-After` header** | If GitHub specifies a wait duration, VulnSweep waits exactly that long before retrying                                   |
 | **Exponential backoff**  | When no `Retry-After` is present: base delay 2 s, maximum cap 60 s                                                       |
 | **Jitter**               | Random jitter (up to 1 s) added to backoff delays to prevent thundering-herd API hammering                               |
@@ -424,17 +454,18 @@ This means VulnSweep will never silently corrupt your scan results due to transi
 
 VulnSweep is built on a **zero-trust, local-first** architecture. Your source code, project structure, and dependency data never leave your machine.
 
-| Data Type                    | What Happens                                                                                                                                         |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Your source code             | Never read, never transmitted — VulnSweep only executes npm audit                                                                                    |
-| package.json contents        | Processed locally to determine fix strategies                                                                                                        |
-| npm registry calls           | Version resolution only — same as npm install already does                                                                                           |
-| NVD API calls                | CVE enrichment lookups — CVE identifiers only, no code sent                                                                                          |
-| OSV.dev API calls            | Package name + version lookups — no code sent                                                                                                        |
-| GitHub Advisory calls        | Advisory ID lookups — no code sent                                                                                                                   |
-| Personal or identifying data | None collected or stored                                                                                                                             |
-| Anonymous usage statistics   | Collected anonymously via Aptabase (EU, GDPR-compliant) — opt-out available in the About tab at any time. No personal data, no code, no identifiers. |
-| PDF security reports         | Generated and saved locally — never transmitted                                                                                                      |
+| Data Type                    | What Happens                                                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Your source code             | Never read, never transmitted — VulnSweep only executes npm audit                                                                                                        |
+| package.json contents        | Processed locally to determine fix strategies                                                                                                                            |
+| npm registry calls           | Version resolution only — same as npm install already does                                                                                                               |
+| NVD API calls                | CVE enrichment lookups — CVE identifiers only, no code sent                                                                                                              |
+| OSV.dev API calls            | Package name + version lookups — no code sent                                                                                                                            |
+| GitHub Advisory calls        | Advisory ID lookups — no code sent                                                                                                                                       |
+| API credentials (GitHub/NVD) | Stored AES-256 encrypted in local app data via `secure-ls`; plaintext cleared from memory immediately after entry; never transmitted; never returned to renderer process |
+| Personal or identifying data | None collected or stored                                                                                                                                                 |
+| Anonymous usage statistics   | Collected anonymously via Aptabase (EU, GDPR-compliant) — opt-out available in the About tab at any time. No personal data, no code, no identifiers.                     |
+| PDF security reports         | Generated and saved locally — never transmitted                                                                                                                          |
 
 ---
 
@@ -442,22 +473,23 @@ VulnSweep is built on a **zero-trust, local-first** architecture. Your source co
 
 VulnSweep is engineered on a battle-tested, production-grade technology foundation:
 
-| Layer                    | Technology                 | Purpose                                               |
-| ------------------------ | -------------------------- | ----------------------------------------------------- |
-| **Desktop Runtime**      | Electron 41                | Windows desktop (macOS and Linux coming soon)         |
-| **UI Framework**         | React + TailwindCSS        | Component-based UI with utility-first styling         |
-| **Build Tool**           | Vite                       | Fast bundling and hot-reload development              |
-| **Vulnerability Data**   | npm audit                  | Official npm vulnerability data source                |
-| **CVE Enrichment**       | NVD API v2                 | NIST National Vulnerability Database — CVSS scores    |
-| **CVE Enrichment**       | OSV.dev API                | Open Source Vulnerabilities — cross-ecosystem data    |
-| **CVE Enrichment**       | GitHub Advisory REST       | GitHub Security Advisory Database                     |
-| **Exploit Intelligence** | CISA KEV + NVD             | Known exploited vulnerabilities in the wild           |
-| **License Analysis**     | package-lock.json v2/v3    | SPDX expression parsing + risk tier classification    |
-| **SBOM Export**          | CycloneDX v1.6 / SPDX v2.3 | Industry-standard bill of materials formats           |
-| **Version Intelligence** | npm registry API           | Latest safe version resolution                        |
-| **Charts**               | Recharts                   | Statistics and license dashboard visualization        |
-| **Git Automation**       | Git CLI                    | Automated commit and push operations                  |
-| **Security**             | Electron contextBridge     | Secure IPC boundary between renderer and main process |
+| Layer                    | Technology                 | Purpose                                                      |
+| ------------------------ | -------------------------- | ------------------------------------------------------------ |
+| **Desktop Runtime**      | Electron 41                | Windows desktop (macOS and Linux coming soon)                |
+| **UI Framework**         | React + TailwindCSS        | Component-based UI with utility-first styling                |
+| **Build Tool**           | Vite                       | Fast bundling and hot-reload development                     |
+| **Vulnerability Data**   | npm audit                  | Official npm vulnerability data source                       |
+| **CVE Enrichment**       | NVD API v2                 | NIST National Vulnerability Database — CVSS scores           |
+| **CVE Enrichment**       | OSV.dev API                | Open Source Vulnerabilities — cross-ecosystem data           |
+| **CVE Enrichment**       | GitHub Advisory REST       | GitHub Security Advisory Database                            |
+| **Exploit Intelligence** | CISA KEV + NVD             | Known exploited vulnerabilities in the wild                  |
+| **License Analysis**     | package-lock.json v2/v3    | SPDX expression parsing + risk tier classification           |
+| **SBOM Export**          | CycloneDX v1.6 / SPDX v2.3 | Industry-standard bill of materials formats                  |
+| **Version Intelligence** | npm registry API           | Latest safe version resolution                               |
+| **Charts**               | Recharts                   | Statistics and license dashboard visualization               |
+| **Git Automation**       | Git CLI                    | Automated commit and push operations                         |
+| **Security**             | Electron contextBridge     | Secure IPC boundary between renderer and main process        |
+| **Credential Storage**   | secure-ls (AES-256)        | Encrypted local storage for GitHub Advisory and NVD API keys |
 
 ---
 
