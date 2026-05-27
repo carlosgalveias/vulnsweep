@@ -1,7 +1,11 @@
 'use strict';
 
 const { isCisaKnownExploited } = require('../../enrichment/sources/cisa-kev-source');
-const { fetchOsvRaw, extractAliases } = require('../../enrichment/sources/osv-source');
+const {
+  fetchOsvRaw,
+  extractAliases,
+  isVersionSafe,
+} = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'cisa-kev';
 
@@ -73,7 +77,10 @@ async function query(pkg) {
 
     // Collect all CVE IDs across all OSV entries (flattened — per-entry association
     // is not relevant for CISA KEV; exploitation status is per-CVE-ID)
-    const cveIds = collectAllCveIds(vulns);
+    const safeVulns = vulns.filter((v) => {
+      return !isVersionSafe(pkg.version, v);
+    });
+    const cveIds = collectAllCveIds(safeVulns);
     if (cveIds.length === 0) return [];
 
     const results = [];

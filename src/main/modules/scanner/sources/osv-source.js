@@ -6,6 +6,7 @@ const {
   extractSeverity,
   extractAliases,
   extractUrl,
+  isVersionSafe,
 } = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'osv';
@@ -69,7 +70,9 @@ async function query(pkg) {
     const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
     if (!vulns || vulns.length === 0) return [];
 
-    return vulns.map((v) => {
+    const safe = vulns.filter((v) => !isVersionSafe(pkg.version, v));
+    if (safe.length === 0) return [];
+    return safe.map((v) => {
       const allAliases = extractAliases(v);
       const { cveIds, aliases } = partitionAliases(allAliases);
 

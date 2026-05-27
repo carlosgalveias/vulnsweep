@@ -7,6 +7,7 @@ const {
   extractAliases,
   extractSeverity,
   extractUrl,
+  isVersionSafe,
 } = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'github-advisory';
@@ -80,6 +81,7 @@ async function query(pkg) {
     const results = [];
 
     for (const v of vulns) {
+      if (isVersionSafe(pkg.version, v)) continue;
       const allAliases = extractAliases(v);
       const { cveIds, ghsaIds, aliases } = partitionAliases(allAliases);
 

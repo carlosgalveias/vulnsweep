@@ -1,0 +1,19 @@
+{
+  "name": "proj0",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "babel-traverse": "npm:@babel/traverse@^7.23.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "overrides": {
+    "babel-traverse": "npm:@babel/traverse@^7.23.2"
+  }
+}

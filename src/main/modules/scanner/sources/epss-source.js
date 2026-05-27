@@ -1,7 +1,11 @@
 'use strict';
 
 const { queryEPSS, prefetchEPSS, clearEpssCache } = require('../../enrichment/sources/epss-source');
-const { fetchOsvRaw, extractAliases } = require('../../enrichment/sources/osv-source');
+const {
+  fetchOsvRaw,
+  extractAliases,
+  isVersionSafe,
+} = require('../../enrichment/sources/osv-source');
 
 const SOURCE_ID = 'epss';
 const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
@@ -66,7 +70,10 @@ async function query(pkg) {
     const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
     if (!vulns || vulns.length === 0) return [];
 
-    const cveIds = collectCveIds(vulns);
+    const safeVulns = vulns.filter((v) => {
+      return !isVersionSafe(pkg.version, v);
+    });
+    const cveIds = collectCveIds(safeVulns);
     if (cveIds.length === 0) return [];
 
     // Query all CVEs in parallel — EPSS is a read-only scoring API with no

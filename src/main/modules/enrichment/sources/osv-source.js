@@ -202,18 +202,42 @@ function minVersion(versions) {
   });
 }
 
-/**
- * Extracts the fixed version from a single OSV vulnerability entry.
- * Filters by npm ecosystem first; falls back to any ecosystem if no npm entry found.
- * Returns the minimum semver value when multiple npm entries have different fixed versions.
- *
- * @param {object} osvVuln - A single OSV vulnerability object from fetchOsvRaw()
- * @returns {string|null} The fixed version string, or null if not determinable
- */
+function compareVersions(a, b) {
+  const aCoreStr = String(a).split('-')[0];
+  const bCoreStr = String(b).split('-')[0];
+  const aPre = String(a).indexOf('-') !== -1 ? String(a).slice(String(a).indexOf('-') + 1) : null;
+  const bPre = String(b).indexOf('-') !== -1 ? String(b).slice(String(b).indexOf('-') + 1) : null;
+  const aParts = aCoreStr.split('.').map((p) => {
+    return parseInt(p, 10) || 0;
+  });
+  const bParts = bCoreStr.split('.').map((p) => {
+    return parseInt(p, 10) || 0;
+  });
+  const len = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < len; i++) {
+    const av = aParts[i] || 0;
+    const bv = bParts[i] || 0;
+    if (av < bv) return -1;
+    if (av > bv) return 1;
+  }
+  if (aPre && !bPre) return -1;
+  if (!aPre && bPre) return 1;
+  if (aPre && bPre) return aPre < bPre ? -1 : aPre > bPre ? 1 : 0;
+  return 0;
+}
+
+function parseLastKnownAffectedBound(rangeStr) {
+  if (!rangeStr || typeof rangeStr !== 'string') return null;
+  const trimmed = rangeStr.trim();
+  const m1 = trimmed.match(/^<=\s*(\S+)$/);
+  if (m1) return m1[1];
+  const m2 = trimmed.match(/^<\s*(\S+)$/);
+  if (m2) return m2[1];
+  return null;
+}
+
 function extractFixedIn(osvVuln) {
   if (!Array.isArray(osvVuln.affected)) return null;
-
-  // First pass: collect fixed versions from npm ecosystem entries only
   const npmFixed = [];
   for (const aff of osvVuln.affected) {
     if (!aff.package || aff.package.ecosystem !== 'npm') continue;
@@ -226,10 +250,16 @@ function extractFixedIn(osvVuln) {
       }
     }
   }
-
   if (npmFixed.length > 0) return minVersion(npmFixed);
-
-  // Fallback: first fixed event from any ecosystem
+  const npmBounds = [];
+  for (const aff of osvVuln.affected) {
+    if (!aff.package || aff.package.ecosystem !== 'npm') continue;
+    const bound = parseLastKnownAffectedBound(
+      aff.database_specific && aff.database_specific.last_known_affected_version_range
+    );
+    if (bound) npmBounds.push(bound);
+  }
+  if (npmBounds.length > 0) return minVersion(npmBounds);
   for (const aff of osvVuln.affected) {
     if (!Array.isArray(aff.ranges)) continue;
     for (const range of aff.ranges) {
@@ -240,6 +270,13 @@ function extractFixedIn(osvVuln) {
     }
   }
   return null;
+}
+
+function isVersionSafe(installedVersion, osvVuln) {
+  if (!installedVersion || !osvVuln) return false;
+  const fixedIn = extractFixedIn(osvVuln);
+  if (!fixedIn) return false;
+  return compareVersions(installedVersion, fixedIn) >= 0;
 }
 
 /**
@@ -297,4 +334,5 @@ module.exports = {
   extractSeverity,
   extractAliases,
   extractUrl,
+  isVersionSafe,
 };
