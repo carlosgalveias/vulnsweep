@@ -181,7 +181,10 @@ function parseNvdResponse(json, cveId) {
     return false;
   };
 
-  tryMetric('cvssMetricV31') || tryMetric('cvssMetricV30') || tryMetric('cvssMetricV2');
+  tryMetric('cvssMetricV40') ||
+    tryMetric('cvssMetricV31') ||
+    tryMetric('cvssMetricV30') ||
+    tryMetric('cvssMetricV2');
 
   const cweIds = [];
   const weaknesses = cve.weaknesses || [];
@@ -305,4 +308,4 @@ async function queryNVD(cveId) {
   });
 }
 
-module.exports = { queryNVD, scoreToCvssCategory, clearNvdSessionCache };
+module.exports = { queryNVD, scoreToCvssCategory, clearNvdSessionCache, enqueueNvd };

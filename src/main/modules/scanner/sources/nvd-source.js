@@ -1,115 +1,104 @@
 'use strict';
 
-const { queryNVD } = require('../../enrichment/sources/nvd-source');
-const {
-  fetchOsvRaw,
-  extractFixedIn,
-  extractAliases,
-  extractSeverity,
-  extractUrl,
-  isVersionSafe,
-} = require('../../enrichment/sources/osv-source');
+const { queryNvdKeyword } = require('../../enrichment/sources/nvd-keyword-source');
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const SOURCE_ID = 'nvd';
 
-const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
+// ─── Severity mapping ─────────────────────────────────────────────────────────
 
 /**
- * Partitions an aliases array into CVE IDs and non-CVE aliases.
+ * Maps a NVD CVSS severity category string to the canonical severity strings
+ * used by the scanner. MEDIUM maps to 'moderate' (not 'medium') to match the
+ * convention used by every other scanner plugin.
  *
- * @param {string[]} allAliases - Full alias list from extractAliases()
- * @returns {{ cveIds: string[], aliases: string[] }}
+ * @param {string|null} category - CVSS severity string (e.g. 'CRITICAL', 'HIGH')
+ * @returns {string} Canonical severity: 'critical' | 'high' | 'moderate' | 'low' | 'unknown'
  */
-function partitionAliases(allAliases) {
-  const cveIds = [];
-  const aliases = [];
-  for (const id of allAliases) {
-    if (CVE_PATTERN.test(id)) {
-      cveIds.push(id);
-    } else {
-      aliases.push(id);
-    }
-  }
-  return { cveIds, aliases };
+function severityFromCvssCategory(category) {
+  if (!category) return 'unknown';
+  const SEVERITY_MAP = {
+    CRITICAL: 'critical',
+    HIGH: 'high',
+    MEDIUM: 'moderate',
+    LOW: 'low',
+    NONE: 'low',
+  };
+  return SEVERITY_MAP[category.toUpperCase()] || 'unknown';
 }
 
+// ─── Scanner plugin ───────────────────────────────────────────────────────────
+
 /**
- * Queries the NVD API for CVSS data on each CVE associated with a package's
- * OSV vulnerability entries. Uses fetchOsvRaw() for per-entry CVE discovery
- * so that CVSS data is linked to the correct individual vulnerability — not
- * merged across all entries for the package.
- *
- * Rate limiting: queryNVD() uses an internal serial enqueueNvd() queue that
- * enforces a delay between NVD API calls. An NVD API key is strongly
- * recommended for 'full' scan mode.
- *
- * @param {object} pkg - PackageDescriptor from package-universe-builder
- * @param {string} pkg.name - Package name
- * @param {string} pkg.version - Exact installed version
- * @param {string|null} [pkg.resolved] - Resolved registry URL; null for git/local
- * @returns {Promise<SourceResult[]>}
- *
+ * @typedef {object} NvdKeywordHit
+ * @property {string}        cveId        - CVE ID (e.g. 'CVE-2026-9358')
+ * @property {number|null}   cvssScore    - CVSS base score from NVD
+ * @property {string|null}   cvssVector   - CVSS vector string from NVD
+ * @property {string|null}   cvssCategory - CVSS severity category (e.g. 'HIGH')
+ * @property {string[]}      cweIds       - CWE IDs from NVD weaknesses
+ * @property {string}        url          - NVD advisory URL
+ * @property {string}        description  - English CVE description text
+ */
+
+/**
  * @typedef {object} SourceResult
- * @property {string}   sourceId             - Always 'nvd'
- * @property {string}   packageName          - pkg.name
- * @property {string}   packageVersion       - pkg.version
- * @property {string}   severity             - NVD cvssCategory or OSV severity or 'unknown'
- * @property {string[]} cveIds               - CVE IDs from this specific OSV entry
- * @property {string[]} aliases              - Non-CVE aliases from this specific OSV entry
- * @property {string}   title                - vuln.summary or empty string
- * @property {null}     description          - Not provided by NVD source
- * @property {string|null} fixedIn           - First fixed version or null
- * @property {string|null} url               - NVD advisory URL
- * @property {number|null} cvssScore         - CVSS base score from NVD
- * @property {string|null} cvssVector        - CVSS vector string from NVD
- * @property {boolean}  cisaKnownExploited   - Always false; populated by cisa-kev plugin
- * @property {null}     epssScore            - Populated by cisa-kev plugin
- * @property {null}     epssPercentile       - Populated by cisa-kev plugin
- * @property {object}   rawData              - { osv: raw OSV entry, nvd: NVD result }
+ * @property {string}      sourceId           - Always 'nvd'
+ * @property {string}      packageName        - pkg.name
+ * @property {string}      packageVersion     - pkg.version
+ * @property {string}      severity           - Canonical severity string
+ * @property {string[]}    cveIds             - Array containing the single CVE ID for this hit
+ * @property {string[]}    aliases            - Always [] — NVD keyword results carry no non-CVE aliases
+ * @property {string}      title              - First 120 chars of the NVD English description
+ * @property {string|null} description        - Full NVD English description text
+ * @property {null}        fixedIn            - Always null — NVD keyword results include no fix versions
+ * @property {string|null} url                - NVD advisory URL
+ * @property {number|null} cvssScore          - CVSS base score from NVD
+ * @property {string|null} cvssVector         - CVSS vector string from NVD
+ * @property {boolean}     cisaKnownExploited - Always false; populated by cisa-kev plugin
+ * @property {null}        epssScore          - Populated by cisa-kev plugin
+ * @property {null}        epssPercentile     - Populated by cisa-kev plugin
+ * @property {object}      rawData            - { nvd: NvdKeywordHit }
+ */
+
+/**
+ * Queries the NVD API v2 by keyword for vulnerabilities affecting a given package.
+ * Returns zero or more SourceResult objects — one per matched CVE.
+ *
+ * Input guard: skips packages with no version or no resolved URL (git/local packages).
+ * Rate limiting: delegated to queryNvdKeyword() which uses the shared enqueueNvd() queue.
+ *
+ * @param {object}      pkg          - PackageDescriptor from package-universe-builder
+ * @param {string}      pkg.name     - Package name
+ * @param {string}      pkg.version  - Exact installed version
+ * @param {string|null} [pkg.resolved] - Resolved registry URL; null for git/local packages
+ * @returns {Promise<SourceResult[]>}
  */
 async function query(pkg) {
-  if (!pkg || !pkg.version || !pkg.resolved) return [];
+  if (!pkg || !pkg.name || !pkg.version || !pkg.resolved) return [];
 
   try {
-    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
-    if (!vulns || vulns.length === 0) return [];
+    const hits = await queryNvdKeyword(pkg);
+    if (!hits || hits.length === 0) return [];
 
-    const results = [];
-
-    for (const v of vulns) {
-      if (isVersionSafe(pkg.version, v)) continue;
-      const allAliases = extractAliases(v);
-      const { cveIds, aliases } = partitionAliases(allAliases);
-
-      // NVD requires a CVE ID — skip entries with no CVE aliases
-      if (cveIds.length === 0) continue;
-
-      // Use the first CVE ID per entry; the existing enqueueNvd() serial queue
-      // in the enrichment nvd-source handles rate limiting automatically
-      const nvdResult = await queryNVD(cveIds[0]);
-      if (!nvdResult || !nvdResult.found) continue;
-
-      results.push({
-        sourceId: SOURCE_ID,
-        packageName: pkg.name,
-        packageVersion: pkg.version,
-        severity: nvdResult.cvssCategory || extractSeverity(v) || 'unknown',
-        cveIds,
-        aliases,
-        title: v.summary || '',
-        description: null,
-        fixedIn: extractFixedIn(v),
-        url: nvdResult.url || extractUrl(v),
-        cvssScore: nvdResult.cvssScore ?? null,
-        cvssVector: nvdResult.cvssVector ?? null,
-        cisaKnownExploited: false,
-        epssScore: null,
-        epssPercentile: null,
-        rawData: { osv: v, nvd: nvdResult },
-      });
-    }
-
-    return results;
+    return hits.map((hit) => ({
+      sourceId: SOURCE_ID,
+      packageName: pkg.name,
+      packageVersion: pkg.version,
+      severity: severityFromCvssCategory(hit.cvssCategory),
+      cveIds: hit.cveId ? [hit.cveId] : [],
+      aliases: [],
+      title: hit.description ? hit.description.slice(0, 120) : hit.cveId || '',
+      description: hit.description || null,
+      fixedIn: null,
+      url: hit.url || null,
+      cvssScore: hit.cvssScore ?? null,
+      cvssVector: hit.cvssVector ?? null,
+      cisaKnownExploited: false,
+      epssScore: null,
+      epssPercentile: null,
+      rawData: { nvd: hit },
+    }));
   } catch (err) {
     console.warn(`[scanner/nvd-source] query error for ${pkg.name}@${pkg.version}: ${err.message}`);
     return [];

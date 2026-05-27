@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Replaced OSV-dependent NVD source with a direct NVD keyword-search implementation ([`nvd-keyword-source`](src/main/modules/enrichment/sources/nvd-keyword-source.js)) that detects CVEs independently of OSV, adds CVSS 4.0 support, and fixes version safety filtering with full CPE range evaluation.
+
 #### Sprint 5 — Feature A: Settings Tab
 
 - **New Settings tab** added to the left of the About tab ([`src/renderer/components/SettingsTab.jsx`](src/renderer/components/SettingsTab.jsx) NEW, [`src/renderer/hooks/useSettings.js`](src/renderer/hooks/useSettings.js) NEW)

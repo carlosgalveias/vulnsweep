@@ -11,6 +11,7 @@ jest.mock('../../../../../src/main/modules/enrichment/sources/osv-source', () =>
   extractSeverity: jest.fn(),
   extractAliases: jest.fn(),
   extractUrl: jest.fn(),
+  isVersionSafe: jest.fn().mockReturnValue(false),
 }));
 
 const enrichmentOsv = require('../../../../../src/main/modules/enrichment/sources/osv-source');
