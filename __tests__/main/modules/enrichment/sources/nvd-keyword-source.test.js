@@ -145,21 +145,21 @@ describe('extractVersionRangeInfo()', () => {
     const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
     expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
       fixedIn: '4.17.5',
-      affectedVersionRange: '<4.17.5',
+      vulnerableRange: '<4.17.5',
     });
   });
   it('returns fixedIn as next patch from versionEndIncluding', () => {
     const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndIncluding: '4.17.4' }];
     expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
       fixedIn: '4.17.5',
-      affectedVersionRange: '<=4.17.4',
+      vulnerableRange: '<=4.17.4',
     });
   });
   it('returns null fixedIn when no upper bound', () => {
     const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionStartIncluding: '4.0.0' }];
     expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
       fixedIn: null,
-      affectedVersionRange: '>=4.0.0',
+      vulnerableRange: '>=4.0.0',
     });
   });
   it('returns full range string with both lower and upper bounds', () => {
@@ -173,7 +173,7 @@ describe('extractVersionRangeInfo()', () => {
     ];
     expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
       fixedIn: '4.17.5',
-      affectedVersionRange: '>=4.0.0 <4.17.5',
+      vulnerableRange: '>=4.0.0 <4.17.5',
     });
   });
   it('ignores CPE entries that do not match the package', () => {
@@ -182,13 +182,13 @@ describe('extractVersionRangeInfo()', () => {
     ];
     expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
       fixedIn: null,
-      affectedVersionRange: null,
+      vulnerableRange: null,
     });
   });
   it('returns null both fields when no matching CPE entries', () => {
     expect(extractVersionRangeInfo('lodash', [])).toEqual({
       fixedIn: null,
-      affectedVersionRange: null,
+      vulnerableRange: null,
     });
   });
 });
@@ -226,7 +226,7 @@ describe('parseKeywordResponse()', () => {
       expect(results).toHaveLength(1);
       expect(results[0].cveId).toBe('CVE-2019-10744');
       expect(results[0].fixedIn).toBe('4.17.5');
-      expect(results[0].affectedVersionRange).toBe('<4.17.5');
+      expect(results[0].vulnerableRange).toBe('<4.17.5');
     });
 
     it('excludes CVE when version is above affected range', () => {
@@ -248,81 +248,6 @@ describe('parseKeywordResponse()', () => {
       // LangSmith CPE should NOT match lodash
       const results = parseKeywordResponse(json, 'lodash', '4.18.1');
       expect(results).toHaveLength(0);
-    });
-  });
-
-  describe('No-CPE path (description-based fallback)', () => {
-    it('includes CVE when description contains npm signals AND package name', () => {
-      const json = makeNvdResponse(
-        'CVE-2021-99999',
-        [
-          {
-            lang: 'en',
-            value: 'A vulnerability in lodash npm package allows prototype pollution.',
-          },
-        ],
-        null
-      );
-      const results = parseKeywordResponse(json, 'lodash', '4.17.4');
-      expect(results).toHaveLength(1);
-      expect(results[0].cveId).toBe('CVE-2021-99999');
-    });
-
-    it('excludes CVE when description has npm signals but NOT the package name (false positive fix)', () => {
-      // This is the LangSmith-type false positive: mentions node.js but not lodash
-      const json = makeNvdResponse(
-        'CVE-2026-40190',
-        [
-          {
-            lang: 'en',
-            value:
-              'Improper access control in LangSmith Client for Node.js allows remote attackers to exfiltrate data.',
-          },
-        ],
-        null
-      );
-      const results = parseKeywordResponse(json, 'lodash', '4.18.1');
-      expect(results).toHaveLength(0);
-    });
-
-    it('excludes CVE when description has package name but NO npm signals', () => {
-      const json = makeNvdResponse(
-        'CVE-2025-11111',
-        [
-          {
-            lang: 'en',
-            value: 'A vulnerability in lodash allows arbitrary code execution on Windows.',
-          },
-        ],
-        null
-      );
-      const results = parseKeywordResponse(json, 'lodash', '4.17.4');
-      expect(results).toHaveLength(0);
-    });
-
-    it('excludes CVE when description is completely unrelated', () => {
-      const json = makeNvdResponse(
-        'CVE-2025-22222',
-        [{ lang: 'en', value: 'Buffer overflow in FooBar Server 2.0 on Windows.' }],
-        null
-      );
-      const results = parseKeywordResponse(json, 'lodash', '4.17.4');
-      expect(results).toHaveLength(0);
-    });
-
-    it('is case-insensitive for package name matching', () => {
-      const json = makeNvdResponse(
-        'CVE-2021-88888',
-        [
-          {
-            lang: 'en',
-            value: 'Prototype pollution in Lodash npm package before version 4.17.21.',
-          },
-        ],
-        null
-      );
-      const results = parseKeywordResponse(json, 'lodash', '4.17.4');
-      expect(results).toHaveLength(1);
     });
   });
 

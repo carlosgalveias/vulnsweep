@@ -42,7 +42,7 @@ function makeHit(overrides) {
       url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-9358',
       description: 'A vulnerability was found in postcss-selector-parser npm package up to 7.1.1.',
       fixedIn: null,
-      affectedVersionRange: null,
+      vulnerableRange: null,
     },
     overrides
   );
@@ -161,18 +161,32 @@ describe('SourceResult shape', () => {
     expect(results[0].fixedIn).toBeNull();
   });
 
-  it('17c. affectedVersionRange is propagated from hit into rawData.nvd', async () => {
+  it('17c. vulnerableRange is propagated from hit into rawData.nvd', async () => {
     queryNvdKeyword.mockResolvedValue([
-      makeHit({ fixedIn: '4.17.5', affectedVersionRange: '>=4.0.0 <4.17.5' }),
+      makeHit({ fixedIn: '4.17.5', vulnerableRange: '>=4.0.0 <4.17.5' }),
     ]);
     const results = await query(makePkg());
-    expect(results[0].rawData.nvd.affectedVersionRange).toBe('>=4.0.0 <4.17.5');
+    expect(results[0].rawData.nvd.vulnerableRange).toBe('>=4.0.0 <4.17.5');
   });
 
-  it('17d. affectedVersionRange is null in rawData when hit carries no range', async () => {
-    queryNvdKeyword.mockResolvedValue([makeHit({ affectedVersionRange: null })]);
+  it('17d. vulnerableRange is null in rawData when hit carries no range', async () => {
+    queryNvdKeyword.mockResolvedValue([makeHit({ vulnerableRange: null })]);
     const results = await query(makePkg());
-    expect(results[0].rawData.nvd.affectedVersionRange).toBeNull();
+    expect(results[0].rawData.nvd.vulnerableRange).toBeNull();
+  });
+
+  it('17e. vulnerableRange is propagated from hit when hit.vulnerableRange is a string', async () => {
+    queryNvdKeyword.mockResolvedValue([
+      makeHit({ fixedIn: '4.17.5', vulnerableRange: '>=4.0.0 <4.17.5' }),
+    ]);
+    const results = await query(makePkg());
+    expect(results[0].vulnerableRange).toBe('>=4.0.0 <4.17.5');
+  });
+
+  it('17f. vulnerableRange is null when hit.vulnerableRange is null', async () => {
+    queryNvdKeyword.mockResolvedValue([makeHit({ vulnerableRange: null })]);
+    const results = await query(makePkg());
+    expect(results[0].vulnerableRange).toBeNull();
   });
 
   it('18. rawData is { nvd: hit }', async () => {

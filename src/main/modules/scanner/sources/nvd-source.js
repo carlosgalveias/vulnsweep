@@ -40,7 +40,7 @@ function severityFromCvssCategory(category) {
  * @property {string}        url                  - NVD advisory URL
  * @property {string}        description          - English CVE description text
  * @property {string|null}   fixedIn              - Fixed version from CPE versionEndExcluding or versionEndIncluding+1
- * @property {string|null}   affectedVersionRange - Human-readable version range (e.g. ">=4.0.0 <4.17.5")
+ * @property {string|null}   vulnerableRange      - Human-readable version range (e.g. ">=4.0.0 <4.17.5")
  */
 
 /**
@@ -55,6 +55,7 @@ function severityFromCvssCategory(category) {
  * @property {string|null} description        - Full NVD English description text
  * @property {string|null} fixedIn            - Fixed version propagated from NvdKeywordHit; null when not available
  * @property {string|null} url                - NVD advisory URL
+ * @property {string|null} vulnerableRange      - Human-readable version range (e.g. ">=4.0.0 <4.17.5")
  * @property {number|null} cvssScore          - CVSS base score from NVD
  * @property {string|null} cvssVector         - CVSS vector string from NVD
  * @property {boolean}     cisaKnownExploited - Always false; populated by cisa-kev plugin
@@ -94,6 +95,7 @@ async function query(pkg) {
       description: hit.description || null,
       fixedIn: hit.fixedIn ?? null,
       url: hit.url || null,
+      vulnerableRange: hit.vulnerableRange ?? null,
       cvssScore: hit.cvssScore ?? null,
       cvssVector: hit.cvssVector ?? null,
       cisaKnownExploited: false,

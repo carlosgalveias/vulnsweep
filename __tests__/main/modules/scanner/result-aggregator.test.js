@@ -263,4 +263,31 @@ describe('result-aggregator aggregate()', () => {
     // CVSS data should come from NVD
     expect(result.vulnerabilities[0].cvssScore).toBe(9.8);
   });
+
+  it('aggregates vulnerableRange from NVD when npm-audit is not present', async () => {
+    const nvdResult = makeSource({
+      sourceId: 'nvd',
+      cveIds: ['CVE-2021-23337'],
+      fixedIn: '4.17.21',
+      vulnerableRange: '>=4.0.0 <4.17.21',
+    });
+    const result = await aggregate(pkg, [[nvdResult]]);
+    expect(result.vulnerabilities[0].vulnerableRange).toBe('>=4.0.0 <4.17.21');
+  });
+
+  it('merges vulnerableRange during deduplication of same package/version', async () => {
+    const s1 = makeSource({
+      cveIds: ['CVE-2021-23337'],
+      vulnerableRange: null,
+    });
+    const s2 = makeSource({
+      cveIds: ['CVE-2021-23338'],
+      vulnerableRange: '>=4.0.0 <4.17.21',
+    });
+    // Two vulnerabilities of the same package and version will be deduplicated into one.
+    // The first one has null range, the second one has a non-null range.
+    const result = await aggregate(pkg, [[s1, s2]]);
+    expect(result.vulnerabilities).toHaveLength(1);
+    expect(result.vulnerabilities[0].vulnerableRange).toBe('>=4.0.0 <4.17.21');
+  });
 });

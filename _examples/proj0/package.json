@@ -16,7 +16,14 @@
     "jwa": "2.0.1",
     "jws": "4.0.1",
     "shred": "0.8.10",
-    "axios": "1.15.2"
+    "axios": "1.15.2",
+    "color-convert": "2.0.1",
+    "color-name": "1.1.4",
+    "color-string": "2.0.0",
+    "jmespath": "0.16.0",
+    "router": "2.2.0",
+    "minimist": "^0.2.1",
+    "eslint": "^7.11.0"
   },
   "overrides": {
     "babel-traverse": "npm:@babel/traverse@^7.23.2",

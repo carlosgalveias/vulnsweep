@@ -9,7 +9,6 @@ const NVD_KEYWORD_MAX_RESULTS = 20;
 const NVD_KW_BACKOFF_BASE_MS = ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS;
 const NVD_KW_MAX_RETRIES = 3;
 const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
-const NPM_SIGNALS = ['npm', 'node.js', 'nodejs', 'node_modules', 'node module'];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,17 +74,6 @@ function getEnglishDescription(descriptions) {
   const enDesc = Array.isArray(descriptions) ? descriptions.find((d) => d.lang === 'en') : null;
   if (!enDesc || typeof enDesc.value !== 'string') return '';
   return enDesc.value;
-}
-
-/**
- * Returns true if the CVE description contains npm/Node.js ecosystem signals.
- * @param {Array<{lang: string, value: string}>} descriptions
- * @returns {boolean}
- */
-function isNpmRelevant(descriptions) {
-  const lower = getEnglishDescription(descriptions).toLowerCase();
-  if (!lower) return false;
-  return NPM_SIGNALS.some((sig) => lower.includes(sig));
 }
 
 function extractCpeMatches(vulnerabilityItem) {
@@ -167,14 +155,14 @@ function cpeMatchesPackage(criteriaString, pkgName) {
  * Returns the earliest fixed version and a human-readable affected version range string.
  * @param {string} pkgName - The npm package name to match against CPE product fields
  * @param {Array<object>} cpeMatches - Array of CPE match objects from NVD API response
- * @returns {{ fixedIn: string|null, affectedVersionRange: string|null }}
+ * @returns {{ fixedIn: string|null, vulnerableRange: string|null }}
  */
 function extractVersionRangeInfo(pkgName, cpeMatches) {
-  if (!cpeMatches || cpeMatches.length === 0) return { fixedIn: null, affectedVersionRange: null };
+  if (!cpeMatches || cpeMatches.length === 0) return { fixedIn: null, vulnerableRange: null };
   const packageCpes = cpeMatches.filter(
     (cpe) => cpe.vulnerable && cpeMatchesPackage(cpe.criteria, pkgName)
   );
-  if (packageCpes.length === 0) return { fixedIn: null, affectedVersionRange: null };
+  if (packageCpes.length === 0) return { fixedIn: null, vulnerableRange: null };
   let bestFixedIn = null;
   let bestFixedInCoerced = null;
   const rangeParts = [];
@@ -223,7 +211,7 @@ function extractVersionRangeInfo(pkgName, cpeMatches) {
   }
   return {
     fixedIn: bestFixedIn,
-    affectedVersionRange: rangeParts.length > 0 ? rangeParts.join(' || ') : null,
+    vulnerableRange: rangeParts.length > 0 ? rangeParts.join(' || ') : null,
   };
 }
 
@@ -302,47 +290,59 @@ function parseCvss(metrics) {
  *
  * Two filtering paths are applied per CVE:
  *  1. CPE path (preferred): if CPE data exists, gates on CPE product matching
- *     pkgName AND isVersionAffected(). Extracts fixedIn + affectedVersionRange.
- *  2. No-CPE fallback: gates on npm ecosystem signals in the description AND
- *     the package name appearing in the description (prevents false positives
- *     for CVEs that mention Node.js but describe unrelated packages).
+ *     pkgName AND isVersionAffected(). Extracts fixedIn + vulnerableRange.
  *
  * @param {object} json - Raw JSON response from NVD API v2 /cves/2.0 endpoint
  * @param {string} pkgName - The npm package name being scanned
  * @param {string} pkgVersion - The installed version of the package
  * @returns {Array<{cveId: string, cvssScore: number|null, cvssVector: string|null,
  *   cvssCategory: string|null, cweIds: string[], url: string, description: string,
- *   fixedIn: string|null, affectedVersionRange: string|null}>}
+ *   fixedIn: string|null, vulnerableRange: string|null}>}
  */
 function parseKeywordResponse(json, pkgName, pkgVersion) {
   if (!json || !Array.isArray(json.vulnerabilities)) return [];
   const results = [];
+
+  // Strict ecosystem whitelist: The CPE MUST reference the Node ecosystem
+  const NODE_ECOSYSTEMS = ['npm', 'node.js', 'nodejs'];
+
   for (const item of json.vulnerabilities) {
     const cve = item && item.cve;
     if (!cve || !cve.id || !CVE_PATTERN.test(cve.id)) continue;
+
     const cpeMatches = extractCpeMatches(item);
-    if (cpeMatches.length > 0) {
-      if (!isVersionAffected(pkgName, pkgVersion, cpeMatches)) {
-        continue;
-      }
-    } else {
-      // No CPE data: fall back to description-based relevance.
-      // Require BOTH npm ecosystem signals AND the package name in the description
-      // to prevent false positives (e.g. LangSmith CVEs matching lodash).
-      const enDescText = getEnglishDescription(cve.descriptions);
-      if (
-        !isNpmRelevant(cve.descriptions) ||
-        !enDescText.toLowerCase().includes(pkgName.toLowerCase())
-      ) {
-        continue;
-      }
+
+    // 1. If there is no structured CPE data, ignore it completely (safer fallback).
+    if (cpeMatches.length === 0) {
+      continue;
     }
+
+    // 2. --- ECOSYSTEM WHITELIST GUARD ---
+    // Ensure at least one CPE match explicitly targets the Node/npm ecosystem.
+    // This instantly eliminates things like cpe:2.3:a:drupal:drupal...
+    const isNodeEcosystem = cpeMatches.some((cpe) => {
+      const criteria = (cpe.criteria || '').toLowerCase();
+      return NODE_ECOSYSTEMS.some(
+        (eco) => criteria.includes(`:${eco}:`) || criteria.includes(`:${eco}`)
+      );
+    });
+
+    if (!isNodeEcosystem) continue;
+
+    // 3. --- STRUCTURED VERSION VERIFICATION ---
+    // Check if our installed version actually falls into the NVD's stated CPE range
+    if (!isVersionAffected(pkgName, pkgVersion, cpeMatches)) {
+      continue;
+    }
+
+    // --- PROCESSING VALID MATCHES ---
     const enDescText = getEnglishDescription(cve.descriptions);
-    const { fixedIn, affectedVersionRange } = extractVersionRangeInfo(pkgName, cpeMatches);
+    const { fixedIn, vulnerableRange } = extractVersionRangeInfo(pkgName, cpeMatches);
     const { cvssScore, cvssVector } = parseCvss(cve.metrics || {});
     const cweIds = (cve.weaknesses || []).flatMap((w) =>
       (w.description || []).filter((d) => d.value && d.value.startsWith('CWE-')).map((d) => d.value)
     );
+
     results.push({
       cveId: cve.id,
       cvssScore,
@@ -352,9 +352,10 @@ function parseKeywordResponse(json, pkgName, pkgVersion) {
       url: `https://nvd.nist.gov/vuln/detail/${cve.id}`,
       description: enDescText,
       fixedIn,
-      affectedVersionRange,
+      vulnerableRange,
     });
   }
+
   return results;
 }
 

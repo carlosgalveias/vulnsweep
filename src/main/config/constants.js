@@ -295,7 +295,7 @@ const ENRICHMENT_CONFIG = {
    * Per-request HTTP timeout for all enrichment API calls (milliseconds).
    * @type {number}
    */
-  ENRICHMENT_TIMEOUT_MS: 15000,
+  ENRICHMENT_TIMEOUT_MS: 60000,
 
   /**
    * In-process enrichment cache TTL (milliseconds).
@@ -499,7 +499,7 @@ const SCANNER_CONFIG = {
    * Per-package timeout in milliseconds (applies to each source plugin call).
    * @type {number}
    */
-  PER_PACKAGE_TIMEOUT_MS: 30000,
+  PER_PACKAGE_TIMEOUT_MS: 60000,
 
   /**
    * Pause between batches to avoid rate limiting (milliseconds).

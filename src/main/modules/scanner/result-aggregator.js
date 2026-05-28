@@ -251,7 +251,7 @@ async function mergeGroup(g, pkg) {
   const cveIds = mergeCveIds(g),
     aliases = mergeAliases(g);
   const patchedVersion = mergePatchedVersion(g);
-  const vulnerableRange = npm ? npm.vulnerableRange || null : null;
+  const vulnerableRange = firstByPriority(g, 'vulnerableRange') || null;
   const title = firstByPriority(g, 'title') || null;
   const url = firstByPriority(g, 'url') || null;
   const urls = mergeUrls(g);
@@ -410,6 +410,8 @@ function mergeVulnInto(primary, secondary) {
   if (secondary.cisaKnownExploited === true) primary.cisaKnownExploited = true;
   if (primary.patchedVersion == null && secondary.patchedVersion != null)
     primary.patchedVersion = secondary.patchedVersion;
+  if (primary.vulnerableRange == null && secondary.vulnerableRange != null)
+    primary.vulnerableRange = secondary.vulnerableRange;
 }
 
 /**
