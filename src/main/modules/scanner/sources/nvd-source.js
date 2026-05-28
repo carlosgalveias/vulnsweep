@@ -32,13 +32,15 @@ function severityFromCvssCategory(category) {
 
 /**
  * @typedef {object} NvdKeywordHit
- * @property {string}        cveId        - CVE ID (e.g. 'CVE-2026-9358')
- * @property {number|null}   cvssScore    - CVSS base score from NVD
- * @property {string|null}   cvssVector   - CVSS vector string from NVD
- * @property {string|null}   cvssCategory - CVSS severity category (e.g. 'HIGH')
- * @property {string[]}      cweIds       - CWE IDs from NVD weaknesses
- * @property {string}        url          - NVD advisory URL
- * @property {string}        description  - English CVE description text
+ * @property {string}        cveId                - CVE ID (e.g. 'CVE-2026-9358')
+ * @property {number|null}   cvssScore            - CVSS base score from NVD
+ * @property {string|null}   cvssVector           - CVSS vector string from NVD
+ * @property {string|null}   cvssCategory         - CVSS severity category (e.g. 'HIGH')
+ * @property {string[]}      cweIds               - CWE IDs from NVD weaknesses
+ * @property {string}        url                  - NVD advisory URL
+ * @property {string}        description          - English CVE description text
+ * @property {string|null}   fixedIn              - Fixed version from CPE versionEndExcluding or versionEndIncluding+1
+ * @property {string|null}   affectedVersionRange - Human-readable version range (e.g. ">=4.0.0 <4.17.5")
  */
 
 /**
@@ -51,7 +53,7 @@ function severityFromCvssCategory(category) {
  * @property {string[]}    aliases            - Always [] — NVD keyword results carry no non-CVE aliases
  * @property {string}      title              - First 120 chars of the NVD English description
  * @property {string|null} description        - Full NVD English description text
- * @property {null}        fixedIn            - Always null — NVD keyword results include no fix versions
+ * @property {string|null} fixedIn            - Fixed version propagated from NvdKeywordHit; null when not available
  * @property {string|null} url                - NVD advisory URL
  * @property {number|null} cvssScore          - CVSS base score from NVD
  * @property {string|null} cvssVector         - CVSS vector string from NVD
@@ -90,7 +92,7 @@ async function query(pkg) {
       aliases: [],
       title: hit.description ? hit.description.slice(0, 120) : hit.cveId || '',
       description: hit.description || null,
-      fixedIn: null,
+      fixedIn: hit.fixedIn ?? null,
       url: hit.url || null,
       cvssScore: hit.cvssScore ?? null,
       cvssVector: hit.cvssVector ?? null,

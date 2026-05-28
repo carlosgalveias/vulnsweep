@@ -383,6 +383,10 @@ ipcMain.handle('commit-and-push', async (event, projectPath, messageOrOptions) =
 
     if (result.success) {
       sendLogMessage('success', `Changes committed and pushed: ${path.basename(sanitized)}`);
+      const fixCount = Array.isArray(commitOptions?.vulnerabilities)
+        ? commitOptions.vulnerabilities.length
+        : 0;
+      analytics.trackEvent('commit_pushed', { fixCount });
     } else {
       sendLogMessage('error', `Failed to commit/push: ${result.error}`);
     }
@@ -632,6 +636,13 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
         total: projectPaths.length,
       });
     }
+    analytics.trackEvent('scan_completed', {
+      repoCount: results.length,
+      totalVulnerabilities: results.reduce(
+        (s, r) => s + (r.content?.vulnerabilities?.length || 0),
+        0
+      ),
+    });
     return { success: true, content: results };
   } catch (err) {
     return { success: false, error: err.message };
@@ -1599,6 +1610,7 @@ app.on('before-quit', () => {
   } catch (err) {
     console.warn('[main] scan cache flush on quit failed (non-fatal):', err.message);
   }
+  analytics.trackEvent('app_closed');
 });
 
 // Quit when all windows are closed, except on macOS

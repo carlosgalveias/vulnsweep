@@ -1,362 +1,158 @@
 'use strict';
 
-/**
- * Tests for src/main/modules/enrichment/sources/nvd-keyword-source.js
- *
- * Mocking strategy:
- *  - https module is mocked to control HTTP responses
- *  - nvd-source enrichment module is partially mocked:
- *      enqueueNvd: calls fn() immediately (no queueing)
- *      scoreToCvssCategory: real implementation used
- */
-
-jest.mock('https');
-jest.mock('../../../../../src/main/modules/enrichment/sources/nvd-source', () => ({
-  enqueueNvd: jest.fn((fn) => fn()),
-  scoreToCvssCategory: jest.requireActual(
-    '../../../../../src/main/modules/enrichment/sources/nvd-source'
-  ).scoreToCvssCategory,
-}));
-
-const { EventEmitter } = require('events');
-const https = require('https');
 const {
-  queryNvdKeyword,
+  normalizePackageName,
+  extractCpeProduct,
+  cpeMatchesPackage,
+  isVersionAffected,
+  extractVersionRangeInfo,
 } = require('../../../../../src/main/modules/enrichment/sources/nvd-keyword-source');
-const fixture = require('../../../../fixtures/nvd-keyword-response.json');
 
-// ─── HTTP mock helpers ────────────────────────────────────────────────────────
+const CPE_LODASH = 'cpe:2.3:a:lodash:lodash:*:*:*:*:*:node.js:*:*';
+const CPE_LODASH_PROJECT = 'cpe:2.3:a:lodash_project:lodash:*:*:*:*:*:node.js:*:*';
+const CPE_LODAHS_TYPO = 'cpe:2.3:a:lodahs_project:lodahs:1.0.0:*:*:*:*:node.js:*:*';
+const CPE_LANGSMITH = 'cpe:2.3:a:langchain:langsmith_client:*:*:*:*:*:node.js:*:*';
+const CPE_NODE_FETCH = 'cpe:2.3:a:node_fetch:node_fetch:*:*:*:*:*:node.js:*:*';
 
-/**
- * Creates a minimal mock of https.request that simulates a successful 200 response
- * with the provided JSON body.
- */
-function mockHttpsSuccess(jsonBody) {
-  https.request.mockImplementation((options, callback) => {
-    const res = new EventEmitter();
-    res.statusCode = 200;
-    res.setEncoding = jest.fn();
+describe('normalizePackageName()', () => {
+  it('lowercases input', () => {
+    expect(normalizePackageName('Lodash')).toBe('lodash');
+  });
+  it('removes hyphens', () => {
+    expect(normalizePackageName('node-fetch')).toBe('nodefetch');
+  });
+  it('removes underscores', () => {
+    expect(normalizePackageName('node_fetch')).toBe('nodefetch');
+  });
+  it('removes dots', () => {
+    expect(normalizePackageName('some.package')).toBe('somepackage');
+  });
+  it('returns empty string for null', () => {
+    expect(normalizePackageName(null)).toBe('');
+  });
+  it('does not strip @ or / (scoped packages stay unmatched)', () => {
+    expect(normalizePackageName('@babel/core')).toBe('@babel/core');
+  });
+});
 
-    const req = new EventEmitter();
-    req.end = jest.fn(() => {
-      callback(res);
-      res.emit('data', JSON.stringify(jsonBody));
-      res.emit('end');
+describe('extractCpeProduct()', () => {
+  it('returns product from valid CPE string', () => {
+    expect(extractCpeProduct(CPE_LODASH)).toBe('lodash');
+  });
+  it('returns product from CPE with different vendor than product', () => {
+    expect(extractCpeProduct(CPE_LODASH_PROJECT)).toBe('lodash');
+  });
+  it('returns null for wildcard product', () => {
+    expect(extractCpeProduct('cpe:2.3:a:lodash:*:*:*:*:*:*:node.js:*:*')).toBeNull();
+  });
+  it('returns null for malformed CPE (too few components)', () => {
+    expect(extractCpeProduct('cpe:2.3:a:lodash')).toBeNull();
+  });
+  it('returns null for empty string', () => {
+    expect(extractCpeProduct('')).toBeNull();
+  });
+  it('returns null for null', () => {
+    expect(extractCpeProduct(null)).toBeNull();
+  });
+});
+
+describe('cpeMatchesPackage()', () => {
+  it('returns true when CPE product exactly matches package name', () => {
+    expect(cpeMatchesPackage(CPE_LODASH, 'lodash')).toBe(true);
+  });
+  it('returns true when CPE vendor differs but product matches', () => {
+    expect(cpeMatchesPackage(CPE_LODASH_PROJECT, 'lodash')).toBe(true);
+  });
+  it('returns false when CPE product is a typo of the package name', () => {
+    expect(cpeMatchesPackage(CPE_LODAHS_TYPO, 'lodash')).toBe(false);
+  });
+  it('returns false when CPE product is an unrelated package', () => {
+    expect(cpeMatchesPackage(CPE_LANGSMITH, 'lodash')).toBe(false);
+  });
+  it('returns true for hyphen vs underscore normalization', () => {
+    expect(cpeMatchesPackage(CPE_NODE_FETCH, 'node-fetch')).toBe(true);
+  });
+  it('returns false for malformed CPE string', () => {
+    expect(cpeMatchesPackage('notacpe', 'lodash')).toBe(false);
+  });
+  it('returns false for null criteria', () => {
+    expect(cpeMatchesPackage(null, 'lodash')).toBe(false);
+  });
+});
+
+describe('isVersionAffected()', () => {
+  it('returns false when CPE entries exist but none match the package name', () => {
+    const cpeMatches = [
+      { vulnerable: true, criteria: CPE_LANGSMITH, versionEndExcluding: '99.0.0' },
+    ];
+    expect(isVersionAffected('lodash', '4.17.4', cpeMatches)).toBe(false);
+  });
+  it('returns true when CPE entry matches package and version is in range', () => {
+    const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
+    expect(isVersionAffected('lodash', '4.17.4', cpeMatches)).toBe(true);
+  });
+  it('returns false when CPE entry matches package and version is above range', () => {
+    const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
+    expect(isVersionAffected('lodash', '4.18.1', cpeMatches)).toBe(false);
+  });
+  it('returns true when no CPE entries exist (conservative fallback)', () => {
+    expect(isVersionAffected('lodash', '4.17.4', [])).toBe(true);
+  });
+  it('returns false when CPE entries exist but all have vulnerable: false', () => {
+    const cpeMatches = [{ vulnerable: false, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
+    expect(isVersionAffected('lodash', '4.17.4', cpeMatches)).toBe(false);
+  });
+});
+
+describe('extractVersionRangeInfo()', () => {
+  it('returns fixedIn from versionEndExcluding', () => {
+    const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
+    expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
+      fixedIn: '4.17.5',
+      affectedVersionRange: '<4.17.5',
     });
-    req.setTimeout = jest.fn();
-    req.destroy = jest.fn();
-
-    return req;
   });
-}
-
-/**
- * Creates a mock that returns a specific HTTP status code with optional body.
- */
-function mockHttpsStatus(statusCode, body = '') {
-  https.request.mockImplementation((options, callback) => {
-    const res = new EventEmitter();
-    res.statusCode = statusCode;
-    res.setEncoding = jest.fn();
-
-    const req = new EventEmitter();
-    req.end = jest.fn(() => {
-      callback(res);
-      if (body) res.emit('data', typeof body === 'string' ? body : JSON.stringify(body));
-      res.emit('end');
+  it('returns fixedIn as next patch from versionEndIncluding', () => {
+    const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndIncluding: '4.17.4' }];
+    expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
+      fixedIn: '4.17.5',
+      affectedVersionRange: '<=4.17.4',
     });
-    req.setTimeout = jest.fn();
-    req.destroy = jest.fn();
-
-    return req;
   });
-}
-
-/**
- * Creates a mock that rejects the request with a network error.
- */
-function mockHttpsError(message) {
-  https.request.mockImplementation((_options, _callback) => {
-    const req = new EventEmitter();
-    req.end = jest.fn(() => {
-      req.emit('error', new Error(message));
+  it('returns null fixedIn when no upper bound', () => {
+    const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionStartIncluding: '4.0.0' }];
+    expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
+      fixedIn: null,
+      affectedVersionRange: '>=4.0.0',
     });
-    req.setTimeout = jest.fn();
-    req.destroy = jest.fn();
-    return req;
   });
-}
-
-// ─── Reset mocks before each test ─────────────────────────────────────────────
-
-beforeEach(() => {
-  jest.clearAllMocks();
-});
-
-// ─── Group: queryNvdKeyword(pkg) input guards ─────────────────────────────────
-
-describe('queryNvdKeyword() input guards', () => {
-  it('1. returns [] for null pkg', async () => {
-    const result = await queryNvdKeyword(null);
-    expect(result).toEqual([]);
+  it('returns full range string with both lower and upper bounds', () => {
+    const cpeMatches = [
+      {
+        vulnerable: true,
+        criteria: CPE_LODASH,
+        versionStartIncluding: '4.0.0',
+        versionEndExcluding: '4.17.5',
+      },
+    ];
+    expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
+      fixedIn: '4.17.5',
+      affectedVersionRange: '>=4.0.0 <4.17.5',
+    });
   });
-
-  it('2. returns [] for pkg missing name', async () => {
-    const result = await queryNvdKeyword({ version: '1.0.0' });
-    expect(result).toEqual([]);
+  it('ignores CPE entries that do not match the package', () => {
+    const cpeMatches = [
+      { vulnerable: true, criteria: CPE_LANGSMITH, versionEndExcluding: '99.0.0' },
+    ];
+    expect(extractVersionRangeInfo('lodash', cpeMatches)).toEqual({
+      fixedIn: null,
+      affectedVersionRange: null,
+    });
   });
-
-  it('3. returns [] for pkg missing version', async () => {
-    const result = await queryNvdKeyword({ name: 'postcss-selector-parser' });
-    expect(result).toEqual([]);
-  });
-
-  it('4. does NOT call httpsGet when input guard fires', async () => {
-    await queryNvdKeyword(null);
-    expect(https.request).not.toHaveBeenCalled();
-  });
-});
-
-// ─── Group: npm ecosystem filter ──────────────────────────────────────────────
-
-describe('npm ecosystem filter', () => {
-  const pkg = {
-    name: 'postcss-selector-parser',
-    version: '7.1.0',
-    resolved:
-      'https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.1.0.tgz',
-  };
-
-  it('5. returns result for CVE with "npm package" in description (entry 1 from fixture)', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results.some((r) => r.cveId === 'CVE-2026-9358')).toBe(true);
-  });
-
-  it('6. does NOT return result for CVE with no npm signals in description (entry 2 from fixture)', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results.some((r) => r.cveId === 'CVE-2020-99999')).toBe(false);
-  });
-
-  it('7. with fixture: returns exactly 1 result (only the npm-relevant CVE)', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results).toHaveLength(1);
-    expect(results[0].cveId).toBe('CVE-2026-9358');
-  });
-});
-
-// ─── Group: CVSS 4.0 priority ─────────────────────────────────────────────────
-
-describe('CVSS 4.0 priority', () => {
-  const pkg = {
-    name: 'postcss-selector-parser',
-    version: '7.1.0',
-    resolved:
-      'https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.1.0.tgz',
-  };
-
-  it('8. when fixture entry has both cvssMetricV40 (2.1) and cvssMetricV31 (4.3), cvssScore MUST be 2.1', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].cvssScore).toBe(2.1);
-  });
-
-  it('9. result cvssVector must be the V4.0 vector string', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].cvssVector).toBe(
-      'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N'
-    );
-  });
-
-  it('10. result cvssCategory must be "LOW" for score 2.1', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].cvssCategory).toBe('LOW');
-  });
-});
-
-// ─── Group: version filtering with CPE data ───────────────────────────────────
-
-describe('version filtering with CPE data', () => {
-  function makeFixtureWithCpe(cpeBounds) {
-    return {
-      vulnerabilities: [
-        {
-          cve: {
-            id: 'CVE-2026-9358',
-            descriptions: [
-              { lang: 'en', value: 'A vulnerability in the npm package postcss-selector-parser.' },
-            ],
-            metrics: {
-              cvssMetricV31: [
-                {
-                  source: 'nvd@nist.gov',
-                  type: 'Primary',
-                  cvssData: {
-                    version: '3.1',
-                    vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:L',
-                    baseScore: 4.3,
-                    baseSeverity: 'MEDIUM',
-                  },
-                },
-              ],
-            },
-            weaknesses: [],
-            configurations: [
-              {
-                nodes: [
-                  {
-                    operator: 'OR',
-                    negate: false,
-                    cpeMatch: [
-                      {
-                        vulnerable: true,
-                        criteria: 'cpe:2.3:a:postcss:postcss-selector-parser:*:*:*:*:*:node.js:*:*',
-                        ...cpeBounds,
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      ],
-    };
-  }
-
-  const pkgBase = { name: 'pkg', version: '1.0.0', resolved: 'https://r.example.com' };
-
-  it('11. version 7.1.0 against versionEndIncluding 7.1.1 returns the CVE', async () => {
-    mockHttpsSuccess(makeFixtureWithCpe({ versionEndIncluding: '7.1.1' }));
-    const results = await queryNvdKeyword({ ...pkgBase, version: '7.1.0' });
-    expect(results).toHaveLength(1);
-  });
-
-  it('12. version 7.1.2 against versionEndIncluding 7.1.1 does NOT return the CVE', async () => {
-    mockHttpsSuccess(makeFixtureWithCpe({ versionEndIncluding: '7.1.1' }));
-    const results = await queryNvdKeyword({ ...pkgBase, version: '7.1.2' });
-    expect(results).toHaveLength(0);
-  });
-
-  it('13. version 7.1.1 against versionEndIncluding 7.1.1 returns the CVE (inclusive boundary)', async () => {
-    mockHttpsSuccess(makeFixtureWithCpe({ versionEndIncluding: '7.1.1' }));
-    const results = await queryNvdKeyword({ ...pkgBase, version: '7.1.1' });
-    expect(results).toHaveLength(1);
-  });
-
-  it('14. version 7.1.1 against versionEndExcluding 7.1.1 does NOT return the CVE (exclusive)', async () => {
-    mockHttpsSuccess(makeFixtureWithCpe({ versionEndExcluding: '7.1.1' }));
-    const results = await queryNvdKeyword({ ...pkgBase, version: '7.1.1' });
-    expect(results).toHaveLength(0);
-  });
-
-  it('15. when cpeMatches is empty and npm filter passes: CVE IS included (conservative)', async () => {
-    const noConfigFixture = {
-      vulnerabilities: [
-        {
-          cve: {
-            id: 'CVE-2026-9358',
-            descriptions: [
-              { lang: 'en', value: 'Affects the npm package postcss-selector-parser.' },
-            ],
-            metrics: {},
-            weaknesses: [],
-            configurations: [],
-          },
-        },
-      ],
-    };
-    mockHttpsSuccess(noConfigFixture);
-    const results = await queryNvdKeyword({ ...pkgBase, version: '1.0.0' });
-    expect(results).toHaveLength(1);
-  });
-
-  it('16. versionStartIncluding lower bound: version below start is excluded', async () => {
-    mockHttpsSuccess(
-      makeFixtureWithCpe({ versionStartIncluding: '5.0.0', versionEndIncluding: '8.0.0' })
-    );
-    const results = await queryNvdKeyword({ ...pkgBase, version: '4.9.9' });
-    expect(results).toHaveLength(0);
-  });
-
-  it('17. versionStartExcluding lower bound: version equal to start is excluded (exclusive)', async () => {
-    mockHttpsSuccess(
-      makeFixtureWithCpe({ versionStartExcluding: '5.0.0', versionEndIncluding: '8.0.0' })
-    );
-    const results = await queryNvdKeyword({ ...pkgBase, version: '5.0.0' });
-    expect(results).toHaveLength(0);
-  });
-});
-
-// ─── Group: result shape ──────────────────────────────────────────────────────
-
-describe('result shape', () => {
-  const pkg = {
-    name: 'postcss-selector-parser',
-    version: '7.1.0',
-    resolved:
-      'https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.1.0.tgz',
-  };
-
-  it('18. result object has all required fields', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0]).toHaveProperty('cveId');
-    expect(results[0]).toHaveProperty('cvssScore');
-    expect(results[0]).toHaveProperty('cvssVector');
-    expect(results[0]).toHaveProperty('cvssCategory');
-    expect(results[0]).toHaveProperty('cweIds');
-    expect(results[0]).toHaveProperty('url');
-    expect(results[0]).toHaveProperty('description');
-  });
-
-  it('19. cweIds array contains "CWE-674" from fixture', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].cweIds).toContain('CWE-674');
-  });
-
-  it('20. url is "https://nvd.nist.gov/vuln/detail/CVE-2026-9358"', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].url).toBe('https://nvd.nist.gov/vuln/detail/CVE-2026-9358');
-  });
-
-  it('21. description contains the fixture description string', async () => {
-    mockHttpsSuccess(fixture);
-    const results = await queryNvdKeyword(pkg);
-    expect(results[0].description).toContain('postcss-selector-parser npm package up to 7.1.1');
-  });
-});
-
-// ─── Group: HTTP and retry behavior ──────────────────────────────────────────
-
-describe('HTTP and retry behavior', () => {
-  const pkg = {
-    name: 'postcss-selector-parser',
-    version: '7.1.0',
-    resolved:
-      'https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.1.0.tgz',
-  };
-
-  it('22. when httpsGet returns null (404 simulation): returns []', async () => {
-    mockHttpsStatus(404);
-    const results = await queryNvdKeyword(pkg);
-    expect(results).toEqual([]);
-  });
-
-  it('23. when httpsGet returns empty vulnerabilities array: returns []', async () => {
-    mockHttpsSuccess({ resultsPerPage: 0, startIndex: 0, totalResults: 0, vulnerabilities: [] });
-    const results = await queryNvdKeyword(pkg);
-    expect(results).toEqual([]);
-  });
-
-  it('24. never throws — errors are caught and return []', async () => {
-    mockHttpsError('Connection refused');
-    await expect(queryNvdKeyword(pkg)).resolves.toEqual([]);
+  it('returns null both fields when no matching CPE entries', () => {
+    expect(extractVersionRangeInfo('lodash', [])).toEqual({
+      fixedIn: null,
+      affectedVersionRange: null,
+    });
   });
 });

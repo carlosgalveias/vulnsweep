@@ -1,6 +1,6 @@
 {
   "name": "proj0",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "license": "ISC",
   "author": "",
@@ -11,9 +11,16 @@
   },
   "dependencies": {
     "babel-traverse": "npm:@babel/traverse@^7.23.2",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "lodash": "4.18.1",
+    "jwa": "2.0.1",
+    "jws": "4.0.1",
+    "shred": "0.8.10",
+    "axios": "1.15.2"
   },
   "overrides": {
-    "babel-traverse": "npm:@babel/traverse@^7.23.2"
-  }
+    "babel-traverse": "npm:@babel/traverse@^7.23.2",
+    "cookiejar": "2.1.4"
+  },
+  "devDependencies": {}
 }

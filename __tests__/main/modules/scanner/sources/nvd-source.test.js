@@ -41,6 +41,8 @@ function makeHit(overrides) {
       cweIds: ['CWE-674'],
       url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-9358',
       description: 'A vulnerability was found in postcss-selector-parser npm package up to 7.1.1.',
+      fixedIn: null,
+      affectedVersionRange: null,
     },
     overrides
   );
@@ -147,8 +149,30 @@ describe('SourceResult shape', () => {
     expect(result.epssPercentile).toBeNull();
   });
 
-  it('17. fixedIn is always null', () => {
-    expect(result.fixedIn).toBeNull();
+  it('17a. fixedIn is propagated from hit when hit.fixedIn is a string', async () => {
+    queryNvdKeyword.mockResolvedValue([makeHit({ fixedIn: '4.17.5' })]);
+    const results = await query(makePkg());
+    expect(results[0].fixedIn).toBe('4.17.5');
+  });
+
+  it('17b. fixedIn is null when hit.fixedIn is null', async () => {
+    queryNvdKeyword.mockResolvedValue([makeHit({ fixedIn: null })]);
+    const results = await query(makePkg());
+    expect(results[0].fixedIn).toBeNull();
+  });
+
+  it('17c. affectedVersionRange is propagated from hit into rawData.nvd', async () => {
+    queryNvdKeyword.mockResolvedValue([
+      makeHit({ fixedIn: '4.17.5', affectedVersionRange: '>=4.0.0 <4.17.5' }),
+    ]);
+    const results = await query(makePkg());
+    expect(results[0].rawData.nvd.affectedVersionRange).toBe('>=4.0.0 <4.17.5');
+  });
+
+  it('17d. affectedVersionRange is null in rawData when hit carries no range', async () => {
+    queryNvdKeyword.mockResolvedValue([makeHit({ affectedVersionRange: null })]);
+    const results = await query(makePkg());
+    expect(results[0].rawData.nvd.affectedVersionRange).toBeNull();
   });
 
   it('18. rawData is { nvd: hit }', async () => {
