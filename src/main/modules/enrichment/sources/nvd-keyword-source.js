@@ -66,10 +66,25 @@ function httpsGet(url, timeoutMs) {
   });
 }
 
-function isNpmRelevant(descriptions) {
+/**
+ * Extracts the English description string from a CVE descriptions array.
+ * @param {Array<{lang: string, value: string}>} descriptions
+ * @returns {string}
+ */
+function getEnglishDescription(descriptions) {
   const enDesc = Array.isArray(descriptions) ? descriptions.find((d) => d.lang === 'en') : null;
-  if (!enDesc || typeof enDesc.value !== 'string') return false;
-  const lower = enDesc.value.toLowerCase();
+  if (!enDesc || typeof enDesc.value !== 'string') return '';
+  return enDesc.value;
+}
+
+/**
+ * Returns true if the CVE description contains npm/Node.js ecosystem signals.
+ * @param {Array<{lang: string, value: string}>} descriptions
+ * @returns {boolean}
+ */
+function isNpmRelevant(descriptions) {
+  const lower = getEnglishDescription(descriptions).toLowerCase();
+  if (!lower) return false;
   return NPM_SIGNALS.some((sig) => lower.includes(sig));
 }
 
@@ -92,6 +107,8 @@ function extractCpeMatches(vulnerabilityItem) {
 /**
  * Normalizes a package name for fuzzy comparison by lowercasing
  * and stripping separator characters (-, _, .).
+ * Note: scoped package prefixes (e.g. '@babel/') are intentionally NOT stripped —
+ * NVD CPE entries for scoped packages are rare and would require separate handling.
  * @param {string} name
  * @returns {string}
  */
@@ -102,9 +119,9 @@ function normalizePackageName(name) {
 
 /**
  * Extracts the product component (index 4) from a CPE 2.3 URI string.
- * Returns null/empty string if the criteria is malformed or the product field is '*'.
+ * Returns null if the criteria is malformed or the product field is '*'.
  * @param {string} criteriaString - e.g. 'cpe:2.3:a:lodash:lodash:*:...'
- * @returns {string}
+ * @returns {string|null}
  */
 function extractCpeProduct(criteriaString) {
   if (!criteriaString || typeof criteriaString !== 'string') return null;
@@ -113,6 +130,22 @@ function extractCpeProduct(criteriaString) {
   const product = parts[4];
   if (!product || product === '*') return null;
   return product;
+}
+
+/**
+ * Extracts the version component (index 5) from a CPE 2.3 URI string.
+ * Returns null if the criteria is malformed, the version field is '*', or '-' (N/A).
+ * Used to detect pinned-exact CPEs (a single version with no range bounds).
+ * @param {string} criteriaString - e.g. 'cpe:2.3:a:axios:axios:1.5.1:*:...'
+ * @returns {string|null}
+ */
+function extractCpeVersion(criteriaString) {
+  if (!criteriaString || typeof criteriaString !== 'string') return null;
+  const parts = criteriaString.split(':');
+  if (parts.length < 6) return null;
+  const version = parts[5];
+  if (!version || version === '*' || version === '-') return null;
+  return version;
 }
 
 /**
@@ -225,6 +258,22 @@ function isVersionAffected(pkgName, pkgVersion, cpeMatches) {
         const ce = semver.clean(cpe.versionEndExcluding) || (ec && ec.version);
         if (ce && semver.lt(cleanPkg, ce)) return true;
       } else {
+        // No versionEnd* bounds — could be a pinned-exact CPE (version field in the
+        // criteria URI itself, e.g. cpe:2.3:a:axios:axios:1.5.1:*:...) or a fully
+        // open-ended CPE (*). For pinned-exact CPEs, only match if the installed
+        // version equals the pinned version. For open-ended CPEs (version='*'),
+        // extractCpeVersion returns null and we fall through to return true.
+        const pinnedVersion = extractCpeVersion(cpe.criteria);
+        if (pinnedVersion !== null) {
+          // Pinned-exact: compare semver-coerced versions
+          const pinnedCoerced = semver.coerce(pinnedVersion);
+          const pinnedClean =
+            semver.clean(pinnedVersion) || (pinnedCoerced && pinnedCoerced.version);
+          if (pinnedClean && semver.eq(cleanPkg, pinnedClean)) return true;
+          // Installed version does not match the pinned version — not affected by this CPE
+          continue;
+        }
+        // Open-ended CPE (no range bounds, no pinned version) — treat as universally affected
         return true;
       }
     }
@@ -247,6 +296,24 @@ function parseCvss(metrics) {
   return { cvssScore: null, cvssVector: null };
 }
 
+/**
+ * Filters a raw NVD API v2 JSON response down to CVEs that are relevant
+ * to the given package name and version.
+ *
+ * Two filtering paths are applied per CVE:
+ *  1. CPE path (preferred): if CPE data exists, gates on CPE product matching
+ *     pkgName AND isVersionAffected(). Extracts fixedIn + affectedVersionRange.
+ *  2. No-CPE fallback: gates on npm ecosystem signals in the description AND
+ *     the package name appearing in the description (prevents false positives
+ *     for CVEs that mention Node.js but describe unrelated packages).
+ *
+ * @param {object} json - Raw JSON response from NVD API v2 /cves/2.0 endpoint
+ * @param {string} pkgName - The npm package name being scanned
+ * @param {string} pkgVersion - The installed version of the package
+ * @returns {Array<{cveId: string, cvssScore: number|null, cvssVector: string|null,
+ *   cvssCategory: string|null, cweIds: string[], url: string, description: string,
+ *   fixedIn: string|null, affectedVersionRange: string|null}>}
+ */
 function parseKeywordResponse(json, pkgName, pkgVersion) {
   if (!json || !Array.isArray(json.vulnerabilities)) return [];
   const results = [];
@@ -255,12 +322,23 @@ function parseKeywordResponse(json, pkgName, pkgVersion) {
     if (!cve || !cve.id || !CVE_PATTERN.test(cve.id)) continue;
     const cpeMatches = extractCpeMatches(item);
     if (cpeMatches.length > 0) {
-      if (!isVersionAffected(pkgName, pkgVersion, cpeMatches)) continue;
+      if (!isVersionAffected(pkgName, pkgVersion, cpeMatches)) {
+        continue;
+      }
     } else {
-      if (!isNpmRelevant(cve.descriptions)) continue;
+      // No CPE data: fall back to description-based relevance.
+      // Require BOTH npm ecosystem signals AND the package name in the description
+      // to prevent false positives (e.g. LangSmith CVEs matching lodash).
+      const enDescText = getEnglishDescription(cve.descriptions);
+      if (
+        !isNpmRelevant(cve.descriptions) ||
+        !enDescText.toLowerCase().includes(pkgName.toLowerCase())
+      ) {
+        continue;
+      }
     }
+    const enDescText = getEnglishDescription(cve.descriptions);
     const { fixedIn, affectedVersionRange } = extractVersionRangeInfo(pkgName, cpeMatches);
-    const enDesc = (cve.descriptions || []).find((d) => d.lang === 'en');
     const { cvssScore, cvssVector } = parseCvss(cve.metrics || {});
     const cweIds = (cve.weaknesses || []).flatMap((w) =>
       (w.description || []).filter((d) => d.value && d.value.startsWith('CWE-')).map((d) => d.value)
@@ -272,7 +350,7 @@ function parseKeywordResponse(json, pkgName, pkgVersion) {
       cvssCategory: scoreToCvssCategory(cvssScore),
       cweIds,
       url: `https://nvd.nist.gov/vuln/detail/${cve.id}`,
-      description: enDesc ? enDesc.value : '',
+      description: enDescText,
       fixedIn,
       affectedVersionRange,
     });
@@ -319,6 +397,7 @@ module.exports = {
   queryNvdKeyword,
   normalizePackageName,
   extractCpeProduct,
+  extractCpeVersion,
   cpeMatchesPackage,
   extractVersionRangeInfo,
   isVersionAffected,

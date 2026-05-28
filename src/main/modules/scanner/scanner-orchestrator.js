@@ -118,6 +118,7 @@ function buildEmptyScanResult(projectPath, sourceIds, allPackages = 0) {
  * @param {string[]} [options.enabledSources] - Override active source plugin IDs
  * @param {string} [options.mode] - Named scan mode: 'fast' or 'full'
  * @param {number} [options.maxConcurrent] - Max packages processed concurrently
+ * @param {number} [options.perPackageTimeoutMs] - Per-package timeout override in ms (defaults to SCANNER_CONFIG.PER_PACKAGE_TIMEOUT_MS). Use a large value (e.g. 600_000) for CLI scripts that cannot access the Electron API key and must use the free-tier rate limit.
  * @param {function} [progressCb] - Progress callback: ({phase, current, total, packageName, partialResult})
  * @returns {Promise<ScanResult>}
  */
@@ -149,7 +150,10 @@ async function scanProject(projectPath, options, progressCb) {
   const plugins = resolvePlugins(options);
   const sourceIds = pluginsToIds(plugins);
   const maxConcurrent = options.maxConcurrent ?? SCANNER_CONFIG.MAX_CONCURRENT_PACKAGES;
-  const timeoutMs = SCANNER_CONFIG.PER_PACKAGE_TIMEOUT_MS;
+  // Allow callers to override the per-package timeout (e.g. CLI scripts running without an
+  // NVD API key need a much larger timeout to account for the 6 s free-tier rate-limit queue
+  // depth; the Electron UI uses the stored API key so 600 ms/call is fast enough).
+  const timeoutMs = options.perPackageTimeoutMs ?? SCANNER_CONFIG.PER_PACKAGE_TIMEOUT_MS;
   const batchPauseMs = SCANNER_CONFIG.BATCH_PAUSE_MS;
 
   // Phase 1: Build package universe (called exactly once per scanProject invocation)

@@ -110,6 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GitHub Advisory thundering-herd**: rate limiting no longer causes cascading independent backoff delays across concurrent requests (singleton queue shares one wait period)
 - [`VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx): removed dead `isEnriching` / `enrichmentProgress` props
 - Fixed NVD keyword source ([`nvd-keyword-source.js`](src/main/modules/enrichment/sources/nvd-keyword-source.js)) to correctly match CVEs by CPE package identity, extract vulnerable version ranges and `fixedIn` versions from NVD API CPE data, and eliminate false-positive matches for unrelated packages.
+- Fixed NVD keyword source false positive where CPE entries with a pinned exact version (e.g. `cpe:...:1.5.1:*`) incorrectly flagged all installed versions as vulnerable instead of only matching the exact pinned version via `semver.eq()`.
+- Fixed `scripts/full-scan-proj0.js` returning 0 vulnerabilities due to NVD rate-limit queue starvation; [`scanner-orchestrator.js`](src/main/modules/scanner/scanner-orchestrator.js) now accepts a `perPackageTimeoutMs` override for CLI scripts operating at the free-tier rate limit.
 
 ### Security
 
