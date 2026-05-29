@@ -585,7 +585,7 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
   try {
     const { scanProject } = require('./modules/scanner/scanner-orchestrator');
     // Read persisted settings once for the entire batch scan
-    const scanOptions = {};
+    const scanOptions = { signal };
     try {
       const raw = storeGet('app:settings');
       const saved = raw ? JSON.parse(raw) : {};

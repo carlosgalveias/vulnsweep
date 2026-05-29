@@ -63,11 +63,11 @@ function partitionAliases(allAliases) {
  * @property {null}     epssPercentile       - Reserved for enrichment phase
  * @property {object}   rawData              - Raw OSV vulnerability object
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.version || !pkg.resolved) return [];
 
   try {
-    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
+    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm', signal);
     if (!vulns || vulns.length === 0) return [];
 
     const safe = vulns.filter((v) => !isVersionSafe(pkg.version, v));

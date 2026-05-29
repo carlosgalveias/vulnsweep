@@ -21,9 +21,20 @@ const EPSS_BATCH_SIZE = 100;
  */
 const _epssCache = new Map();
 
-function httpsGet(url, timeoutMs) {
+function httpsGet(url, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const u = new URL(url);
+
+    const abortHandler = () => {
+      req.destroy(new Error('Request aborted'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
     const req = https.request(
       {
         hostname: u.hostname,
@@ -42,6 +53,10 @@ function httpsGet(url, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 404) {
             resolve(null);
             return;
@@ -58,7 +73,10 @@ function httpsGet(url, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`EPSS timeout ${timeoutMs}ms`)));
     req.end();
   });
@@ -72,7 +90,7 @@ function httpsGet(url, timeoutMs) {
  * @param {string[]} cveIds
  * @returns {Promise<void>}
  */
-async function prefetchEPSS(cveIds) {
+async function prefetchEPSS(cveIds, signal) {
   const notFound = { found: false, epssScore: null, epssPercentile: null };
 
   const toFetch = [
@@ -94,7 +112,9 @@ async function prefetchEPSS(cveIds) {
     chunks.map(async (chunk) => {
       const url = `${ENRICHMENT_CONFIG.EPSS_API_URL}?cve=${chunk.join(',')}`;
       try {
-        const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
+        if (signal?.aborted) return;
+
+        const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, signal);
         if (json && Array.isArray(json.data)) {
           for (const entry of json.data) {
             if (!entry || !entry.cve) continue;
@@ -134,7 +154,7 @@ function clearEpssCache() {
  * @param {string} cveId
  * @returns {Promise<{found: boolean, epssScore: number|null, epssPercentile: number|null, error?: string}>}
  */
-async function queryEPSS(cveId) {
+async function queryEPSS(cveId, signal) {
   const notFound = { found: false, epssScore: null, epssPercentile: null };
 
   if (!cveId || typeof cveId !== 'string' || !/^CVE-\d{4}-\d{4,}$/i.test(cveId)) {
@@ -150,8 +170,12 @@ async function queryEPSS(cveId) {
 
   const url = `${ENRICHMENT_CONFIG.EPSS_API_URL}?cve=${encodeURIComponent(upperCveId)}`;
 
+  if (signal?.aborted) {
+    return { ...notFound, error: 'Request aborted' };
+  }
+
   try {
-    const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
+    const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, signal);
 
     if (json === null) {
       return notFound;

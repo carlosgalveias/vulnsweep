@@ -77,11 +77,11 @@ function severityFromCvssCategory(category) {
  * @param {string|null} [pkg.resolved] - Resolved registry URL; null for git/local packages
  * @returns {Promise<SourceResult[]>}
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version || !pkg.resolved) return [];
 
   try {
-    const hits = await queryNvdKeyword(pkg);
+    const hits = await queryNvdKeyword(pkg, signal);
     if (!hits || hits.length === 0) return [];
 
     return hits.map((hit) => ({

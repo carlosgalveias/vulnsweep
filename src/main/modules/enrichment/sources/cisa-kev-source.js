@@ -44,9 +44,20 @@ const _kevCache = { kevSet: null, fetchedAt: 0, inFlight: null };
 
 // ─── HTTP helper (identical pattern to nvd-source.js) ────────────────────────
 
-function httpsGet(url, timeoutMs) {
+function httpsGet(url, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const u = new URL(url);
+
+    const abortHandler = () => {
+      req.destroy(new Error('Request aborted'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
     const req = https.request(
       {
         hostname: u.hostname,
@@ -65,6 +76,10 @@ function httpsGet(url, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 404) {
             resolve(null);
             return;
@@ -81,7 +96,10 @@ function httpsGet(url, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`CISA KEV timeout ${timeoutMs}ms`)));
     req.end();
   });
@@ -123,11 +141,12 @@ function tryLoadDiskCache() {
  *
  * @returns {Promise<{ kevSet: Set<string>, fetchedAt: number }>}
  */
-async function fetchKevFromNetwork() {
+async function fetchKevFromNetwork(signal) {
   try {
     const json = await httpsGet(
       ENRICHMENT_CONFIG.CISA_KEV_URL,
-      ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS
+      ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+      signal
     );
 
     if (!json || !Array.isArray(json.vulnerabilities)) {
@@ -168,9 +187,10 @@ async function fetchKevFromNetwork() {
  * Always returns false on any error — never throws.
  *
  * @param {string} cveId  e.g. "CVE-2021-44228"
+ * @param {AbortSignal} [signal] - Optional abort signal
  * @returns {Promise<boolean>}
  */
-async function isCisaKnownExploited(cveId) {
+async function isCisaKnownExploited(cveId, signal) {
   // Step 1 — Input guard
   if (!cveId || typeof cveId !== 'string') return false;
 
@@ -189,12 +209,12 @@ async function isCisaKnownExploited(cveId) {
     return _kevCache.kevSet.has(upperCveId);
   }
 
-  // Step 4 — Cold start: ONE shared Promise; all concurrent callers await the same fetch.
+  // Step 4: Cold start: ONE shared Promise; all concurrent callers await the same fetch.
   // Storing the Promise (not the resolved value) is the correct async singleton pattern.
   // Without this, all 10 packages in the first concurrent batch each fire an independent
   // network fetch of the same static catalog — the classic async-singleton mistake.
   if (!_kevCache.inFlight) {
-    _kevCache.inFlight = fetchKevFromNetwork().then((result) => {
+    _kevCache.inFlight = fetchKevFromNetwork(signal).then((result) => {
       _kevCache.kevSet = result.kevSet;
       _kevCache.fetchedAt = result.fetchedAt;
       _kevCache.inFlight = null;
@@ -202,6 +222,7 @@ async function isCisaKnownExploited(cveId) {
   }
 
   await _kevCache.inFlight;
+  if (signal?.aborted) return false;
 
   // Step 5 — Return lookup result (kevSet may be null if fetch failed; default to empty Set)
   return (_kevCache.kevSet ?? new Set()).has(upperCveId);

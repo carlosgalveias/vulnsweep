@@ -23,8 +23,13 @@ function backoffDelay(baseDelay, attempt) {
 const OSV_BACKOFF_BASE_MS = 1000;
 const OSV_MAX_RETRIES = 3;
 
-function httpsPost(url, body, timeoutMs) {
+function httpsPost(url, body, timeoutMs, signal = undefined) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const payload = JSON.stringify(body);
     const u = new URL(url);
     const req = https.request(
@@ -47,6 +52,10 @@ function httpsPost(url, body, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 429) {
             const err = new Error('OSV rate-limited (429)');
             err.isRateLimit = true;
@@ -65,7 +74,16 @@ function httpsPost(url, body, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    // Abort request if signal is triggered
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        req.destroy(new Error('Request aborted'));
+      });
+    }
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`OSV timeout ${timeoutMs}ms`)));
     req.write(payload);
     req.end();
@@ -115,17 +133,22 @@ function extractUrl(v) {
  * swallowing them. Used by queryOSV() so it can return { found: false, error: '...' }
  * rather than silently returning an empty result on HTTP errors.
  */
-async function _fetchOsvRawOrThrow(packageName, version, ecosystem = 'npm') {
+async function _fetchOsvRawOrThrow(packageName, version, ecosystem = 'npm', signal = undefined) {
   const requestBody = {
     package: { name: packageName, ecosystem },
     version: version || '',
   };
   for (let attempt = 0; attempt <= OSV_MAX_RETRIES; attempt++) {
+    if (signal?.aborted) {
+      throw new Error('Request aborted');
+    }
+
     try {
       const response = await httpsPost(
         ENRICHMENT_CONFIG.OSV_API_URL,
         requestBody,
-        ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS
+        ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+        signal
       );
       return Array.isArray(response.vulns) ? response.vulns : [];
     } catch (err) {
@@ -150,10 +173,10 @@ async function _fetchOsvRawOrThrow(packageName, version, ecosystem = 'npm') {
  * @param {string} [ecosystem='npm'] - OSV ecosystem identifier
  * @returns {Promise<object[]>} Array of raw OSV vulnerability objects, empty if none found
  */
-async function fetchOsvRaw(packageName, version, ecosystem = 'npm') {
+async function fetchOsvRaw(packageName, version, ecosystem = 'npm', signal = undefined) {
   if (!packageName || typeof packageName !== 'string') return [];
   try {
-    return await _fetchOsvRawOrThrow(packageName, version, ecosystem);
+    return await _fetchOsvRawOrThrow(packageName, version, ecosystem, signal);
   } catch {
     return [];
   }
@@ -289,14 +312,14 @@ function isVersionSafe(installedVersion, osvVuln) {
  * @param {string} ecosystem - OSV ecosystem identifier; undefined falls back to fetchOsvRaw()'s default ('npm')
  * @returns {Promise<{found: boolean, severity: string|null, aliases: string[], url: string|null}>}
  */
-async function queryOSV(packageName, version, ecosystem) {
+async function queryOSV(packageName, version, ecosystem, signal = undefined) {
   // Validate input early and return error shape so callers can check r.error
   if (!packageName || typeof packageName !== 'string') {
     return { found: false, error: 'Invalid package name', severity: null, aliases: [], url: null };
   }
   let vulns;
   try {
-    vulns = await _fetchOsvRawOrThrow(packageName, version, ecosystem);
+    vulns = await _fetchOsvRawOrThrow(packageName, version, ecosystem, signal);
   } catch (err) {
     return { found: false, error: err.message, severity: null, aliases: [], url: null };
   }

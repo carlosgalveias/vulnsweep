@@ -152,7 +152,7 @@ function App() {
     allowReset,
     handleAllowResetChange,
     commitAndPush: commitAndPushVulns,
-  } = useGitOperations(addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo);
+  } = useGitOperations(addLog, vulnerabilitiesRef, removeDirtyRepo);
 
   // useSettings — load persisted scan option values once on mount for initial hydration.
   // SettingsTab owns its own useSettings instance and auto-saves every change;
@@ -230,7 +230,11 @@ function App() {
       }
       setDepUpdatesDirty(false);
     }
-    await commitAndPushVulns();
+    // Commit vulnerability fixes and remove committed vulnerabilities from state
+    const committedIds = await commitAndPushVulns();
+    if (committedIds && committedIds.length > 0) {
+      setVulnerabilities((prev) => prev.filter((v) => !committedIds.includes(v.id)));
+    }
   }, [
     depUpdatesDirty,
     depCommitMessage,
@@ -238,6 +242,7 @@ function App() {
     selectedFolder,
     addLog,
     commitAndPushVulns,
+    setVulnerabilities,
   ]);
 
   useEffect(() => {

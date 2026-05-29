@@ -68,11 +68,11 @@ function collectAllCveIds(vulns) {
  * @property {null}     epssPercentile       - Populated by epss plugin via result-aggregator
  * @property {object}   rawData              - { cveId, epss: null }
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version) return [];
 
   try {
-    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
+    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm', signal);
     if (!vulns || vulns.length === 0) return [];
 
     // Collect all CVE IDs across all OSV entries (flattened — per-entry association
@@ -88,7 +88,7 @@ async function query(pkg) {
     for (const cveId of cveIds) {
       // OPT-1 bonus: removed redundant queryEPSS() call that duplicated epss-source plugin.
       // epssScore/epssPercentile are set to null; the epss plugin covers all EPSS lookups.
-      const isKnownExploited = await isCisaKnownExploited(cveId);
+      const isKnownExploited = await isCisaKnownExploited(cveId, signal);
       if (!isKnownExploited) continue;
 
       results.push({

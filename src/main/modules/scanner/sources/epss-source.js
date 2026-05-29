@@ -63,11 +63,11 @@ function collectCveIds(vulns) {
  * @property {number|null} epssPercentile     - EPSS percentile ranking (0–1), or null
  * @property {object}      rawData            - { cveId, epss: epssResult }
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version) return [];
 
   try {
-    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
+    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm', signal);
     if (!vulns || vulns.length === 0) return [];
 
     const safeVulns = vulns.filter((v) => {
@@ -80,7 +80,8 @@ async function query(pkg) {
     // rate-limit concerns for typical package CVE counts (usually < 10).
     const settled = await Promise.allSettled(
       cveIds.map(async (cveId) => {
-        const epssResult = await queryEPSS(cveId);
+        if (signal?.aborted) return null;
+        const epssResult = await queryEPSS(cveId, signal);
         return { cveId, epssResult };
       })
     );

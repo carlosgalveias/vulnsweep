@@ -71,11 +71,11 @@ function partitionAliases(allAliases) {
  * @property {null}     epssPercentile       - Populated by cisa-kev plugin
  * @property {object}   rawData              - { osv: raw OSV entry, github: GitHub result }
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version) return [];
 
   try {
-    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm');
+    const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm', signal);
     if (!vulns || vulns.length === 0) return [];
 
     const results = [];
@@ -90,7 +90,7 @@ async function query(pkg) {
       if (!queryId) continue;
 
       // Existing retry/backoff in queryGitHubAdvisory() handles 429/403 automatically
-      const ghResult = await queryGitHubAdvisory(queryId);
+      const ghResult = await queryGitHubAdvisory(queryId, signal);
       if (!ghResult || !ghResult.found) continue;
 
       results.push({

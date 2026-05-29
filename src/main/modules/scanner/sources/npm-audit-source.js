@@ -190,8 +190,11 @@ async function _getResolvesDependentsMap(projectPath) {
  * @property {null}        epssPercentile       - Populated by cisa-kev plugin
  * @property {object}      rawData              - { via, resolvesDependents, isPromotedDependent }
  */
-async function query(pkg) {
+async function query(pkg, signal) {
   if (!pkg || !pkg.projectPath) return [];
+
+  // Check abort signal early to avoid spawning unnecessary subprocess
+  if (signal?.aborted) return [];
 
   const { projectPath } = pkg;
 

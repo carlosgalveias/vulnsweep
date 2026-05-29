@@ -119,6 +119,7 @@ function buildEmptyScanResult(projectPath, sourceIds, allPackages = 0) {
  * @param {string} [options.mode] - Named scan mode: 'fast' or 'full'
  * @param {number} [options.maxConcurrent] - Max packages processed concurrently
  * @param {number} [options.perPackageTimeoutMs] - Per-package timeout override in ms (defaults to SCANNER_CONFIG.PER_PACKAGE_TIMEOUT_MS). Use a large value (e.g. 600_000) for CLI scripts that cannot access the Electron API key and must use the free-tier rate limit.
+ * @param {AbortSignal} [options.signal] - Abort signal to cancel in-flight HTTP requests
  * @param {function} [progressCb] - Progress callback: ({phase, current, total, packageName, partialResult})
  * @returns {Promise<ScanResult>}
  */
@@ -129,6 +130,8 @@ async function scanProject(projectPath, options, progressCb) {
     options = {};
   }
   if (options == null) options = {};
+
+  const { signal } = options;
 
   // [telemetry] Reset all counters and start the total-scan wall-clock timer
   scanTelemetry.reset();
@@ -184,7 +187,8 @@ async function scanProject(projectPath, options, progressCb) {
   // OPT-3: NPM-Audit Pre-warm — run npm audit once BEFORE the concurrent batch loop
   // so all query() calls find a fully resolved Promise in the cache, eliminating the
   // first-batch blocking wait that previously added ~1-5s latency to each first-batch call.
-  if (typeof npmAuditSource.prewarmCache === 'function') {
+  // Check signal before pre-warming to avoid spawning subprocess on cancelled scan.
+  if (!signal?.aborted && typeof npmAuditSource.prewarmCache === 'function') {
     await npmAuditSource.prewarmCache(projectPath);
   }
 
@@ -214,10 +218,14 @@ async function scanProject(projectPath, options, progressCb) {
             const sourceId = plugin.SOURCE_ID;
             const tlabel = `scan:source:${sourceId}`;
 
-            // npm-audit always runs fresh — never cached
+            // Check abort signal early — allow all plugins to exit cleanly on cancel
+            if (signal?.aborted) {
+              return Promise.resolve([]);
+            }
+
             if (sourceId === 'npm-audit') {
               const tlToken = scanTelemetry.start(tlabel);
-              return withTimeout(plugin.query(pkg), timeoutMs)
+              return withTimeout(plugin.query(pkg, signal), timeoutMs)
                 .then((r) => {
                   scanTelemetry.end(tlToken, tlabel);
                   return r;
@@ -248,7 +256,7 @@ async function scanProject(projectPath, options, progressCb) {
               const cached = scanCache.get(sourceId, cacheKey) || [];
               // T8: capture token in outer closure so .catch() can reach it
               const tlToken = scanTelemetry.start(tlabel);
-              return withTimeout(plugin.query(pkg), timeoutMs)
+              return withTimeout(plugin.query(pkg, signal), timeoutMs)
                 .then((results) => {
                   scanTelemetry.end(tlToken, tlabel);
                   if (Array.isArray(results) && results.length > 0) {
@@ -268,7 +276,7 @@ async function scanProject(projectPath, options, progressCb) {
             // Cache miss or post-hard-invalidation → fetch fresh
             const tlToken = scanTelemetry.start(tlabel);
             scanTelemetry.count('cache:fresh-fetched', 1);
-            return withTimeout(plugin.query(pkg), timeoutMs)
+            return withTimeout(plugin.query(pkg, signal), timeoutMs)
               .then((results) => {
                 scanTelemetry.end(tlToken, tlabel);
                 // Cache both non-empty AND empty arrays — an empty result ([]) is a valid,

@@ -20,6 +20,7 @@ jest.mock('fs', () => ({
   },
 }));
 
+const path = require('path');
 const fs = require('fs').promises;
 const discovery = require('../../../src/main/modules/discovery');
 
@@ -81,7 +82,7 @@ describe('discovery module', () => {
   });
 
   describe('discoverProjects', () => {
-    it('should discover valid Node.js projects', async () => {
+    it('should discover valid Node.js projects at immediate level', async () => {
       fs.access.mockResolvedValue();
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
@@ -101,6 +102,86 @@ describe('discovery module', () => {
       expect(result.content[0].packageJson.name).toBe('test-project');
     });
 
+    it('should discover nested projects with relative path names', async () => {
+      const baseDir = '/Work/projects';
+
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      // First call for /Work/projects - returns one subdir 'my_proj'
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([{ name: 'my_proj', isDirectory: () => true }]);
+        }
+        // Second call for /Work/projects/my_proj - returns 'demo'
+        if (dirPath === '/Work/projects/my_proj') {
+          return Promise.resolve([{ name: 'demo', isDirectory: () => true }]);
+        }
+        // Third call for /Work/projects/my_proj/demo - no subdirs
+        if (dirPath === '/Work/projects/my_proj/demo') {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'nested-project', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects(baseDir);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(2);
+      // The nested project should have relative path as name
+      const nestedProject = result.content.find(
+        (p) => p.name.includes(path.sep) || p.name.includes('/')
+      );
+      expect(nestedProject).toBeDefined();
+      expect(nestedProject.path).toBe('/Work/projects/my_proj/demo');
+    });
+
+    it('should skip nested projects when parent is already a project', async () => {
+      const baseDir = '/Work/projects';
+
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([{ name: 'project-with-nested', isDirectory: () => true }]);
+        }
+        if (dirPath === '/Work/projects/project-with-nested') {
+          return Promise.resolve([{ name: 'nested-child', isDirectory: () => true }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects(baseDir);
+
+      expect(result.success).toBe(true);
+      // Should only find the parent, not the child
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('project-with-nested');
+    });
+
+    it('should check if base directory itself has package.json', async () => {
+      const baseDir = '/single-project';
+
+      // Base dir has package.json
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+      fs.readdir.mockResolvedValue([]); // No subdirs
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'single-project', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects(baseDir);
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('single-project');
+      expect(result.content[0].path).toBe(baseDir);
+    });
+
     it('should skip directories without package.json', async () => {
       fs.access.mockImplementation((filePath) => {
         if (filePath.endsWith('package.json') && !filePath.endsWith('package-lock.json')) {
@@ -115,6 +196,7 @@ describe('discovery module', () => {
       const result = await discovery.discoverProjects('/base/dir');
 
       expect(result.success).toBe(true);
+      // Base dir also checked - no package.json there either, so 0 projects
       expect(result.content).toHaveLength(0);
     });
 

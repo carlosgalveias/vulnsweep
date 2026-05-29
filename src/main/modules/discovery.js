@@ -23,14 +23,79 @@ async function validateProject(projectPath) {
 }
 
 /**
- * Discovers all valid Node.js projects in the base directory
- * Scans only immediate subdirectories (not recursive)
+ * Recursively discovers valid Node.js projects starting from a directory
+ * @param {string} dirPath - Directory path to scan
+ * @param {string} baseDirectory - Original base directory for relative path calculation
+ * @param {string[]} discoveredPaths - Array of already-discovered project paths to avoid duplicates
+ * @returns {Promise<Array>} - Array of discovered projects
+ */
+async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths) {
+  const projects = [];
+
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    const directories = entries.filter((entry) => entry.isDirectory());
+
+    for (const dir of directories) {
+      const projectPath = path.join(dirPath, dir.name);
+
+      // Skip if this path is a child of an already-discovered project
+      const isChildOfDiscovered = discoveredPaths.some((discoveredPath) => {
+        return projectPath === discoveredPath || projectPath.startsWith(discoveredPath + path.sep);
+      });
+
+      if (isChildOfDiscovered) {
+        continue;
+      }
+
+      const validationResult = await validateProject(projectPath);
+
+      if (validationResult.success) {
+        const packageJsonPath = path.join(projectPath, 'package.json');
+        const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+
+        try {
+          const packageJson = JSON.parse(packageJsonContent);
+          const relativePath = path.relative(baseDirectory, projectPath);
+          const projectName = relativePath.split(path.sep).join('/');
+
+          discoveredPaths.push(projectPath);
+
+          projects.push({
+            name: projectName,
+            path: projectPath,
+            packageJson,
+          });
+        } catch (parseError) {
+          console.warn(`Invalid package.json in ${projectPath}:`, parseError.message);
+        }
+      }
+
+      // Recursively scan subdirectories even if this one isn't a project
+      const nestedProjects = await discoverProjectsRecursive(
+        projectPath,
+        baseDirectory,
+        discoveredPaths
+      );
+      projects.push(...nestedProjects);
+    }
+  } catch {
+    // Skip directories with access issues
+  }
+
+  return projects;
+}
+
+/**
+ * Discovers all valid Node.js projects in the base directory (recursive)
+ * Checks base directory itself and all subdirectories for package.json
  * @param {string} baseDirectory - Base directory path to scan
  * @returns {Promise<Object>} - Result object with projects array and optional errors
  */
 async function discoverProjects(baseDirectory) {
   const projects = [];
   const errors = [];
+  const discoveredPaths = [];
 
   try {
     // Validate base directory exists and is accessible
@@ -44,54 +109,36 @@ async function discoverProjects(baseDirectory) {
     return createError(`Invalid base directory: ${error.message}`);
   }
 
-  try {
-    // Read all entries in the base directory
-    const entries = await fs.readdir(baseDirectory, { withFileTypes: true });
+  // Check if base directory itself has a package.json
+  const baseValidation = await validateProject(baseDirectory);
+  if (baseValidation.success) {
+    try {
+      const packageJsonPath = path.join(baseDirectory, 'package.json');
+      const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+      const packageJson = JSON.parse(packageJsonContent);
 
-    // Filter to only directories
-    const directories = entries.filter((entry) => entry.isDirectory());
-
-    // Process each subdirectory
-    for (const dir of directories) {
-      const projectPath = path.join(baseDirectory, dir.name);
-
-      try {
-        // Validate if this is a Node.js project
-        const validationResult = await validateProject(projectPath);
-
-        if (validationResult.success) {
-          // Read and parse package.json
-          const packageJsonPath = path.join(projectPath, 'package.json');
-          const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
-
-          try {
-            const packageJson = JSON.parse(packageJsonContent);
-
-            projects.push({
-              name: dir.name,
-              path: projectPath,
-              packageJson,
-            });
-          } catch (parseError) {
-            errors.push({
-              project: dir.name,
-              path: projectPath,
-              error: `Invalid package.json: ${parseError.message}`,
-            });
-          }
-        }
-      } catch (error) {
-        // Skip directories with access issues
-        errors.push({
-          project: dir.name,
-          path: projectPath,
-          error: `Access denied or error reading project: ${error.message}`,
-        });
-      }
+      discoveredPaths.push(baseDirectory);
+      projects.push({
+        name: path.basename(baseDirectory),
+        path: baseDirectory,
+        packageJson,
+      });
+    } catch (parseError) {
+      errors.push({
+        project: path.basename(baseDirectory),
+        path: baseDirectory,
+        error: `Invalid package.json: ${parseError.message}`,
+      });
     }
-  } catch (error) {
-    return createError(`Error scanning directory: ${error.message}`);
   }
+
+  // Recursively discover projects in subdirectories
+  const recursiveProjects = await discoverProjectsRecursive(
+    baseDirectory,
+    baseDirectory,
+    discoveredPaths
+  );
+  projects.push(...recursiveProjects);
 
   // Log errors if any occurred (for debugging)
   if (errors.length > 0) {
@@ -108,23 +155,33 @@ async function discoverProjects(baseDirectory) {
 
 /**
  * Async generator version of discoverProjects for memory efficiency
- * Yields projects as they are discovered
+ * Yields projects as they are discovered (recursive)
  * @param {string} baseDirectory - Base directory path to scan
+ * @param {string[]} discoveredPaths - Internal use: tracks discovered paths to avoid duplicates
  * @yields {Object} - Project object
  */
-async function* discoverProjectsStream(baseDirectory) {
-  try {
-    // Validate base directory
-    await fs.access(baseDirectory, fsConstants.R_OK);
-    const baseStat = await fs.stat(baseDirectory);
+async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
+  // Check if base directory itself has a package.json
+  const baseValidation = await validateProject(baseDirectory);
+  if (baseValidation.success) {
+    try {
+      const packageJsonPath = path.join(baseDirectory, 'package.json');
+      const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
+      const packageJson = JSON.parse(packageJsonContent);
 
-    if (!baseStat.isDirectory()) {
-      throw new Error(`Path is not a directory: ${baseDirectory}`);
+      discoveredPaths.push(baseDirectory);
+
+      yield {
+        name: path.basename(baseDirectory),
+        path: baseDirectory,
+        packageJson,
+      };
+    } catch (parseError) {
+      console.warn(`Invalid package.json in ${baseDirectory}:`, parseError.message);
     }
-  } catch (error) {
-    throw new Error(`Invalid base directory: ${error.message}`);
   }
 
+  // Recursively scan subdirectories
   try {
     const entries = await fs.readdir(baseDirectory, { withFileTypes: true });
     const directories = entries.filter((entry) => entry.isDirectory());
@@ -132,31 +189,20 @@ async function* discoverProjectsStream(baseDirectory) {
     for (const dir of directories) {
       const projectPath = path.join(baseDirectory, dir.name);
 
-      try {
-        const isValid = await validateProject(projectPath);
+      // Skip if this path is a child of an already-discovered project
+      const isChildOfDiscovered = discoveredPaths.some((discoveredPath) => {
+        return projectPath === discoveredPath || projectPath.startsWith(discoveredPath + path.sep);
+      });
 
-        if (isValid) {
-          const packageJsonPath = path.join(projectPath, 'package.json');
-          const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
-
-          try {
-            const packageJson = JSON.parse(packageJsonContent);
-
-            yield {
-              name: dir.name,
-              path: projectPath,
-              packageJson,
-            };
-          } catch (parseError) {
-            console.warn(`Invalid package.json in ${dir.name}:`, parseError.message);
-          }
-        }
-      } catch (error) {
-        console.warn(`Error processing ${dir.name}:`, error.message);
+      if (isChildOfDiscovered) {
+        continue;
       }
+
+      // Recursively yield projects from subdirectories
+      yield* discoverProjectsStream(projectPath, discoveredPaths);
     }
-  } catch (error) {
-    throw new Error(`Error scanning directory: ${error.message}`);
+  } catch {
+    // Skip directories with access issues
   }
 }
 

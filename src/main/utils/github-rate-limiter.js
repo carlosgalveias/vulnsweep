@@ -76,13 +76,22 @@ function sleep(ms) {
  *
  * @template T
  * @param {() => Promise<T>} fn - Async function encapsulating a single HTTP request.
+ * @param {AbortSignal} [signal] - Optional abort signal to cancel the request.
  * @returns {Promise<T>} Resolves with fn()'s return value, or rejects with fn()'s error.
  */
-function enqueue(fn) {
+function enqueue(fn, signal = undefined) {
+  if (signal?.aborted) {
+    return Promise.reject(new Error('Request aborted'));
+  }
+
   _queueDepth += 1;
 
   _queue = _queue.then(async () => {
     _queueDepth -= 1;
+
+    if (signal?.aborted) {
+      throw new Error('Request aborted');
+    }
 
     const now = Date.now();
     if (_rateLimitedUntil > now) {
@@ -93,7 +102,7 @@ function enqueue(fn) {
       await sleep(waitMs);
     }
 
-    return fn();
+    return fn(signal);
   });
 
   return _queue;

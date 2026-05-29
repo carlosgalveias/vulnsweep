@@ -166,12 +166,11 @@ describe('App component', () => {
     it('should initialize useGitOperations with correct parameters', () => {
       render(<App />);
 
-      // useGitOperations: addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo
+      // useGitOperations: addLog, vulnerabilitiesRef, removeDirtyRepo
       expect(useGitOperations).toHaveBeenCalled();
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) }), // projectsRef
         expect.any(Function) // removeDirtyRepo
       );
     });
@@ -381,11 +380,10 @@ describe('App component', () => {
     it('should pass correct parameters to hooks on initial render', () => {
       render(<App />);
 
-      // Verify useGitOperations gets refs (not arrays) to avoid circular dependency
+      // Verify useGitOperations gets vulnerabilitiesRef only (projects derived from vulns)
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function),
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) }), // projectsRef
         expect.any(Function) // removeDirtyRepo
       );
 

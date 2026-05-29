@@ -103,6 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanner resolves plugins from `enabledSources` only â€” scan mode preset drives source selection
 - [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js) migrated to `scanProjects` IPC + `onScanProgress` event listener; `isEnriching` state and enrichment `useEffect` removed from [`App.jsx`](src/renderer/App.jsx)
 - Scan pipeline: replaced two-phase `analyze-project` + `enrich-vulnerabilities` with single `scan-project` call
+- **Recursive project discovery**: root folder containing package.json is now included as a project, and nested subdirectories with package.json use relative path naming (e.g., 'my_proj/demo')
+- **NVD enrichment with GitHub advisory data**: when NVD CVE references contain GitHub advisory URLs, queries GitHub Advisory for additional patched version information
 
 ### Fixed
 
@@ -112,6 +114,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed NVD keyword source ([`nvd-keyword-source.js`](src/main/modules/enrichment/sources/nvd-keyword-source.js)) to correctly match CVEs by CPE package identity, extract vulnerable version ranges and `fixedIn` versions from NVD API CPE data, and eliminate false-positive matches for unrelated packages.
 - Fixed NVD keyword source false positive where CPE entries with a pinned exact version (e.g. `cpe:...:1.5.1:*`) incorrectly flagged all installed versions as vulnerable instead of only matching the exact pinned version via `semver.eq()`.
 - Fixed `scripts/full-scan-proj0.js` returning 0 vulnerabilities due to NVD rate-limit queue starvation; [`scanner-orchestrator.js`](src/main/modules/scanner/scanner-orchestrator.js) now accepts a `perPackageTimeoutMs` override for CLI scripts operating at the free-tier rate limit.
+- **Aliases tooltip links fixed**: each CVE/GHSA ID in the Sources column now links to its correct specific URL (CVE to NVD, GHSA to GitHub Advisories) instead of all links incorrectly pointing to the first CVE's NVD page
+- **Cancel scan now aborts in-flight HTTP requests**: AbortSignal propagation added to NVD, GitHub Advisory, OSV, and CISA KEV sources for immediate termination when cancel is pressed
+- **Multi-repo commit state fixed**: resolved vulnerabilities are now removed from the list after successful commit, preventing duplicate commit attempts on the same fixes
 
 ### Security
 
@@ -119,6 +124,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Credential plaintext cleared from renderer memory immediately after submission â€” before the IPC promise resolves
 - No credential-read IPC channel exposed to renderer process; `credentials:getStatus` returns only masked hint
 - `GITHUB_TOKEN` getter lazy-reads from encrypted store before environment variable fallback
+
+### Added
+
+- **Recursive project discovery**: root folder containing package.json is now included as a project, and nested subdirectories with package.json use relative path naming (e.g., 'my_proj/demo')
+- **NVD enrichment with GitHub advisory data**: when NVD CVE references contain GitHub advisory URLs, queries GitHub Advisory for additional patched version information
 
 ### Deprecated
 

@@ -8,6 +8,8 @@ const {
   isVersionAffected,
   extractVersionRangeInfo,
   parseKeywordResponse,
+  extractGhsaIdFromReferences,
+  mergeGhData,
 } = require('../../../../../src/main/modules/enrichment/sources/nvd-keyword-source');
 
 const CPE_LODASH = 'cpe:2.3:a:lodash:lodash:*:*:*:*:*:node.js:*:*';
@@ -140,6 +142,26 @@ describe('isVersionAffected()', () => {
   });
 });
 
+describe('extractGhsaIdFromReferences()', () => {
+  it('extracts GHSA ID from URL in references array', () => {
+    const refs = [{ url: 'https://github.com/advisories/GHSA-xxxx-yyyy-zzzz' }];
+    expect(extractGhsaIdFromReferences(refs)).toBe('GHSA-XXXX-YYYY-ZZZZ');
+  });
+  it('extracts GHSA ID from string reference', () => {
+    const refs = ['https://github.com/advisories/GHSA-abcd-1234-5678'];
+    expect(extractGhsaIdFromReferences(refs)).toBe('GHSA-ABCD-1234-5678');
+  });
+  it('returns null when no GitHub advisory URL present', () => {
+    const refs = [{ url: 'https://nvd.nist.gov/vuln/detail/CVE-2021-1234' }];
+    expect(extractGhsaIdFromReferences(refs)).toBeNull();
+  });
+  it('returns null for empty or null references', () => {
+    expect(extractGhsaIdFromReferences([])).toBeNull();
+    expect(extractGhsaIdFromReferences(null)).toBeNull();
+    expect(extractGhsaIdFromReferences(undefined)).toBeNull();
+  });
+});
+
 describe('extractVersionRangeInfo()', () => {
   it('returns fixedIn from versionEndExcluding', () => {
     const cpeMatches = [{ vulnerable: true, criteria: CPE_LODASH, versionEndExcluding: '4.17.5' }];
@@ -193,9 +215,36 @@ describe('extractVersionRangeInfo()', () => {
   });
 });
 
+describe('mergeGhData()', () => {
+  it('uses patchedVersions to set fixedIn when NVD has no fixedIn', () => {
+    const nvdResult = { fixedIn: null, vulnerableRange: null };
+    const ghResult = { patchedVersions: ['>= 4.17.21'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    expect(merged.fixedIn).toBe('4.17.21');
+  });
+  it('uses earlier version from patchedVersions as fixedIn', () => {
+    const nvdResult = { fixedIn: '4.18.0', vulnerableRange: '<4.18.0' };
+    const ghResult = { patchedVersions: ['>= 4.17.21', '>= 4.17.15'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    expect(merged.fixedIn).toBe('4.17.15');
+  });
+  it('does not override fixedIn when GH version is higher', () => {
+    const nvdResult = { fixedIn: '4.17.21', vulnerableRange: '<4.17.21' };
+    const ghResult = { patchedVersions: ['>= 4.18.0'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    expect(merged.fixedIn).toBe('4.17.21');
+  });
+  it('sets vulnerableRange from patchedVersions when NVD has none', () => {
+    const nvdResult = { fixedIn: null, vulnerableRange: null };
+    const ghResult = { patchedVersions: ['>= 4.17.21'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    expect(merged.vulnerableRange).toBe('<4.17.21');
+  });
+});
+
 // ─── parseKeywordResponse() ───────────────────────────────────────────────────
 
-function makeNvdResponse(cveId, descriptions, cpeMatches) {
+function makeNvdResponse(cveId, descriptions, cpeMatches, references) {
   return {
     vulnerabilities: [
       {
@@ -205,6 +254,7 @@ function makeNvdResponse(cveId, descriptions, cpeMatches) {
           metrics: {},
           weaknesses: [],
           configurations: cpeMatches ? [{ nodes: [{ cpeMatch: cpeMatches }] }] : [],
+          references: references || [],
         },
       },
     ],
@@ -216,49 +266,97 @@ describe('parseKeywordResponse()', () => {
   const CPE_LANGSMITH = 'cpe:2.3:a:langchain:langsmith_client:*:*:*:*:*:node.js:*:*';
 
   describe('CPE path (cpeMatches present)', () => {
-    it('includes CVE when version is in affected range', () => {
+    it('includes CVE when version is in affected range', async () => {
       const json = makeNvdResponse(
         'CVE-2019-10744',
         [{ lang: 'en', value: 'Lodash prototype pollution via defaultsDeep.' }],
         [{ vulnerable: true, criteria: CPE_LODASH_VULN, versionEndExcluding: '4.17.5' }]
       );
-      const results = parseKeywordResponse(json, 'lodash', '4.17.4');
+      const results = await parseKeywordResponse(json, 'lodash', '4.17.4');
       expect(results).toHaveLength(1);
       expect(results[0].cveId).toBe('CVE-2019-10744');
       expect(results[0].fixedIn).toBe('4.17.5');
       expect(results[0].vulnerableRange).toBe('<4.17.5');
     });
 
-    it('excludes CVE when version is above affected range', () => {
+    it('excludes CVE when version is above affected range', async () => {
       const json = makeNvdResponse(
         'CVE-2019-10744',
         [{ lang: 'en', value: 'Lodash prototype pollution via defaultsDeep.' }],
         [{ vulnerable: true, criteria: CPE_LODASH_VULN, versionEndExcluding: '4.17.5' }]
       );
-      const results = parseKeywordResponse(json, 'lodash', '4.18.1');
+      const results = await parseKeywordResponse(json, 'lodash', '4.18.1');
       expect(results).toHaveLength(0);
     });
 
-    it('excludes CVE when CPE product does not match package name', () => {
+    it('excludes CVE when CPE product does not match package name', async () => {
       const json = makeNvdResponse(
         'CVE-2026-40190',
         [{ lang: 'en', value: 'LangSmith vulnerability affecting Node.js SDK.' }],
         [{ vulnerable: true, criteria: CPE_LANGSMITH, versionEndExcluding: '99.0.0' }]
       );
       // LangSmith CPE should NOT match lodash
-      const results = parseKeywordResponse(json, 'lodash', '4.18.1');
+      const results = await parseKeywordResponse(json, 'lodash', '4.18.1');
       expect(results).toHaveLength(0);
     });
   });
 
+  describe('GitHub advisory enrichment', () => {
+    it('enriches result with patchedVersions from GitHub advisory', async () => {
+      const json = makeNvdResponse(
+        'CVE-2021-12345',
+        [{ lang: 'en', value: 'Test vulnerability.' }],
+        [{ vulnerable: true, criteria: CPE_LODASH_VULN }],
+        [{ url: 'https://github.com/advisories/GHSA-test-1234-5678' }]
+      );
+      const ghCache = {
+        'GHSA-TEST-1234-5678': { found: true, patchedVersions: ['>= 4.17.21'] },
+      };
+      const results = await parseKeywordResponse(json, 'lodash', '4.17.4', ghCache);
+      expect(results).toHaveLength(1);
+      expect(results[0].fixedIn).toBe('4.17.21');
+      expect(results[0].vulnerableRange).toBe('<4.17.21');
+    });
+
+    it('uses cached GitHub advisory data', async () => {
+      const json = makeNvdResponse(
+        'CVE-2021-12345',
+        [{ lang: 'en', value: 'Test vulnerability.' }],
+        [{ vulnerable: true, criteria: CPE_LODASH_VULN }],
+        [{ url: 'https://github.com/advisories/GHSA-abcd-ef12-3456' }]
+      );
+      const ghCache = {
+        'GHSA-ABCD-EF12-3456': { found: true, patchedVersions: ['>= 4.18.0'] },
+      };
+      const results = await parseKeywordResponse(json, 'lodash', '4.17.4', ghCache);
+      expect(results).toHaveLength(1);
+      expect(results[0].fixedIn).toBe('4.18.0');
+    });
+
+    it('does not override NVD fixedIn with higher GH version', async () => {
+      const json = makeNvdResponse(
+        'CVE-2021-12345',
+        [{ lang: 'en', value: 'Test vulnerability.' }],
+        [{ vulnerable: true, criteria: CPE_LODASH_VULN, versionEndExcluding: '4.17.5' }],
+        [{ url: 'https://github.com/advisories/GHSA-abcd-ef12-3456' }]
+      );
+      const ghCache = {
+        'GHSA-ABCD-EF12-3456': { found: true, patchedVersions: ['>= 4.18.0'] },
+      };
+      const results = await parseKeywordResponse(json, 'lodash', '4.17.4', ghCache);
+      expect(results).toHaveLength(1);
+      expect(results[0].fixedIn).toBe('4.17.5');
+    });
+  });
+
   describe('Input guards', () => {
-    it('returns empty array for null input', () => {
-      expect(parseKeywordResponse(null, 'lodash', '4.17.4')).toEqual([]);
+    it('returns empty array for null input', async () => {
+      expect(await parseKeywordResponse(null, 'lodash', '4.17.4')).toEqual([]);
     });
-    it('returns empty array when vulnerabilities is missing', () => {
-      expect(parseKeywordResponse({}, 'lodash', '4.17.4')).toEqual([]);
+    it('returns empty array when vulnerabilities is missing', async () => {
+      expect(await parseKeywordResponse({}, 'lodash', '4.17.4')).toEqual([]);
     });
-    it('skips entries with invalid CVE IDs', () => {
+    it('skips entries with invalid CVE IDs', async () => {
       const json = {
         vulnerabilities: [
           {
@@ -272,7 +370,7 @@ describe('parseKeywordResponse()', () => {
           },
         ],
       };
-      expect(parseKeywordResponse(json, 'lodash', '4.17.4')).toEqual([]);
+      expect(await parseKeywordResponse(json, 'lodash', '4.17.4')).toEqual([]);
     });
   });
 });

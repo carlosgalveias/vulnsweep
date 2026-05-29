@@ -53,8 +53,13 @@ function computeBackoffDelay(attempt) {
   return Math.min(exponential + jitter, GIT_CONFIG.GITHUB_RETRY_MAX_DELAY_MS);
 }
 
-function httpsGet(url, timeoutMs) {
+function httpsGet(url, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const u = new URL(url);
     const req = https.request(
       {
@@ -78,6 +83,10 @@ function httpsGet(url, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 404) {
             resolve({ statusCode: res.statusCode, body: null });
             return;
@@ -104,7 +113,10 @@ function httpsGet(url, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () =>
       req.destroy(new Error(`GitHub Advisory timeout ${timeoutMs}ms`))
     );
@@ -149,21 +161,7 @@ function normaliseAdvisory(advisory) {
   };
 }
 
-/**
- * Query GitHub Advisory Database by CVE ID or GHSA ID.
- *
- * All HTTP requests are serialised through the singleton rateLimiter queue so
- * that concurrent callers share a single backoff when rate-limited, rather than
- * each sleeping independently (thundering-herd problem).
- *
- * When a CVE ID is provided, GET /advisories?cve_id=id returns an array;
- * we use the first result.
- * When a GHSA ID is provided, GET /advisories/ghsa-id returns a single object.
- *
- * @param {string} id - CVE ID ("CVE-YYYY-NNNNN") or GHSA ID ("GHSA-xxxx-xxxx-xxxx")
- * @returns {Promise<{found: boolean, ghsaId: string|null, severity: string|null, patchedVersions: string[], url: string|null, error?: string}>}
- */
-async function queryGitHubAdvisory(id) {
+async function queryGitHubAdvisory(id, signal) {
   if (ENRICHMENT_CONFIG.GITHUB_TOKEN && !_authLogEmitted) {
     _authLogEmitted = true;
     console.log('[GitHubAdvisory] Authenticated API access active (5,000 req/hr limit)');
@@ -190,10 +188,18 @@ async function queryGitHubAdvisory(id) {
   // the same queue position and rate-limit state. When any queued request
   // triggers setRateLimited(), ALL pending requests wait together — one sleep,
   // not N independent sleeps (the thundering-herd fix).
-  return rateLimiter.enqueue(async () => {
+  return rateLimiter.enqueue(async (sig) => {
     for (let attempt = 0; attempt <= GIT_CONFIG.GITHUB_MAX_RETRIES; attempt++) {
+      if (sig?.aborted) {
+        throw new Error('Request aborted');
+      }
+
       try {
-        const result = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
+        const result = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, sig);
+
+        if (sig?.aborted) {
+          throw new Error('Request aborted');
+        }
 
         if (!result.body || result.statusCode === 404) {
           return empty;
@@ -233,7 +239,7 @@ async function queryGitHubAdvisory(id) {
     }
     // Exhausted all retries
     return { ...empty, error: 'rate_limit_exceeded' };
-  });
+  }, signal);
 }
 
 module.exports = { queryGitHubAdvisory };

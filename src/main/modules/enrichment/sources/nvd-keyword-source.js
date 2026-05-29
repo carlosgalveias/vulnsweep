@@ -3,6 +3,7 @@
 const https = require('https');
 const semver = require('semver');
 const { ENRICHMENT_CONFIG } = require('../../../config/constants');
+const { queryGitHubAdvisory } = require('./github-advisory-source');
 const { enqueueNvd, scoreToCvssCategory } = require('./nvd-source');
 
 const NVD_KEYWORD_MAX_RESULTS = 20;
@@ -17,11 +18,22 @@ function backoffDelay(baseDelay, attempt) {
   return baseDelay * Math.pow(2, attempt) + Math.floor(Math.random() * 1000);
 }
 
-function httpsGet(url, timeoutMs) {
+function httpsGet(url, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const u = new URL(url);
     const headers = { 'User-Agent': ENRICHMENT_CONFIG.USER_AGENT, Accept: 'application/json' };
     if (ENRICHMENT_CONFIG.NVD_API_KEY) headers['apiKey'] = ENRICHMENT_CONFIG.NVD_API_KEY;
+
+    const abortHandler = () => {
+      req.destroy(new Error('Request aborted'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
     const req = https.request(
       {
         hostname: u.hostname,
@@ -37,6 +49,10 @@ function httpsGet(url, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 404) {
             resolve(null);
             return;
@@ -59,7 +75,10 @@ function httpsGet(url, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`NVD keyword timeout ${timeoutMs}ms`)));
     req.end();
   });
@@ -285,6 +304,57 @@ function parseCvss(metrics) {
 }
 
 /**
+ * Extracts GHSA ID from GitHub advisory URLs in CVE references.
+ * @param {Array<{url: string}>} references
+ * @returns {string|null}
+ */
+function extractGhsaIdFromReferences(references) {
+  if (!Array.isArray(references) || references.length === 0) return null;
+  const GHSA_PATTERN = /github\.com\/advisories\/(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i;
+  for (const ref of references) {
+    const url = typeof ref === 'string' ? ref : ref.url;
+    if (typeof url === 'string') {
+      const match = url.match(GHSA_PATTERN);
+      if (match) return match[1].toUpperCase();
+    }
+  }
+  return null;
+}
+
+/**
+ * Merges GitHub advisory data into an NVD result.
+ * GitHub's patchedVersions provide more precise fix information.
+ * @param {{fixedIn: string|null, vulnerableRange: string|null}} nvdResult
+ * @param {{patchedVersions: string[]}} ghResult
+ * @returns {{fixedIn: string|null, vulnerableRange: string|null}}
+ */
+function mergeGhData(nvdResult, ghResult) {
+  const merged = { ...nvdResult };
+  if (ghResult.patchedVersions && ghResult.patchedVersions.length > 0) {
+    const semverVersions = ghResult.patchedVersions
+      .map((v) => v.replace(/^>=\s*/, '').trim())
+      .filter((v) => semver.valid(v))
+      .map((v) => semver.coerce(v)?.version)
+      .filter(Boolean);
+    if (semverVersions.length > 0) {
+      const minFixed = semverVersions.reduce(
+        (min, v) => (semver.lt(v, min) ? v : min),
+        semverVersions[0]
+      );
+      if (!merged.fixedIn || (minFixed && semver.lt(minFixed, merged.fixedIn))) {
+        merged.fixedIn = minFixed;
+      }
+    }
+    if (!merged.vulnerableRange && ghResult.patchedVersions.length > 0) {
+      merged.vulnerableRange = ghResult.patchedVersions[0].startsWith('>=')
+        ? `<${ghResult.patchedVersions[0].replace(/^>=\s*/, '').trim()}`
+        : ghResult.patchedVersions[0];
+    }
+  }
+  return merged;
+}
+
+/**
  * Filters a raw NVD API v2 JSON response down to CVEs that are relevant
  * to the given package name and version.
  *
@@ -295,11 +365,12 @@ function parseCvss(metrics) {
  * @param {object} json - Raw JSON response from NVD API v2 /cves/2.0 endpoint
  * @param {string} pkgName - The npm package name being scanned
  * @param {string} pkgVersion - The installed version of the package
+ * @param {object} [ghCache] - Optional cache for GitHub advisory results (for testing)
  * @returns {Array<{cveId: string, cvssScore: number|null, cvssVector: string|null,
  *   cvssCategory: string|null, cweIds: string[], url: string, description: string,
  *   fixedIn: string|null, vulnerableRange: string|null}>}
  */
-function parseKeywordResponse(json, pkgName, pkgVersion) {
+async function parseKeywordResponse(json, pkgName, pkgVersion, ghCache = {}, signal) {
   if (!json || !Array.isArray(json.vulnerabilities)) return [];
   const results = [];
 
@@ -337,11 +408,23 @@ function parseKeywordResponse(json, pkgName, pkgVersion) {
 
     // --- PROCESSING VALID MATCHES ---
     const enDescText = getEnglishDescription(cve.descriptions);
-    const { fixedIn, vulnerableRange } = extractVersionRangeInfo(pkgName, cpeMatches);
+    let { fixedIn, vulnerableRange } = extractVersionRangeInfo(pkgName, cpeMatches);
     const { cvssScore, cvssVector } = parseCvss(cve.metrics || {});
     const cweIds = (cve.weaknesses || []).flatMap((w) =>
       (w.description || []).filter((d) => d.value && d.value.startsWith('CWE-')).map((d) => d.value)
     );
+
+    // Feature 2: Check for GitHub advisory references and enrich with GH data
+    const ghsaId = extractGhsaIdFromReferences(cve.references);
+    if (ghsaId) {
+      const ghData = ghCache[ghsaId] || (await queryGitHubAdvisory(ghsaId, signal));
+      if (!ghCache[ghsaId]) ghCache[ghsaId] = ghData;
+      if (ghData && ghData.found) {
+        const merged = mergeGhData({ fixedIn, vulnerableRange }, ghData);
+        fixedIn = merged.fixedIn;
+        vulnerableRange = merged.vulnerableRange;
+      }
+    }
 
     results.push({
       cveId: cve.id,
@@ -359,18 +442,27 @@ function parseKeywordResponse(json, pkgName, pkgVersion) {
   return results;
 }
 
-async function queryNvdKeyword(pkg) {
+async function queryNvdKeyword(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version) return [];
+  if (signal?.aborted) return [];
   const url =
     `${ENRICHMENT_CONFIG.NVD_API_URL}?keywordSearch=${encodeURIComponent(
       pkg.name
     )}&keywordExactMatch` + `&resultsPerPage=${NVD_KEYWORD_MAX_RESULTS}`;
-  return enqueueNvd(async () => {
+  return enqueueNvd(async (sig) => {
+    if (sig?.aborted) {
+      throw new Error('Request aborted');
+    }
+
     for (let attempt = 0; attempt <= NVD_KW_MAX_RETRIES; attempt++) {
+      if (sig?.aborted) {
+        throw new Error('Request aborted');
+      }
+
       try {
-        const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
+        const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, sig);
         if (json === null) return [];
-        return parseKeywordResponse(json, pkg.name, pkg.version);
+        return parseKeywordResponse(json, pkg.name, pkg.version, {}, sig);
       } catch (err) {
         if (err.isRateLimit && attempt < NVD_KW_MAX_RETRIES) {
           const delay = backoffDelay(NVD_KW_BACKOFF_BASE_MS, attempt);
@@ -391,7 +483,7 @@ async function queryNvdKeyword(pkg) {
       }
     }
     return [];
-  });
+  }, signal);
 }
 
 module.exports = {
@@ -403,4 +495,6 @@ module.exports = {
   extractVersionRangeInfo,
   isVersionAffected,
   parseKeywordResponse,
+  extractGhsaIdFromReferences,
+  mergeGhData,
 };
