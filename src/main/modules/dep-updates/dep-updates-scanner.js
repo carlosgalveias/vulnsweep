@@ -4,14 +4,12 @@
  * VulnSweep — Dependency Updates (F13)
  * Dependency Updates Scanner
  *
- * Scans a root folder's child repos for available dependency updates by:
- *   1. Discovering all immediate subdirectories that contain a package.json
- *      (exactly like discovery.js does for the audit scanner).
- *   2. Falling back to treating the root folder itself as a single repo when it
- *      directly contains a package.json (single-repo usage).
- *   3. For each discovered repo, fetching registry versions and building an
+ * Scans a root folder for available dependency updates by:
+ *   1. Reusing discoverProjects() from discovery.js to find all Node.js
+ *      projects (root included, recursive, with proper exclusion filtering).
+ *   2. For each discovered project, fetching registry versions and building an
  *      UpdateCandidate list.
- *   4. Returning a grouped Array<RepoUpdateResult> instead of a flat array.
+ *   3. Returning a grouped Array<RepoUpdateResult>.
  *
  * applyUpdates() accepts updates with a `repoPath` field so that `npm install`
  * and the git commit are scoped to the correct repo subdirectory.
@@ -32,6 +30,7 @@ const semver = require('semver');
 const { DEP_UPDATES_CONFIG, GIT_CONFIG } = require('../../config/constants');
 const RegistryCache = require('../../utils/registry-cache');
 const { createSuccess, createError } = require('../../utils/result');
+const { discoverProjects } = require('../discovery');
 const {
   filterNewerVersions,
   selectRecommendedVersion,
@@ -127,55 +126,6 @@ function fetchAllVersionsFromRegistry(packageName) {
 }
 
 /**
- * Check whether a directory contains a readable package.json.
- * Mirrors discovery.js's validateProject() logic exactly.
- *
- * @param {string} dirPath - Absolute path to the directory.
- * @returns {Promise<boolean>}
- */
-async function hasPackageJson(dirPath) {
-  try {
-    await fs.promises.access(path.join(dirPath, 'package.json'), fs.constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Discover all immediate child subdirectories of baseDirectory that contain
- * a package.json. Mirrors the exact pattern used in discovery.js
- * discoverProjects() — reads directory entries, filters to directories,
- * checks each for package.json existence.
- *
- * @param {string} baseDirectory - Root folder to scan.
- * @returns {Promise<Array<{repoPath: string, repoName: string}>>}
- *   Array of discovered repos; empty when none found or on error.
- */
-async function discoverRepoDirs(baseDirectory) {
-  const repos = [];
-
-  let entries;
-  try {
-    entries = await fs.promises.readdir(baseDirectory, { withFileTypes: true });
-  } catch {
-    return repos;
-  }
-
-  // Filter to only immediate subdirectories (same as discovery.js)
-  const directories = entries.filter((entry) => entry.isDirectory());
-
-  for (const dir of directories) {
-    const repoPath = path.join(baseDirectory, dir.name);
-    if (await hasPackageJson(repoPath)) {
-      repos.push({ repoPath, repoName: dir.name });
-    }
-  }
-
-  return repos;
-}
-
-/**
  * Scan a single repo's direct deps for available updates.
  * @param {string}   repoPath - Absolute path to the repo directory.
  * @param {Function|null} progressCallback - Optional progress reporter.
@@ -253,27 +203,26 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
 /**
  * Scan a project root for dependency updates across all discovered repos.
  *
- * Discovery logic mirrors discovery.js exactly:
- *   - If root has immediate child subdirs with package.json -> multi-repo mode.
- *   - Else if root itself has package.json -> single-repo mode.
- *   - Else -> return empty array (no error).
+ * Discovery logic reuses discoverProjects() from discovery.js:
+ *   - Root folder is ALWAYS included if it contains package.json.
+ *   - All subdirectories are recursively scanned.
+ *   - Excluded directories (node_modules, vendor, .hidden, etc.) are skipped.
  *
  * @param {string}   projectPath - Absolute path to root folder selected by user.
  * @param {Function} [progressCallback] - Optional ({ current, total, repoName, packageName }) => void.
  * @returns {Promise<{success: boolean, content?: RepoUpdateResult[], error?: string}>}
  */
 async function scanDependencyUpdates(projectPath, progressCallback) {
-  const rootHasPkg = await hasPackageJson(projectPath);
-  const childRepos = await discoverRepoDirs(projectPath);
+  const discoveryResult = await discoverProjects(projectPath);
 
-  let repos;
-  if (childRepos.length > 0) {
-    repos = childRepos;
-  } else if (rootHasPkg) {
-    repos = [{ repoPath: projectPath, repoName: path.basename(projectPath) }];
-  } else {
+  if (!discoveryResult.success || discoveryResult.content.length === 0) {
     return createSuccess([]);
   }
+
+  const repos = discoveryResult.content.map((project) => ({
+    repoPath: project.path,
+    repoName: project.name,
+  }));
 
   // Pre-count total dependencies for accurate global progress reporting
   const depCounts = await Promise.all(
