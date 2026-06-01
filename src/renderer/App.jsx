@@ -19,6 +19,7 @@ import useLogConsole from './hooks/useLogConsole';
 import useProjectDiscovery from './hooks/useProjectDiscovery';
 import useSettings from './hooks/useSettings';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
+import { MAX_FREE_FIXES } from './constants';
 
 function App() {
   const [showFirstRun, setShowFirstRun] = useState(
@@ -503,7 +504,7 @@ function App() {
   };
 
   const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
-  const fixesLeft = trialStatus?.fixesRemaining ?? 10;
+  const fixesLeft = trialStatus?.fixesRemaining ?? MAX_FREE_FIXES;
   const daysLeft = trialStatus?.daysUntilPriceChange ?? installInfo?.daysRemaining ?? 30;
   const trialExhausted = trialStatus?.trialExhausted === true;
 

@@ -28,3 +28,9 @@ export const SBOM_FORMAT_EXT = {
   spdx: 'json',
   csv: 'csv',
 };
+
+/**
+ * Maximum number of free trial fixes. Must match main process TRIAL_CONFIG.MAX_FREE_FIXES.
+ * @type {number}
+ */
+export const MAX_FREE_FIXES = 100;

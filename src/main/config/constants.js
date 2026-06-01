@@ -370,6 +370,23 @@ const LICENSE_CONFIG = {
 };
 
 // ============================================
+// TRIAL CONFIGURATION
+// ============================================
+
+/**
+ * Trial/freemium usage limits for unlicensed users.
+ * @namespace TRIAL_CONFIG
+ */
+const TRIAL_CONFIG = {
+  /**
+   * Maximum number of vulnerability fixes available in the free trial.
+   * Once consumed, user must purchase a license to apply further fixes.
+   * @type {number}
+   */
+  MAX_FREE_FIXES: 100,
+};
+
+// ============================================
 // DEPENDENCY UPDATES CONFIGURATION (F13)
 // ============================================
 
@@ -526,6 +543,7 @@ module.exports = {
   UI_CONFIG,
   PAYPAL_CONFIG,
   ENRICHMENT_CONFIG,
+  TRIAL_CONFIG,
   DEP_UPDATES_CONFIG,
   LICENSE_CONFIG,
   SCANNER_CONFIG,

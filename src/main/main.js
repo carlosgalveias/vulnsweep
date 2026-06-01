@@ -3,7 +3,7 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
-const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
+const { UI_CONFIG, PAYPAL_CONFIG, TRIAL_CONFIG } = require('./config/constants');
 const scanTelemetry = require('./utils/scan-telemetry');
 const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
@@ -1056,7 +1056,7 @@ ipcMain.handle('get-trial-status', async () => {
     console.error('[IPC] get-trial-status error:', err.message);
     // Safe fallback — show full quota so the UI never incorrectly blocks the user.
     return {
-      fixesRemaining: 10,
+      fixesRemaining: TRIAL_CONFIG.MAX_FREE_FIXES,
       fixesConsumed: 0,
       daysUntilPriceChange: 30,
       trialExhausted: false,
