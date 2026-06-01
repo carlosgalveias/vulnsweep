@@ -19,6 +19,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const _SNAPSHOT_RETENTION_COUNT = 1;
+
 let _storeDirCache = null;
 let _storeDirResolved = false;
 let _secretCache = null;
@@ -63,6 +65,57 @@ function _resolveStoreFilePath() {
   return path.join(_resolveStoreDir(), 'store.dat');
 }
 
+function _resolveSnapshotFilePath() {
+  return path.join(_resolveStoreDir(), 'store.dat.bak');
+}
+
+function _snapshotExists() {
+  try {
+    return fs.existsSync(_resolveSnapshotFilePath());
+  } catch {
+    return false;
+  }
+}
+
+function _createSnapshot(filePath) {
+  try {
+    const snapshotPath = _resolveSnapshotFilePath();
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      JSON.parse(raw);
+      fs.copyFileSync(filePath, snapshotPath);
+    }
+  } catch (err) {
+    console.error('[secure-store] Failed to create snapshot:', err.message);
+  }
+}
+
+function _restoreFromSnapshot(filePath) {
+  try {
+    const snapshotPath = _resolveSnapshotFilePath();
+    if (fs.existsSync(snapshotPath)) {
+      fs.copyFileSync(snapshotPath, filePath);
+      return true;
+    }
+  } catch (err) {
+    console.error('[secure-store] Failed to restore from snapshot:', err.message);
+  }
+  return false;
+}
+
+function _cleanupOldSnapshots() {
+  if (_SNAPSHOT_RETENTION_COUNT === 0) {
+    try {
+      const snapshotPath = _resolveSnapshotFilePath();
+      if (fs.existsSync(snapshotPath)) {
+        fs.unlinkSync(snapshotPath);
+      }
+    } catch (err) {
+      console.error('[secure-store] Failed to cleanup old snapshots:', err.message);
+    }
+  }
+}
+
 function _ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -93,6 +146,7 @@ function _deriveEncryptionSecret() {
 
 function _buildFileStorageAdapter(filePath) {
   let _cache = null;
+  let _initializedWithSnapshot = false;
 
   function _read() {
     if (_cache !== null) return _cache;
@@ -103,8 +157,22 @@ function _buildFileStorageAdapter(filePath) {
       return _cache;
     } catch (err) {
       if (err && err.code === 'ENOENT') {
+        if (!_initializedWithSnapshot && _snapshotExists()) {
+          if (_restoreFromSnapshot(filePath)) {
+            return _read();
+          }
+        }
         _cache = {};
         return _cache;
+      }
+      if (
+        (err instanceof SyntaxError || err.code === 'EINVAL' || err.code === 'EILSEQ') &&
+        !_initializedWithSnapshot
+      ) {
+        if (_restoreFromSnapshot(filePath)) {
+          _initializedWithSnapshot = true;
+          return _read();
+        }
       }
       throw err;
     }
@@ -112,8 +180,10 @@ function _buildFileStorageAdapter(filePath) {
 
   function _write(data) {
     _ensureDir(path.dirname(filePath));
+    _createSnapshot(filePath);
     fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');
     _cache = data;
+    _cleanupOldSnapshots();
   }
 
   return {
@@ -232,9 +302,21 @@ function storeGetAll() {
   }
 }
 
+function storeClearSnapshots() {
+  try {
+    const snapshotPath = _resolveSnapshotFilePath();
+    if (fs.existsSync(snapshotPath)) {
+      fs.unlinkSync(snapshotPath);
+    }
+  } catch (err) {
+    console.error('[secure-store] storeClearSnapshots error:', err.message);
+  }
+}
+
 module.exports = {
   storeGet,
   storeSet,
   storeRemove,
   storeGetAll,
+  storeClearSnapshots,
 };

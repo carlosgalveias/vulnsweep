@@ -2,6 +2,16 @@ const fs = require('fs').promises;
 const { constants: fsConstants } = require('fs');
 const path = require('path');
 const { createSuccess, createError } = require('../utils/result');
+const excluded_folders = [
+  'node_modules',
+  'bower_compnents',
+  'vendor',
+  'public',
+  'coverage',
+  'dist',
+  'tmp',
+  'temp',
+];
 
 /**
  * Validates if a directory is a valid Node.js project.
@@ -39,12 +49,8 @@ async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths
     for (const dir of directories) {
       const projectPath = path.join(dirPath, dir.name);
 
-      // Skip if this path is a child of an already-discovered project
-      const isChildOfDiscovered = discoveredPaths.some((discoveredPath) => {
-        return projectPath === discoveredPath || projectPath.startsWith(discoveredPath + path.sep);
-      });
-
-      if (isChildOfDiscovered) {
+      // Skip common directories that should never be scanned
+      if (excluded_folders.includes(dir.name) || dir.name.startsWith('.')) {
         continue;
       }
 
@@ -111,6 +117,7 @@ async function discoverProjects(baseDirectory) {
 
   // Check if base directory itself has a package.json
   const baseValidation = await validateProject(baseDirectory);
+  console.log('Base directory validated:', baseDirectory, baseValidation);
   if (baseValidation.success) {
     try {
       const packageJsonPath = path.join(baseDirectory, 'package.json');
@@ -163,6 +170,7 @@ async function discoverProjects(baseDirectory) {
 async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
   // Check if base directory itself has a package.json
   const baseValidation = await validateProject(baseDirectory);
+  console.log('Base directory validated:', baseDirectory, baseValidation);
   if (baseValidation.success) {
     try {
       const packageJsonPath = path.join(baseDirectory, 'package.json');
@@ -189,12 +197,8 @@ async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
     for (const dir of directories) {
       const projectPath = path.join(baseDirectory, dir.name);
 
-      // Skip if this path is a child of an already-discovered project
-      const isChildOfDiscovered = discoveredPaths.some((discoveredPath) => {
-        return projectPath === discoveredPath || projectPath.startsWith(discoveredPath + path.sep);
-      });
-
-      if (isChildOfDiscovered) {
+      // Skip common directories that should never be scanned
+      if (excluded_folders.includes(dir.name) || dir.name.startsWith('.')) {
         continue;
       }
 

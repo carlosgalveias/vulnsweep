@@ -39,6 +39,11 @@ jest.mock('../../../../src/main/modules/scanner/sources/npm-audit-source', () =>
   query: jest.fn().mockResolvedValue([]),
 }));
 
+jest.mock('../../../../src/main/modules/scanner/sources/epss-source', () => ({
+  SOURCE_ID: 'epss',
+  query: jest.fn().mockResolvedValue([]),
+}));
+
 const {
   buildPackageUniverse,
   getUniqueQueryTargets,
@@ -136,6 +141,21 @@ describe('scanner-orchestrator scanProject()', () => {
     const result = await scanProject(PROJECT, { enabledSources: ['npm-audit', 'osv'] });
     expect(result.sources).toContain('npm-audit');
     expect(result.sources).toContain('osv');
+    expect(result.sources).not.toContain('nvd');
+  });
+
+  it('enabledSources optimal-preset uses all sources except nvd', async () => {
+    buildPackageUniverse.mockResolvedValue([]);
+    getUniqueQueryTargets.mockReturnValue([]);
+    // Optimal preset: UI writes enabledSources directly; scanner reads only that
+    const result = await scanProject(PROJECT, {
+      enabledSources: ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'],
+    });
+    expect(result.sources).toContain('npm-audit');
+    expect(result.sources).toContain('osv');
+    expect(result.sources).toContain('github-advisory');
+    expect(result.sources).toContain('cisa-kev');
+    expect(result.sources).toContain('epss');
     expect(result.sources).not.toContain('nvd');
   });
 

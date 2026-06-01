@@ -164,6 +164,39 @@ async function _fetchOsvRawOrThrow(packageName, version, ecosystem = 'npm', sign
 }
 
 /**
+ * Merge an array of raw OSV vulnerability objects into a single result object.
+ * @param {object[]} vulns - Array of raw OSV vulnerability objects
+ * @returns {{found: boolean, severity: string|null, aliases: string[], url: string|null}}
+ */
+function _mergeOsvVulns(vulns) {
+  if (!Array.isArray(vulns) || vulns.length === 0) {
+    return { found: false, severity: null, aliases: [], url: null };
+  }
+
+  let mergedSeverity = null;
+  const allAliases = new Set();
+  let firstUrl = null;
+
+  for (const vuln of vulns) {
+    const s = extractSeverity(vuln);
+    mergedSeverity = mergedSeverity === null ? s : higherSeverity(mergedSeverity, s);
+    for (const alias of extractAliases(vuln)) {
+      allAliases.add(alias);
+    }
+    if (!firstUrl) {
+      firstUrl = extractUrl(vuln);
+    }
+  }
+
+  return {
+    found: true,
+    severity: mergedSeverity,
+    aliases: Array.from(allAliases),
+    url: firstUrl,
+  };
+}
+
+/**
  * Fetches raw vulnerability entries from the OSV API for a given package.
  * Unlike queryOSV(), this returns the complete array of individual vulnerability
  * objects without merging — one entry per distinct OSV vulnerability.
@@ -180,6 +213,92 @@ async function fetchOsvRaw(packageName, version, ecosystem = 'npm', signal = und
   } catch {
     return [];
   }
+}
+
+/**
+ * Internal variant for batch fetching that propagates non-rate-limit errors.
+ * @param {Object[]} queries - Array of query objects, each with {package: {name, ecosystem}, version}
+ * @param {AbortSignal} [signal] - Abort signal for cancellation
+ * @returns {Promise<Object[]>} Promise that resolves to an array of raw vulns arrays (one per query)
+ * @throws {Error} On abort, rate limit exhaustion, or other HTTP errors
+ */
+async function _fetchOsvRawBatchOrThrow(queries, signal = undefined) {
+  const numQueries = queries.length;
+  if (numQueries === 0) return [];
+
+  const allVulns = Array.from({ length: numQueries }, () => []);
+  const nextTokens = Array.from({ length: numQueries }, () => null); // null means no token yet (first page not fetched)
+  const done = Array.from({ length: numQueries }, () => false);
+  let pending = numQueries;
+
+  while (pending > 0) {
+    if (signal?.aborted) {
+      throw new Error('Request aborted');
+    }
+
+    // Build the batch request for queries that are not done.
+    const batchQueries = [];
+    const indices = []; // mapping from batchQueries index to original query index
+    for (let i = 0; i < numQueries; i++) {
+      if (done[i]) continue;
+      const q = { ...queries[i] };
+      if (nextTokens[i] !== null) {
+        // we have a token to continue
+        q.next_token = nextTokens[i];
+      }
+      batchQueries.push(q);
+      indices.push(i);
+    }
+
+    if (batchQueries.length === 0) break; // should not happen
+
+    // Try request with retries for rate limit
+    let response;
+    for (let attempt = 0; attempt <= OSV_MAX_RETRIES; attempt++) {
+      if (signal?.aborted) {
+        throw new Error('Request aborted');
+      }
+      try {
+        response = await httpsPost(
+          'https://api.osv.dev/v1/querybatch',
+          { queries: batchQueries },
+          ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
+          signal
+        );
+        break; // success
+      } catch (err) {
+        if (err.isRateLimit && attempt < OSV_MAX_RETRIES) {
+          await sleep(backoffDelay(OSV_BACKOFF_BASE_MS, attempt));
+          continue;
+        }
+        throw err; // rethrow after retries exhausted or non-rate-limit error
+      }
+    }
+
+    // Process response: response should have a `results` array same length as batchQueries
+    if (!Array.isArray(response.results) || response.results.length !== batchQueries.length) {
+      throw new Error('Unexpected OSV batch response format');
+    }
+
+    for (let j = 0; j < batchQueries.length; j++) {
+      const origIndex = indices[j];
+      const res = response.results[j];
+      if (Array.isArray(res.vulns)) {
+        allVulns[origIndex].push(...res.vulns);
+      }
+      const token = res.next_page_token;
+      if (token) {
+        nextTokens[origIndex] = token;
+        // not done yet
+      } else {
+        nextTokens[origIndex] = null;
+        done[origIndex] = true;
+        pending--;
+      }
+    }
+  }
+
+  return allVulns;
 }
 
 /**
@@ -350,6 +469,25 @@ async function queryOSV(packageName, version, ecosystem, signal = undefined) {
   };
 }
 
+/**
+ * Query OSV.dev for a batch of package + version pairs.
+ * @param {Array<{packageName: string, version: string}>} packageVersions - Array of package name and version objects
+ * @param {string} [ecosystem='npm'] - OSV ecosystem identifier
+ * @param {AbortSignal} [signal] - Abort signal for cancellation
+ * @returns {Promise<Array<{found: boolean, severity: string|null, aliases: string[], url: string|null}>>}
+ */
+async function queryOsvBatch(packageVersions, ecosystem = 'npm', signal = undefined) {
+  if (!Array.isArray(packageVersions)) {
+    throw new Error('packageVersions must be an array');
+  }
+  const queries = packageVersions.map(({ packageName, version }) => ({
+    package: { name: packageName, ecosystem },
+    version: version || '',
+  }));
+  const rawResults = await _fetchOsvRawBatchOrThrow(queries, signal);
+  return rawResults.map((vulns) => _mergeOsvVulns(vulns));
+}
+
 module.exports = {
   queryOSV,
   fetchOsvRaw,
@@ -358,4 +496,5 @@ module.exports = {
   extractAliases,
   extractUrl,
   isVersionSafe,
+  queryOsvBatch,
 };

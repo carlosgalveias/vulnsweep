@@ -15,9 +15,24 @@ const SOURCE_LABELS = {
 
 const ALL_SOURCE_IDS = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
 
-// Preset source lists for Fast and Full scan modes
+// Preset source lists for scan modes
 const FAST_SOURCES = ['npm-audit', 'osv'];
 const FULL_SOURCES = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
+const OPTIMAL_SOURCES = ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'];
+
+// Map preset name → source array (KISS: map, not nested ternary)
+const PRESET_SOURCES = Object.freeze({
+  fast: FAST_SOURCES,
+  optimal: OPTIMAL_SOURCES,
+  full: FULL_SOURCES,
+});
+
+// Pre-sorted keys for active-preset detection (avoids sorting on every render)
+const PRESET_KEYS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(PRESET_SOURCES).map(([id, sources]) => [id, [...sources].sort().join(',')])
+  )
+);
 
 const card = 'bg-surface-raised border border-gray-700 rounded-lg p-5 space-y-3';
 const hd = 'text-xs font-semibold text-gray-400 uppercase tracking-wider';
@@ -44,9 +59,9 @@ function SettingsTab({
     return deleteCredential(sourceId);
   };
 
-  // Apply a Fast or Full preset by writing enabledSources directly
+  // Apply a preset by writing the source list directly
   const handlePresetChange = (preset) => {
-    saveSettings({ enabledSources: preset === 'fast' ? FAST_SOURCES : FULL_SOURCES });
+    saveSettings({ enabledSources: PRESET_SOURCES[preset] ?? FULL_SOURCES });
   };
 
   const handleSourceToggle = (sourceId) => {
@@ -78,16 +93,11 @@ function SettingsTab({
     if (key === 'removeOverrides' && onRemoveOverridesChange) onRemoveOverridesChange(value);
   };
 
-  const enabledSources = settings.enabledSources ?? ALL_SOURCE_IDS;
-
   // Derive the active preset from current enabledSources — do not store in state
-  const toSortedKey = (arr) => [...arr].sort().join(',');
+  const enabledSources = settings.enabledSources ?? FULL_SOURCES;
+  const enabledKey = [...enabledSources].sort().join(',');
   const activePreset =
-    toSortedKey(enabledSources) === toSortedKey(FAST_SOURCES)
-      ? 'fast'
-      : toSortedKey(enabledSources) === toSortedKey(FULL_SOURCES)
-        ? 'full'
-        : null;
+    Object.entries(PRESET_KEYS).find(([, key]) => key === enabledKey)?.[0] ?? null;
 
   return (
     <div className="max-w-2xl mx-auto space-y-5 text-gray-100">
@@ -131,6 +141,24 @@ function SettingsTab({
               <input
                 type="radio"
                 name="scanMode"
+                value="optimal"
+                checked={activePreset === 'optimal'}
+                onChange={() => handlePresetChange('optimal')}
+                className="mt-0.5 w-3.5 h-3.5 text-blue-600 bg-surface-overlay border-gray-600 focus:ring-blue-500 focus:ring-2 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm text-gray-300 group-hover:text-gray-100 transition-colors font-medium">
+                  Optimal
+                </span>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  All sources except NVD. Broad coverage with shorter scan times.
+                </p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer group">
+              <input
+                type="radio"
+                name="scanMode"
                 value="full"
                 checked={activePreset === 'full'}
                 onChange={() => handlePresetChange('full')}
@@ -141,8 +169,11 @@ function SettingsTab({
                   Full
                 </span>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Runs all enabled sources: npm audit, OSV, NVD, GitHub Advisory, CISA KEV, and
-                  EPSS. Most thorough - may take longer.
+                  Runs all sources: npm audit, OSV, NVD, GitHub Advisory, CISA KEV, and EPSS. Most
+                  thorough. NVD queries may be slow due to rate limits.
+                </p>
+                <p className="text-xs text-yellow-400 mt-1 font-medium">
+                  Warning: This may take a lot of time.
                 </p>
               </div>
             </label>

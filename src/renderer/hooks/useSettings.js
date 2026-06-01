@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-/** All known source IDs supported by the scanner */
-const ALL_SOURCES = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
+// Optimal = all sources except NVD (avoids rate limits while keeping broad coverage)
+const OPTIMAL_SOURCES = ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'];
 
 /** Default settings applied when no persisted settings exist */
 const DEFAULTS = Object.freeze({
-  enabledSources: ALL_SOURCES,
+  enabledSources: OPTIMAL_SOURCES,
   allowReset: false,
   bumpVersion: true,
   removePackageLock: false,

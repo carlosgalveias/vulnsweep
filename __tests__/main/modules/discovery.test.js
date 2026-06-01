@@ -20,8 +20,8 @@ jest.mock('fs', () => ({
   },
 }));
 
-const path = require('path');
 const fs = require('fs').promises;
+const path = require('path');
 const discovery = require('../../../src/main/modules/discovery');
 
 describe('discovery module', () => {
@@ -138,7 +138,7 @@ describe('discovery module', () => {
       expect(nestedProject.path).toBe('/Work/projects/my_proj/demo');
     });
 
-    it('should skip nested projects when parent is already a project', async () => {
+    it('should discover nested projects when parent is already a project', async () => {
       const baseDir = '/Work/projects';
 
       fs.access.mockResolvedValue();
@@ -151,6 +151,9 @@ describe('discovery module', () => {
         if (dirPath === '/Work/projects/project-with-nested') {
           return Promise.resolve([{ name: 'nested-child', isDirectory: () => true }]);
         }
+        if (dirPath === '/Work/projects/project-with-nested/nested-child') {
+          return Promise.resolve([]);
+        }
         return Promise.resolve([]);
       });
 
@@ -159,9 +162,10 @@ describe('discovery module', () => {
       const result = await discovery.discoverProjects(baseDir);
 
       expect(result.success).toBe(true);
-      // Should only find the parent, not the child
-      expect(result.content).toHaveLength(1);
+      // Should find both the parent and the nested child
+      expect(result.content).toHaveLength(2);
       expect(result.content[0].name).toBe('project-with-nested');
+      expect(result.content[1].name).toBe('project-with-nested/nested-child');
     });
 
     it('should check if base directory itself has package.json', async () => {
@@ -297,6 +301,66 @@ describe('discovery module', () => {
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(2);
     });
+
+    it('should skip node_modules directory in discoverProjects', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: 'node_modules', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects('/base/dir');
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('valid-project');
+    });
+
+    it('should skip hidden directories (starting with .) in discoverProjects', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: '.git', isDirectory: () => true },
+        { name: '.idea', isDirectory: () => true },
+        { name: '.vscode', isDirectory: () => true },
+        { name: '.hidden-folder', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects('/base/dir');
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('valid-project');
+    });
+
+    it('should skip coverage, dist, tmp, and temp directories in discoverProjects', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: 'coverage', isDirectory: () => true },
+        { name: 'dist', isDirectory: () => true },
+        { name: 'tmp', isDirectory: () => true },
+        { name: 'temp', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const result = await discovery.discoverProjects('/base/dir');
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('valid-project');
+    });
   });
 
   describe('discoverProjectsStream', () => {
@@ -376,6 +440,72 @@ describe('discovery module', () => {
       expect(projects).toHaveLength(2);
       expect(projects[0].name).toBe('some-project');
       expect(projects[1].name).toBe('another-project');
+    });
+
+    it('should skip node_modules directory in discoverProjectsStream', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: 'node_modules', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const projects = [];
+      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+        projects.push(project);
+      }
+
+      expect(projects).toHaveLength(1);
+      expect(projects[0].name).toBe('valid-project');
+    });
+
+    it('should skip hidden directories (starting with .) in discoverProjectsStream', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: '.git', isDirectory: () => true },
+        { name: '.idea', isDirectory: () => true },
+        { name: '.vscode', isDirectory: () => true },
+        { name: '.hidden-folder', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const projects = [];
+      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+        projects.push(project);
+      }
+
+      expect(projects).toHaveLength(1);
+      expect(projects[0].name).toBe('valid-project');
+    });
+
+    it('should skip coverage, dist, tmp, and temp directories in discoverProjectsStream', async () => {
+      fs.access.mockResolvedValue();
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockResolvedValue([
+        { name: 'coverage', isDirectory: () => true },
+        { name: 'dist', isDirectory: () => true },
+        { name: 'tmp', isDirectory: () => true },
+        { name: 'temp', isDirectory: () => true },
+        { name: 'valid-project', isDirectory: () => true },
+      ]);
+
+      fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+      const projects = [];
+      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+        projects.push(project);
+      }
+
+      expect(projects).toHaveLength(1);
+      expect(projects[0].name).toBe('valid-project');
     });
   });
 });
