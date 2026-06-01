@@ -117,14 +117,16 @@ function extractAliases(v) {
 }
 
 function extractUrl(v) {
-  if (!Array.isArray(v.references) || !v.references.length) return null;
+  if (!Array.isArray(v.references) || !v.references.length) {
+    return v.id ? `https://osv.dev/vulnerability/${v.id}` : null;
+  }
   const urls = v.references.map((r) => (typeof r === 'string' ? r : r.url || ''));
   return (
     urls.find((u) => u.includes('github.com/advisories')) ||
     urls.find((u) => u.includes('nvd.nist.gov')) ||
     urls.find((u) => u.startsWith('https://')) ||
     urls[0] ||
-    null
+    (v.id ? `https://osv.dev/vulnerability/${v.id}` : null)
   );
 }
 

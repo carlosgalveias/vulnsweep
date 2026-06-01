@@ -333,7 +333,153 @@ function getUniqueQueryTargets(universe) {
 }
 
 // ---------------------------------------------------------------------------
+// buildDependencyPaths
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute all dependency paths from the project root to a target package.
+ * Each path is an array of strings: ["root-project@version", "parent@version", ..., "target@version"]
+ *
+ * Supports lockfileVersion 1, 2, and 3.
+ * Returns at most MAX_PATHS results to prevent performance issues with deeply connected graphs.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @param {string} packageName - Name of the target package (e.g. "qs")
+ * @returns {Promise<string[][]>} Array of path arrays
+ */
+async function buildDependencyPaths(projectPath, packageName) {
+  const MAX_PATHS = 10;
+  const lockfileLocation = path.join(projectPath, 'package-lock.json');
+
+  // Read lockfile
+  let lockfileContent;
+  try {
+    lockfileContent = await fs.readFile(lockfileLocation, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw err;
+  }
+
+  let lockfileData;
+  try {
+    lockfileData = JSON.parse(lockfileContent);
+  } catch {
+    return [];
+  }
+
+  // Determine root project name & version
+  const pkgJsonPath = path.join(projectPath, 'package.json');
+  let rootLabel = 'project';
+  try {
+    const pkgRaw = await fs.readFile(pkgJsonPath, 'utf8');
+    const pkgJson = JSON.parse(pkgRaw);
+    rootLabel = pkgJson.name ? `${pkgJson.name}@${pkgJson.version || '0.0.0'}` : 'project';
+  } catch {
+    // Use default rootLabel
+  }
+
+  const lockfileVersion = lockfileData.lockfileVersion || 1;
+
+  if (lockfileVersion >= 2) {
+    return buildPathsFromPackagesMap(
+      lockfileData.packages || {},
+      packageName,
+      rootLabel,
+      MAX_PATHS
+    );
+  }
+
+  // v1: nested dependencies tree
+  return buildPathsFromV1Tree(lockfileData.dependencies || {}, packageName, rootLabel, MAX_PATHS);
+}
+
+/**
+ * Build dependency paths from a v2/v3 flat `packages` map.
+ * Strategy: each key like "node_modules/a/node_modules/b/node_modules/c" encodes
+ * the path [a, b, c]. We find all keys whose final segment matches packageName,
+ * then decode the path from the key itself, resolving versions from the map.
+ *
+ * @param {Object} packagesMap - lockfileData.packages
+ * @param {string} packageName - Target package name
+ * @param {string} rootLabel - Label for root node (e.g. "my-app@1.0.0")
+ * @param {number} maxPaths - Maximum paths to return
+ * @returns {string[][]}
+ */
+function buildPathsFromPackagesMap(packagesMap, packageName, rootLabel, maxPaths) {
+  const paths = [];
+
+  for (const [key, _entry] of Object.entries(packagesMap)) {
+    if (key === '') continue;
+    if (paths.length >= maxPaths) break;
+
+    // Check if this key ends with our target package
+    const name = extractNameFromKey(key);
+    if (name !== packageName) continue;
+
+    // Decode the full path from the key
+    // "node_modules/a/node_modules/@scope/b/node_modules/c" →
+    // segments after splitting: ["", "a", "@scope/b", "c"]
+    const segments = key.split('node_modules/').filter(Boolean);
+    // Each segment may have a trailing "/" — strip it
+    const cleanSegments = segments.map((s) => s.replace(/\/$/, ''));
+
+    // Build the path array with versions
+    const pathArray = [rootLabel];
+    let currentPrefix = '';
+    for (const seg of cleanSegments) {
+      currentPrefix = currentPrefix
+        ? `${currentPrefix}/node_modules/${seg}`
+        : `node_modules/${seg}`;
+      const pkgEntry = packagesMap[currentPrefix];
+      const version = pkgEntry?.version || '?';
+      pathArray.push(`${seg}@${version}`);
+    }
+
+    paths.push(pathArray);
+  }
+
+  return paths;
+}
+
+/**
+ * Build dependency paths from a v1 nested `dependencies` tree using DFS.
+ *
+ * @param {Object} depsTree - lockfileData.dependencies (recursive structure)
+ * @param {string} packageName - Target package name
+ * @param {string} rootLabel - Label for root node
+ * @param {number} maxPaths - Maximum paths to return
+ * @returns {string[][]}
+ */
+function buildPathsFromV1Tree(depsTree, packageName, rootLabel, maxPaths) {
+  const paths = [];
+
+  function dfs(node, currentPath, depth) {
+    if (paths.length >= maxPaths) return;
+    if (!node || typeof node !== 'object' || depth > 10) return;
+
+    for (const [name, entry] of Object.entries(node)) {
+      if (paths.length >= maxPaths) return;
+
+      const version = entry.version || '?';
+      const newPath = [...currentPath, `${name}@${version}`];
+
+      if (name === packageName) {
+        paths.push([rootLabel, ...newPath]);
+      }
+
+      // Recurse into nested dependencies
+      if (entry.dependencies && typeof entry.dependencies === 'object') {
+        dfs(entry.dependencies, newPath, depth + 1);
+      }
+    }
+  }
+
+  dfs(depsTree, [], 1);
+  return paths;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { buildPackageUniverse, getUniqueQueryTargets };
+module.exports = { buildPackageUniverse, getUniqueQueryTargets, buildDependencyPaths };

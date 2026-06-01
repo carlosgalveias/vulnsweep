@@ -1501,6 +1501,38 @@ ipcMain.handle('cache:clear', () => {
   }
 });
 
+// ============================================
+// IPC HANDLER - DEPENDENCY PATH (Dep Path Modal)
+// ============================================
+
+/**
+ * Handler: Retrieve dependency paths from root to a target package.
+ * Used by the Dependency Path Modal in the renderer.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @param {string} packageName - Name of the vulnerable package
+ * @returns {Promise<{ success: boolean, content?: string[][], error?: string }>}
+ */
+ipcMain.handle('get-dependency-paths', async (_event, projectPath, packageName) => {
+  try {
+    if (
+      !projectPath ||
+      typeof projectPath !== 'string' ||
+      !packageName ||
+      typeof packageName !== 'string'
+    ) {
+      return { success: false, error: 'Missing or invalid projectPath/packageName' };
+    }
+    const sanitized = sanitizePath(projectPath);
+    const { buildDependencyPaths } = require('./modules/scanner/package-universe-builder');
+    const paths = await buildDependencyPaths(sanitized, packageName);
+    return { success: true, content: paths };
+  } catch (err) {
+    console.error('[IPC] get-dependency-paths error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
   // Pre-warm the secure store now that app.getPath('userData') is available.

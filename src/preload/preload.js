@@ -367,6 +367,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSettings: (settings) => ipcRenderer.invoke('settings:set', settings),
 
   // ============================================
+  // DEPENDENCY PATH (Dep Path Modal)
+  // ============================================
+
+  /**
+   * Retrieve dependency paths from root to a target package for the path modal.
+   * @param {string} projectPath - Absolute path to the project directory
+   * @param {string} packageName - Name of the vulnerable package
+   * @returns {Promise<{ success: boolean, content?: string[][], error?: string }>}
+   */
+  getDependencyPaths: (projectPath, packageName) =>
+    ipcRenderer.invoke('get-dependency-paths', projectPath, packageName),
+
+  // ============================================
   // CANCEL SCAN (Sprint 5 Feature D)
   // ============================================
 
