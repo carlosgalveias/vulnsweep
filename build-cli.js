@@ -23,6 +23,7 @@ async function buildCli() {
     drop: ['debugger'],
     dropLabels: ['DEV'],
     mangleProps: /_internal$|_private$/,
+    external: ['electron', 'sludge-crypt', 'systeminformation', 'secure-ls'],
     define: {
       'process.env.NODE_ENV': '"production"',
     },
@@ -47,6 +48,11 @@ async function buildCli() {
     engines: { node: '>=18.0.0' },
     os: ['win32', 'linux', 'darwin'],
     files: ['vulnsweep.js', 'vulnsweep.cmd', 'vulnsweep'],
+    dependencies: {
+      'sludge-crypt': pkg.dependencies['sludge-crypt'],
+      systeminformation: pkg.dependencies['systeminformation'],
+      'secure-ls': pkg.dependencies['secure-ls'],
+    },
   };
   writeFileSync('dist-cli/package.json', JSON.stringify(distPkg, null, 2));
 

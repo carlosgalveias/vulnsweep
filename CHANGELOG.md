@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2025-06-02
+
+> **CLI Implementation — Full CLI interface for VulnSweep scanner (cross-platform Windows + Linux)**
+
+### Added
+
+- Full CLI interface for VulnSweep scanner (`src/cli/`) — cross-platform (Windows + Linux)
+- 14 CLI parameters with short/long forms: `--dir`, `--type`, `--output`, `--sbom`, `--sbom-format`, `--html`, `--threshold`, `--autofix`, `--fix-risk`, `--update-level`, `--no-color`, `--json`, `--verbose`, `--help`
+- CycloneDX v1.6 and SPDX v2.3 SBOM export from CLI ([`src/cli/sbom-writer.js`](src/cli/sbom-writer.js))
+- Self-contained HTML report generation with Chart.js graphs ([`src/cli/html-report-generator.js`](src/cli/html-report-generator.js))
+- CI/CD threshold evaluation with granular exit codes (0=pass, 1=threshold exceeded, 2=bad args, 3=scan error, 4=no projects, 130=SIGINT)
+- Autofix handler with shell-injection prevention using `execFile` ([`src/cli/autofix-handler.js`](src/cli/autofix-handler.js))
+- esbuild-based CLI bundler with minification/obfuscation ([`build-cli.js`](build-cli.js))
+- Platform-specific launcher scripts generated during build (`.cmd` for Windows, shell script for Unix)
+- npm global install support from `dist-cli/` directory
+- 40 unit tests across 5 test files (`__tests__/cli/`)
+- CLI implementation specification ([`plans/cli-implementation-spec.md`](plans/cli-implementation-spec.md))
+
+### Fixed
+
+- Shell injection vulnerability in autofix subprocess calls (switched from `exec` to `execFile`)
+- Debug `console.log` statements in `src/main/modules/discovery.js` polluting stdout
+- `noColor` option not being read correctly from parsed args in runner.js
+- Exit codes incorrectly all being 2 regardless of error type
+- Duplicated `extractUpdatesFromArray` utility function (consolidated into `src/cli/utils.js`)
+- Path resolution bug where relative-looking absolute paths (e.g., `mnt/c/...`) were resolved against CWD instead of root
+- Duplicate shebang in esbuild bundle causing SyntaxError on Windows
+
+### Changed
+
+- `package.json` updated with `build:cli`, `cli`, `cli:dev`, `cli:prod` scripts and `bin` field
+- `.gitignore` updated to exclude `dist-cli/` directory
+
+---
+
 ## [1.1.0] - 2026-05-20
 
 > **Sprints 3, 4 & 5 — Modular Scanner Pipeline, Scan Cache, EPSS, Settings Tab, API Credentials, Rate-Limit Resilience, Cancel Scan**

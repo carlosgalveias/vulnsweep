@@ -13,6 +13,51 @@ const pkgPath = resolve(__dirname, '../../package.json');
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 const VERSION = pkg.version;
 
+// ─── Subcommand routing (before parseArgs to avoid unknown-positional errors) ──
+const subcommandArg = process.argv[2];
+
+if (subcommandArg === 'purchase') {
+  const { handlePurchase } = require('./purchase-handler');
+  handlePurchase()
+    .then((r) => process.exit(r.ok ? 0 : 1))
+    .catch((err) => {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exit(3);
+    });
+} else if (subcommandArg === 'activate') {
+  const { handleActivate } = require('./purchase-handler');
+  // Parse --email and --txn from remaining args
+  const args = process.argv.slice(3);
+  let email = null;
+  let txn = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--email' && args[i + 1]) {
+      email = args[i + 1];
+      i++;
+    } else if (args[i] === '--txn' && args[i + 1]) {
+      txn = args[i + 1];
+      i++;
+    }
+  }
+  handleActivate(email, txn)
+    .then((r) => process.exit(r.ok ? 0 : 1))
+    .catch((err) => {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exit(3);
+    });
+} else if (subcommandArg === 'status') {
+  const { handleStatus } = require('./status-handler');
+  handleStatus()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exit(3);
+    });
+} else {
+  // Normal scan logic
+  main();
+}
+
 /**
  * Prints formatted help text to stdout.
  */
@@ -21,11 +66,20 @@ function printHelp() {
 VulnSweep CLI v${VERSION} - npm vulnerability scanner
 
 USAGE:
-  vulnsweep [options]
+  vulnsweep [command] [options]
+
+SUBCOMMANDS:
+  purchase                         Show payment instructions
+  activate --email <e> --txn <id>  Activate license after PayPal payment
+  status                           Show license and fix usage status
 
 OPTIONS:
   -d, --dir <path>          Root directory to scan (default: current directory)
   -t, --type <type>         Scan type: audit | dependency (default: audit)
+  -S, --sources <preset>    Source preset: fast | optimal | full (default: optimal)
+                            fast = npm-audit + osv
+                            optimal = all except nvd (recommended)
+                            full = all sources including nvd
   -o, --output              Print results to stdout
   -s, --sbom <file>         Output SBOM to file
   -f, --format <fmt>        SBOM format: cyclonedx | spdx (default: cyclonedx)
@@ -40,6 +94,13 @@ OPTIONS:
   -h, --help                Show this help message
   -V, --version             Show version number
 
+API KEYS (parameter overrides environment variable):
+      --github-token <token>  GitHub/GHE personal access token
+                              (env: VULNSWEEP_GITHUB_TOKEN or GITHUB_TOKEN)
+      --nvd-key <key>         NVD API key for accelerated rate limits
+                              (env: VULNSWEEP_NVD_KEY or NVD_API_KEY)
+                              Request at: https://nvd.nist.gov/developers/request-an-api-key
+
 EXAMPLES:
   vulnsweep                            Scan current directory for vulnerabilities
   vulnsweep -d ./my-project -o         Scan specific dir, print results
@@ -47,6 +108,10 @@ EXAMPLES:
   vulnsweep -s report.json -f spdx     Generate SPDX SBOM
   vulnsweep -r ./reports               Generate HTML report
   vulnsweep -T critical                Only fail on critical vulnerabilities
+  vulnsweep status                     Show license and fix usage
+  vulnsweep purchase                   Buy a license from the CLI
+  vulnsweep --github-token ghp_xxx     Scan with GitHub authenticated mode
+  VULNSWEEP_NVD_KEY=abc vulnsweep      Scan with NVD API key from env var
 
 EXIT CODES:
   0   Scan passed (no vulnerabilities above threshold)
@@ -89,6 +154,21 @@ async function main() {
     process.exit(0);
   }
 
+  // License gate: check if autofix is allowed before scanning
+  if (opts.autofix) {
+    const { canAutofix } = require('./license-manager');
+    const autofixCheck = await canAutofix();
+    if (!autofixCheck.allowed) {
+      const noColor = opts['no-color'] || process.env.NO_COLOR;
+      const yellow = noColor ? '' : '\x1b[33m';
+      const reset = noColor ? '' : '\x1b[0m';
+      process.stderr.write(`\n${yellow}⚠️  ${autofixCheck.reason}${reset}\n`);
+      process.stderr.write('Run "vulnsweep purchase" to buy a license.\n\n');
+      // Continue with scan results but skip autofix
+      opts.autofix = false;
+    }
+  }
+
   try {
     const result = await run(opts);
 
@@ -111,7 +191,7 @@ async function main() {
 
     // Print formatted report to stdout
     if (opts.output) {
-      const reportOpts = { noColor: opts['no-color'], quiet: opts.quiet };
+      const reportOpts = { noColor: opts['no-color'], quiet: opts.quiet, sources: opts.sources };
       if (result.type === 'audit') {
         printAuditReport(result, reportOpts);
       } else {
@@ -122,7 +202,14 @@ async function main() {
     // Auto-fix if requested (after reports, before threshold)
     if (opts.autofix) {
       const { applyAutofix } = require('./autofix-handler');
+      const { consumeFixes } = require('./license-manager');
       const fixResult = await applyAutofix(result, opts);
+
+      // Consume fix credits for all successful fixes applied
+      if (fixResult.applied > 0) {
+        consumeFixes(fixResult.applied);
+      }
+
       if (!opts.quiet) {
         process.stderr.write(
           `\n  Auto-fix summary: ${fixResult.applied} applied, ${fixResult.skipped} skipped, ${fixResult.failed} failed\n`
@@ -154,5 +241,3 @@ async function main() {
     process.exit(3);
   }
 }
-
-main();

@@ -14,6 +14,7 @@ const ENUM_VALUES = {
   'fix-level': ['low', 'high'],
   'update-level': ['low', 'high'],
   threshold: ['none', 'critical', 'high', 'medium', 'low', 'any'],
+  sources: ['fast', 'optimal', 'full'],
 };
 
 /**
@@ -23,6 +24,7 @@ const ENUM_VALUES = {
 const OPTIONS_CONFIG = {
   dir: { type: 'string', short: 'd', default: process.cwd() },
   type: { type: 'string', short: 't', default: 'audit' },
+  sources: { type: 'string', short: 'S', default: 'optimal' },
   output: { type: 'boolean', short: 'o', default: false },
   sbom: { type: 'string', short: 's' },
   format: { type: 'string', short: 'f', default: 'cyclonedx' },
@@ -33,6 +35,8 @@ const OPTIONS_CONFIG = {
   threshold: { type: 'string', short: 'T', default: 'high' },
   quiet: { type: 'boolean', short: 'q', default: false },
   'no-color': { type: 'boolean', default: false },
+  'github-token': { type: 'string' },
+  'nvd-key': { type: 'string' },
   help: { type: 'boolean', short: 'h', default: false },
   version: { type: 'boolean', short: 'V', default: false },
 };
@@ -75,6 +79,7 @@ function parseCliArgs(argv) {
 
   // Validate enum values
   validateEnum('type', values.type);
+  validateEnum('sources', values.sources);
   validateEnum('format', values.format);
   validateEnum('fix-level', values['fix-level']);
   validateEnum('update-level', values['update-level']);

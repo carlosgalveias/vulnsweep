@@ -110,17 +110,40 @@ function restoreVsweepFileWithBirthtime(vsweepPath, targetBirthtimeMs) {
 }
 
 function getVsweepFilePath() {
-  // Store the marker file in the standard Electron userData directory.
-  // This is the same location used by secure-store.js and is the correct
-  // per-user app data location on all platforms. Non-deceptive, AV-safe,
-  // and consistent with Electron conventions.
+  const { resolveDataDir } = require('../utils/resolve-data-dir');
+  const newPath = path.join(resolveDataDir(), '.vsweep');
+
+  // Migration: if old ~/.vulnsweep/.vsweep exists but the new location does NOT,
+  // copy the old file over preserving timestamps (critical for license validation).
+  // Do NOT delete the old file.
+  const oldPath = path.join(os.homedir(), '.vulnsweep', '.vsweep');
   try {
-    const { app } = require('electron');
-    return path.join(app.getPath('userData'), '.vsweep');
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      const dir = path.dirname(newPath);
+      fs.mkdirSync(dir, { recursive: true });
+
+      if (process.platform === 'linux') {
+        // On Linux, birthtimeMs cannot be preserved on copy — copying creates a new
+        // birthtimeMs/ctimeMs which breaks license validation (uses birthtimeMs as salt).
+        // Use a symlink instead to maintain the original file's timestamps.
+        try {
+          fs.symlinkSync(oldPath, newPath);
+        } catch {
+          // If symlink fails (permissions), don't migrate — license will still
+          // validate from old path since getVsweepFilePath checks existence.
+        }
+      } else {
+        // Windows/macOS: copy is safe (birthtimeMs preserved by filesystem)
+        fs.copyFileSync(oldPath, newPath);
+        const stat = fs.statSync(oldPath);
+        fs.utimesSync(newPath, stat.atime, stat.mtime);
+      }
+    }
   } catch {
-    // Fallback for non-Electron environments (tests, scripts)
-    return path.join(os.homedir(), '.vulnsweep', '.vsweep');
+    /* migration is best-effort */
   }
+
+  return newPath;
 }
 
 function ensureVsweepDir(filePath) {

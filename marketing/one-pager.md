@@ -5,8 +5,8 @@
 ## The Only npm Security Platform That Does Everything. Free to Start.
 
 **Status:** Public Beta — pricing and free tier terms are active during the beta phase and may change at general availability.
-**Category:** DevSecOps Desktop Application — npm Security, License Compliance, SBOM Generation
-**Platform:** Windows (Electron) — macOS and Linux are in development and not yet available.
+**Category:** DevSecOps Platform — Desktop App + Cross-Platform CLI — npm Security, License Compliance, SBOM Generation, CI/CD Integration
+**Platform:** Desktop: Windows (Electron) | CLI: Windows + Linux | macOS desktop in development
 **Pricing:** Core features free. Fix-and-commit: 10 sessions free (beta term). Annual license: EUR 9.99/year (early adopter, first 30 days) / EUR 29.99/year (standard).
 **Download:** https://github.com/carlosgalveias/vulnsweep-releases
 
@@ -33,42 +33,52 @@ Node.js teams managing multiple repositories have no single tool that handles vu
 
 ## The Solution
 
-**VulnSweep** is a cross-platform desktop application that automates the complete npm security and compliance lifecycle for Node.js teams managing multiple repositories.
+**VulnSweep** is a dual-mode npm security platform — a **desktop GUI** AND a **cross-platform CLI** — that automates the complete npm security and compliance lifecycle for Node.js teams managing multiple repositories.
 
-One tool. One workflow. Everything free to start.
+Two interfaces. One engine. Six vulnerability sources. Everything free to start.
 
 ---
 
 ## What It Does — The 6-Step Pipeline
 
 ```
-SELECT  ->  Point at your root folder
-DISCOVER -> Auto-finds every Node.js repo
-SCAN    ->  Parallel npm audit across entire fleet
-ENRICH  ->  CVE cross-referenced: NVD + OSV.dev + GitHub Advisory
-COMPLY  ->  License scan + SBOM export + dep updates dashboard
-FIX     ->  One-click patch, structured commit, auto-push to remote
+DESKTOP:
+  SELECT  ->  Point at your root folder
+  DISCOVER -> Auto-finds every Node.js repo
+  SCAN    ->  Parallel scan across entire fleet (6 sources)
+  ENRICH  ->  CVE cross-referenced: NVD + OSV.dev + GitHub Advisory + CISA KEV + EPSS
+  COMPLY  ->  License scan + SBOM export + dep updates dashboard
+  FIX     ->  One-click patch, structured commit, auto-push to remote
+
+CLI (NEW in v1.2.0):
+  vulnsweep -d . -S optimal -T high -o report.json -H report.html
+  → Same 6-source engine | CI/CD exit codes | HTML reports | SBOM export | Autofix
 ```
 
 ---
 
 ## Feature Snapshot
 
-| Capability                       | Status | Free / Licensed                                  |
-| -------------------------------- | ------ | ------------------------------------------------ |
-| Bulk parallel scanning           | Live   | Free                                             |
-| Cross-source CVE correlation     | Live   | Free                                             |
-| Exploit availability flag        | Live   | Free                                             |
-| SBOM export (CycloneDX/SPDX/CSV) | Live   | Free                                             |
-| License compliance scanning      | Live   | Free                                             |
-| Dependency updates dashboard     | Live   | Free                                             |
-| PDF Security Report Export       | Live   | Free                                             |
-| Automated fix + Git commit/push  | Live   | 10 free sessions / Unlimited with annual license |
-| Repository security grading      | Live   | Free                                             |
-| Statistics and charts dashboard  | Live   | Free                                             |
-| About tab + license management   | Live   | Free                                             |
-| License Backup / Restore         | Live   | Free (when licensed)                             |
-| Anonymous analytics opt-out      | Live   | Free                                             |
+| Capability                        | Status  | Free / Licensed                                  |
+| --------------------------------- | ------- | ------------------------------------------------ |
+| Bulk parallel scanning            | Live    | Free                                             |
+| **Cross-platform CLI (v1.2.0)**   | **NEW** | **Free**                                         |
+| **6-source vulnerability engine** | **NEW** | **Free**                                         |
+| **CI/CD threshold exit codes**    | **NEW** | **Free**                                         |
+| **HTML reports with charts**      | **NEW** | **Free**                                         |
+| **CLI autofix with risk levels**  | **NEW** | **Free**                                         |
+| Cross-source CVE correlation      | Live    | Free                                             |
+| Exploit availability flag         | Live    | Free                                             |
+| SBOM export (CycloneDX/SPDX/CSV)  | Live    | Free                                             |
+| License compliance scanning       | Live    | Free                                             |
+| Dependency updates dashboard      | Live    | Free                                             |
+| PDF Security Report Export        | Live    | Free                                             |
+| Automated fix + Git commit/push   | Live    | 10 free sessions / Unlimited with annual license |
+| Repository security grading       | Live    | Free                                             |
+| Statistics and charts dashboard   | Live    | Free                                             |
+| About tab + license management    | Live    | Free                                             |
+| License Backup / Restore          | Live    | Free (when licensed)                             |
+| Anonymous analytics opt-out       | Live    | Free                                             |
 
 ---
 
@@ -154,9 +164,38 @@ After every scan, click Export PDF on the Statistics tab. VulnSweep generates a 
 
 ---
 
+## NEW in v1.2.0 — Cross-Platform CLI for CI/CD Pipelines
+
+VulnSweep is no longer just a desktop app. The **v1.2.0 CLI** brings the same 6-source intelligence engine to your terminal and CI/CD pipelines:
+
+| CLI Capability              | Detail                                                             |
+| --------------------------- | ------------------------------------------------------------------ |
+| **6 vulnerability sources** | npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS               |
+| **3 speed presets**         | `fast` (2 sources), `optimal` (default, 4 sources), `full` (all 6) |
+| **CI/CD exit codes**        | 0=pass, 1=fail, 2=bad args, 3=error, 4=no projects                 |
+| **HTML reports**            | Chart.js severity doughnut + package bar charts                    |
+| **SBOM export**             | CycloneDX v1.6, SPDX v2.3 — directly from CLI                      |
+| **Autofix**                 | `--autofix --fix-risk low\|medium\|high`                           |
+| **Cross-platform**          | Windows + Linux                                                    |
+| **16 parameters**           | Full control over scanning, output, thresholds, API keys           |
+
+**One command in your pipeline:**
+
+```yaml
+# GitHub Actions
+- run: npx vulnsweep -d . -S optimal -T high --github-token ${{ secrets.GITHUB_TOKEN }}
+
+# GitLab CI
+- vulnsweep -d . -S full -T high -o report.json --nvd-key $NVD_API_KEY
+```
+
+> **The CLI makes VulnSweep the only npm security tool that serves both the developer at their desk AND the DevOps engineer in their pipeline — with the same engine, the same sources, and the same intelligence.**
+
+---
+
 ## Technology Foundation
 
-Built on Electron 41, React, and TailwindCSS. 100% local execution. Zero cloud backend. Zero data transmission. CVE enrichment uses only public-domain intelligence APIs (NVD, OSV.dev, GitHub Advisory REST). Your source code never leaves your machine.
+Built on Electron 41, React, and TailwindCSS (desktop) + esbuild-optimized Node.js bundle (CLI). 100% local execution. Zero cloud backend. Zero data transmission. CVE enrichment uses only public-domain intelligence APIs (NVD, OSV.dev, GitHub Advisory REST, CISA KEV, EPSS). Your source code never leaves your machine.
 
 ---
 

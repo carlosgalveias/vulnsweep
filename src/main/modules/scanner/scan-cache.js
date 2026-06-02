@@ -22,7 +22,6 @@
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { SCAN_CACHE_CONFIG } = require('../../config/constants');
 
@@ -75,12 +74,8 @@ const _saveTimers = {
  * @returns {string} Absolute path to the scan-cache directory
  */
 function _resolveCacheDirPath() {
-  try {
-    const { app } = require('electron');
-    return path.join(app.getPath('userData'), 'scan-cache');
-  } catch {
-    return path.join(os.tmpdir(), 'vulnsweep-scan-cache-test');
-  }
+  const { resolveDataDir } = require('../../utils/resolve-data-dir');
+  return path.join(resolveDataDir(), 'scan-cache');
 }
 
 /**

@@ -164,9 +164,10 @@ function formatSeverityLabel(severity, noColor) {
  * @param {object} opts - Display options
  * @param {boolean} opts.noColor - Disable ANSI colors
  * @param {boolean} opts.quiet - Suppress detailed output (header only)
+ * @param {string} opts.sources - Source preset used (fast/optimal/full)
  */
 function printAuditReport(result, opts) {
-  const { noColor = false, quiet = false } = opts || {};
+  const { noColor = false, quiet = false, sources } = opts || {};
   const termWidth = getTermWidth();
   const maxTitleLen = termWidth - 30;
 
@@ -185,6 +186,11 @@ function printAuditReport(result, opts) {
       noColor
     )
   );
+
+  // Source preset info line
+  if (sources) {
+    writeln(`  ${color('Sources:', 'dim', noColor)} ${sources}`);
+  }
 
   if (quiet) return;
 

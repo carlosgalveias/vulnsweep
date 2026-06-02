@@ -41,24 +41,24 @@ let _initFailed = false;
  */
 function _resolveStoreDir() {
   if (_storeDirResolved) return _storeDirCache;
+  const { resolveDataDir } = require('./resolve-data-dir');
+  _storeDirCache = resolveDataDir();
+  _storeDirResolved = true;
+
+  // Migration: if old ~/.vsweep-store/store.dat exists but the new location
+  // does NOT have store.dat, copy the old file over. Do NOT delete the old file.
+  const oldStoreFile = path.join(os.homedir(), '.vsweep-store', 'store.dat');
+  const newStoreFile = path.join(_storeDirCache, 'store.dat');
   try {
-    const electron = require('electron');
-    const app = (electron && electron.app) || null;
-    if (app && typeof app.getPath === 'function') {
-      const userDataPath = app.getPath('userData');
-      _storeDirCache = userDataPath;
-      _storeDirResolved = true;
-      return _storeDirCache;
+    if (fs.existsSync(oldStoreFile) && !fs.existsSync(newStoreFile)) {
+      fs.mkdirSync(_storeDirCache, { recursive: true });
+      fs.copyFileSync(oldStoreFile, newStoreFile);
     }
-    // Electron loaded but app not ready — return transient fallback WITHOUT caching
-    // so the next call retries once app.getPath is available.
-    return path.join(os.homedir(), '.vsweep-store');
   } catch {
-    // Non-Electron environment. Cache permanently.
-    _storeDirCache = path.join(os.homedir(), '.vsweep-store');
-    _storeDirResolved = true;
-    return _storeDirCache;
+    /* migration is best-effort */
   }
+
+  return _storeDirCache;
 }
 
 function _resolveStoreFilePath() {

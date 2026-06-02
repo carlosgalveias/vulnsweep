@@ -3,7 +3,12 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
-const { UI_CONFIG, PAYPAL_CONFIG, TRIAL_CONFIG } = require('./config/constants');
+const {
+  UI_CONFIG,
+  PAYPAL_CONFIG,
+  TRIAL_CONFIG,
+  LICENSE_API_CONFIG,
+} = require('./config/constants');
 const scanTelemetry = require('./utils/scan-telemetry');
 const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
@@ -1304,7 +1309,9 @@ ipcMain.handle('get-active-price', async () => {
 /**
  * Handler: Open a payment BrowserWindow pointing at the PayPal payment link.
  * Monitors navigation events; when the success URL is detected the window is
- * closed, generateLicense() is called, and the result is returned to the renderer.
+ * closed and { ok: false, needsVerification: true } is returned to the renderer
+ * so it can advance to the verification phase. License generation is deferred
+ * to the verify-and-activate handler.
  * If the user closes the window manually before payment completes, resolves with
  * { ok: false, cancelled: true }.
  */
@@ -1352,25 +1359,24 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
 
     /**
      * Shared handler for both did-navigate and did-navigate-in-page.
-     * @param {Electron.Event} _event
+     * On success URL detection, closes the window and signals the renderer
+     * to advance to the verification phase (no license generated here).
+     * @param {Electron.Event} _evt
      * @param {string} url
      */
-    async function onNavigate(_event, url) {
+    function onNavigate(_evt, url) {
       if (settled) return;
       if (!isSuccessUrl(url)) return;
 
       settled = true;
-      console.log('[Payment] Success URL detected:', url);
+      console.log('[Payment] Success URL detected — advancing to verification:', url);
 
       if (!paymentWin.isDestroyed()) {
         paymentWin.close();
       }
 
-      const result = await license.generateLicense();
-      if (result.ok) {
-        analytics.trackEvent('paypal_purchase_success');
-      }
-      resolve(result);
+      // Signal renderer to show verification form
+      resolve({ ok: false, needsVerification: true });
     }
 
     paymentWin.webContents.on('did-navigate', onNavigate);
@@ -1385,6 +1391,126 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
       }
     });
   });
+});
+
+/**
+ * Handler: Verify a PayPal transaction via the Cloudflare Worker and generate
+ * a local license on success. Mirrors the CLI's handleActivate() logic from
+ * src/cli/purchase-handler.js.
+ *
+ * @param {string} email - Email used for PayPal payment
+ * @param {string} transactionId - PayPal transaction ID from receipt
+ * @returns {{ ok: true, key: string } | { ok: false, error: string }}
+ */
+ipcMain.handle('verify-and-activate', async (_event, email, transactionId) => {
+  // === Input Validation (mirrors CLI purchase-handler.js) ===
+  if (!email || !transactionId) {
+    return { ok: false, error: 'Email and Transaction ID are required.' };
+  }
+
+  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedTxn = transactionId.trim();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return { ok: false, error: 'Invalid email format.' };
+  }
+
+  if (!/^[A-Za-z0-9]{10,30}$/.test(trimmedTxn)) {
+    return { ok: false, error: 'Invalid Transaction ID format. Check your PayPal receipt.' };
+  }
+
+  // === Worker Verification ===
+  const verifyUrl = `${LICENSE_API_CONFIG.URL}${LICENSE_API_CONFIG.VERIFY_ENDPOINT}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LICENSE_API_CONFIG.TIMEOUT_MS);
+
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
+      },
+      body: JSON.stringify({ email: trimmedEmail, transactionId: trimmedTxn }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    const result = await response.json();
+
+    if (!result.verified) {
+      // Map Worker error codes to user-friendly messages
+      const messages = {
+        transaction_not_found:
+          'Transaction not found. Please verify your Transaction ID from the PayPal receipt.',
+        amount_mismatch: 'Payment amount does not match the license price.',
+        already_used: 'This transaction has already been used with a different email address.',
+        verification_in_progress:
+          'Verification already in progress. Please wait a moment and try again.',
+        invalid_status: 'Payment is still processing. Please wait a few minutes and try again.',
+        transaction_not_completed:
+          'Payment is still processing. Please wait a few minutes and try again.',
+        invalid_amount: 'Payment amount does not match the expected license price.',
+        missing_fields: 'Missing email or transaction ID.',
+        unauthorized: 'Client authentication failed. Please update VulnSweep.',
+        rate_limited: 'Too many attempts. Please wait a minute and try again.',
+        invalid_email: 'Invalid email format.',
+        invalid_transaction_id: 'Invalid Transaction ID format.',
+      };
+      return {
+        ok: false,
+        error: messages[result.error] || result.error || 'Verification failed. Please try again.',
+      };
+    }
+
+    // === Token Validation (mirrors CLI purchase-handler.js lines 125–144) ===
+    if (!result.activationToken || !result.activationToken.includes('.')) {
+      return { ok: false, error: 'Invalid activation response from server. Please try again.' };
+    }
+
+    const [payloadB64] = result.activationToken.split('.');
+    try {
+      const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
+
+      if (payload.exp && payload.exp < Date.now()) {
+        return { ok: false, error: 'Activation token expired. Please try again.' };
+      }
+
+      if (payload.email !== trimmedEmail || payload.txn !== trimmedTxn) {
+        return { ok: false, error: 'Activation token mismatch. Please try again.' };
+      }
+    } catch {
+      return { ok: false, error: 'Malformed activation token. Please try again.' };
+    }
+
+    // === License Generation ===
+    console.log('[Payment] Worker verification successful — generating license.');
+    const licenseResult = await license.generateLicense();
+
+    if (licenseResult && licenseResult.ok) {
+      analytics.trackEvent('paypal_purchase_success');
+      return { ok: true, key: licenseResult.key };
+    } else {
+      return { ok: false, error: 'License generation failed. Please contact support.' };
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      return {
+        ok: false,
+        error: 'License server timed out. Please check your internet connection and try again.',
+      };
+    }
+    if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message?.includes('fetch')) {
+      return {
+        ok: false,
+        error: 'Cannot reach the license server. Please check your internet connection.',
+      };
+    }
+    console.error('[Payment] verify-and-activate error:', err);
+    return { ok: false, error: `Activation error: ${err.message}` };
+  }
 });
 
 // ============================================

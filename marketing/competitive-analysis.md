@@ -8,10 +8,10 @@
 
 ## Executive Summary
 
-VulnSweep occupies a unique and uncontested position in the Node.js security tooling market: it is the only **local-first desktop application** that combines bulk multi-repository vulnerability scanning, multi-source CVE enrichment, active exploit flagging, license compliance auditing, SBOM generation, and dependency update management into a single free tool.
+VulnSweep occupies a unique and uncontested position in the Node.js security tooling market: it is the only **dual-mode security platform** (Desktop GUI + Cross-Platform CLI) that combines bulk multi-repository vulnerability scanning from **6 independent intelligence sources**, multi-source CVE enrichment, active exploit flagging, EPSS prediction scoring, license compliance auditing, SBOM generation, CI/CD pipeline integration with threshold-based exit codes, HTML report generation, and automated vulnerability remediation into a single free tool.
 
 **The market gap VulnSweep fills:**
-Cloud-based tools (Snyk, Dependabot, Socket) require code to leave the machine, cost per developer per month, and focus primarily on PR-based workflow integration. CLI tools (npm audit, audit-ci) are single-repo, single-database, and provide no compliance output. VulnSweep is neither — it is a desktop-native security platform that works at the scope of your entire project portfolio, not just the repo you have open in your terminal.
+Cloud-based tools (Snyk, Dependabot, Socket) require code to leave the machine, cost per developer per month, and rely on a single proprietary vulnerability database. CLI tools (npm audit, audit-ci) are single-repo, single-database, and provide no compliance output. VulnSweep is both — a desktop-native security platform for interactive exploration AND a CI/CD-ready CLI with 16 parameters, 6 sources, and threshold-based pass/fail gating. No other tool spans both worlds while aggregating 6 vulnerability intelligence sources for free.
 
 ---
 
@@ -115,25 +115,31 @@ Cloud-based tools (Snyk, Dependabot, Socket) require code to leave the machine, 
 
 ## Head-to-Head Comparison: VulnSweep vs Primary Alternatives
 
-| Capability                          | npm audit | Snyk (Free)   | Snyk (Team)  | Renovate     | Syft/cdxgen | VulnSweep     |
-| ----------------------------------- | --------- | ------------- | ------------ | ------------ | ----------- | ------------- |
-| Multi-repo bulk scanning            | No        | No            | No           | Via CI       | No          | Yes (desktop) |
-| Local execution — no code upload    | Yes       | No            | No           | No           | Yes         | Yes           |
-| CVE data from npm advisory          | Yes       | Yes           | Yes          | N/A          | No          | Yes           |
-| CVE enrichment from NVD API v2      | No        | Partial       | Yes          | No           | No          | Yes (free)    |
-| CVE enrichment from OSV.dev         | No        | No            | Partial      | No           | No          | Yes (free)    |
-| CVE enrichment from GitHub Advisory | Via npm   | Yes           | Yes          | No           | No          | Yes (free)    |
-| Active exploit flagging (CISA KEV)  | No        | No            | Yes          | No           | No          | Yes (free)    |
-| License compliance scanning         | No        | Limited       | Yes          | No           | Partial     | Yes (free)    |
-| SBOM generation CycloneDX           | No        | No            | Yes          | No           | Yes         | Yes (free)    |
-| SBOM generation SPDX                | No        | No            | Yes          | No           | Yes         | Yes (free)    |
-| Dependency updates with risk rating | No        | Partial       | Yes          | Yes          | No          | Yes (free)    |
-| Automated Git commit + push         | No        | No (PR only)  | No (PR only) | No (PR only) | No          | Yes (10 free) |
-| Desktop GUI — no terminal needed    | No        | No            | No           | No           | No          | Yes           |
-| Three-tier intelligent fix strategy | No        | No            | No           | No           | No          | Yes           |
-| Repository security grading         | No        | No            | Yes          | No           | No          | Yes (free)    |
-| Exportable PDF security report      | No        | No            | No           | No           | No          | Yes - free    |
-| Price for above capabilities        | Free      | Free(limited) | $57+/dev/mo  | Free(CI)     | Free        | Free (core)   |
+| Capability                          | npm audit | Snyk (Free)   | Snyk (Team)  | Renovate     | Syft/cdxgen | VulnSweep                      |
+| ----------------------------------- | --------- | ------------- | ------------ | ------------ | ----------- | ------------------------------ |
+| Multi-repo bulk scanning            | No        | No            | No           | Via CI       | No          | Yes (desktop+CLI)              |
+| **Cross-platform CLI**              | Yes       | Yes (limited) | Yes          | No           | Yes         | **Yes (16 params, 6 sources)** |
+| **CI/CD exit codes (threshold)**    | No        | Yes           | Yes          | N/A          | No          | **Yes (free)**                 |
+| **Vulnerability sources count**     | **1**     | **1**         | **1**        | N/A          | 0           | **6 (free)**                   |
+| Local execution — no code upload    | Yes       | No            | No           | No           | Yes         | Yes                            |
+| CVE data from npm advisory          | Yes       | Yes           | Yes          | N/A          | No          | Yes                            |
+| CVE enrichment from NVD API v2      | No        | Partial       | Yes          | No           | No          | Yes (free)                     |
+| CVE enrichment from OSV.dev         | No        | No            | Partial      | No           | No          | Yes (free)                     |
+| CVE enrichment from GitHub Advisory | Via npm   | Yes           | Yes          | No           | No          | Yes (free)                     |
+| Active exploit flagging (CISA KEV)  | No        | No            | Yes          | No           | No          | Yes (free)                     |
+| **EPSS exploit prediction**         | No        | No            | Yes          | No           | No          | **Yes (free)**                 |
+| License compliance scanning         | No        | Limited       | Yes          | No           | Partial     | Yes (free)                     |
+| SBOM generation CycloneDX           | No        | No            | Yes          | No           | Yes         | Yes (free)                     |
+| SBOM generation SPDX                | No        | No            | Yes          | No           | Yes         | Yes (free)                     |
+| **HTML report with charts**         | No        | No            | Yes          | No           | No          | **Yes (free)**                 |
+| Dependency updates with risk rating | No        | Partial       | Yes          | Yes          | No          | Yes (free)                     |
+| **CLI autofix with risk levels**    | No        | No            | Partial      | No           | No          | **Yes (free)**                 |
+| Automated Git commit + push         | No        | No (PR only)  | No (PR only) | No (PR only) | No          | Yes (10 free)                  |
+| Desktop GUI — no terminal needed    | No        | No            | No           | No           | No          | Yes                            |
+| Three-tier intelligent fix strategy | No        | No            | No           | No           | No          | Yes                            |
+| Repository security grading         | No        | No            | Yes          | No           | No          | Yes (free)                     |
+| Exportable PDF security report      | No        | No            | No           | No           | No          | Yes - free                     |
+| Price for above capabilities        | Free      | Free(limited) | $57+/dev/mo  | Free(CI)     | Free        | Free (core)                    |
 
 ---
 
@@ -160,7 +166,24 @@ Cross-source CVE enrichment from NVD, OSV.dev, and GitHub Advisory provides mate
 
 Every audit, enterprise deal, and security review needs a document. VulnSweep generates a full A4 landscape PDF Security Report in one click - dated, structured, and containing: severity breakdown, per-repository A-F security grades, complete CVE table with installed and patched versions and advisory URLs, Cross-Source Correlation summary, and per-vulnerability enrichment details with source URLs, aliases, and discrepancy flags. This is the deliverable a security consultant would charge $500/hour to produce. VulnSweep produces it for free.
 
-### 5. Git Automation at the Repository Level
+### 5. Dual-Mode Architecture — Desktop AND CI/CD CLI (NEW in v1.2.0)
+
+No competitor offers both a rich desktop GUI for interactive security exploration AND a purpose-built CLI for CI/CD pipeline automation — powered by the same 6-source engine. VulnSweep's CLI delivers:
+
+- **16 parameters** for full control over scanning, output, remediation, and API configuration
+- **3 speed presets** (fast/optimal/full) for different pipeline stages
+- **Threshold-based exit codes** (0=pass, 1=fail) for security gate enforcement
+- **HTML reports with Chart.js graphs** — self-contained, offline-capable
+- **SBOM export** (CycloneDX v1.6, SPDX v2.3) directly from the command line
+- **Autofix** with configurable risk levels — safe automated remediation in pipelines
+
+This means VulnSweep serves the developer at their desk (desktop app) AND the DevOps engineer in their pipeline (CLI) — with identical intelligence. No other tool in this category spans both workflows.
+
+### 6. 6-Source Vulnerability Intelligence (vs. 1 for Competitors)
+
+npm audit uses 1 database. Snyk uses 1 proprietary database. Dependabot uses 1 database. VulnSweep aggregates **6 independent sources** (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS) and correlates the results. This means VulnSweep catches vulnerabilities that single-source tools miss, identifies actively exploited CVEs (CISA KEV), and predicts future exploitation probability (EPSS). The 6-source advantage is structurally impossible for tools committed to a single database.
+
+### 7. Git Automation at the Repository Level
 
 PR-based tools (Dependabot, Renovate, Snyk PRs) operate at the CI/CD level — they create pull requests that still require human review and merge. VulnSweep operates at the repository level on your local machine: it executes the fix, stages the changes, writes the commit message with a full CVE table, and pushes. This is a fundamentally different operational model suited to teams who want to execute security maintenance as a controlled, intentional workflow rather than managing an inbox of automated PRs.
 
@@ -249,10 +272,12 @@ Dependabot is excellent for automated PR generation in GitHub repositories. It d
 
 ## Summary: Why VulnSweep Wins
 
-1. **Only local-first desktop npm security platform** — code never leaves the machine
-2. **Only tool combining scanning + enrichment + exploits + licenses + SBOM + dep updates** in one free application
-3. **More intelligence than cloud premium tiers** — free
-4. **Fleet-scale workflow** — manages dozens of repos simultaneously, not one at a time
-5. **Category-defining architecture** — not a CLI, not a bot, not a SaaS — a new class of developer tool
+1. **Only dual-mode npm security platform** — Desktop GUI + Cross-Platform CLI, same 6-source engine
+2. **6 vulnerability sources vs. 1** — npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS (competitors use 1)
+3. **Only tool combining scanning + enrichment + exploits + licenses + SBOM + CI/CD + autofix** in one free application
+4. **CI/CD-native** — threshold-based exit codes, HTML reports, JSON output, SBOM export from CLI
+5. **More intelligence than cloud premium tiers** — free
+6. **Fleet-scale workflow** — manages dozens of repos simultaneously, not one at a time
+7. **Category-defining architecture** — desktop app for developers, CLI for pipelines, zero cloud dependency
 
 [Download VulnSweep — Free](https://github.com/carlosgalveias/vulnsweep-releases)

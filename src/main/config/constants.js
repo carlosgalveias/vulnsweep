@@ -204,6 +204,51 @@ const PAYPAL_CONFIG = {
 };
 
 // ============================================
+// LICENSE API CONFIGURATION
+// ============================================
+
+/**
+ * License verification API configuration.
+ * The Cloudflare Worker at this URL handles PayPal transaction verification
+ * and returns activation tokens for valid purchases.
+ * @namespace LICENSE_API_CONFIG
+ */
+const LICENSE_API_CONFIG = {
+  /**
+   * Base URL of the license verification Worker.
+   * @type {string}
+   */
+  URL: 'https://license.vulnsweep.workers.dev',
+
+  /**
+   * Endpoint for verifying PayPal transactions.
+   * Accepts POST { email, transactionId } and returns { verified, activationToken } or { verified, error }.
+   * @type {string}
+   */
+  VERIFY_ENDPOINT: '/verify',
+
+  /**
+   * Health check endpoint for connectivity testing.
+   * @type {string}
+   */
+  HEALTH_ENDPOINT: '/health',
+
+  /**
+   * HTTP request timeout in milliseconds.
+   * @type {number}
+   */
+  TIMEOUT_MS: 15000,
+
+  /**
+   * Client API key sent in X-API-Key header for endpoint authentication.
+   * The real security is server-side PayPal verification; this prevents
+   * arbitrary access to the endpoint. Rotate annually.
+   * @type {string}
+   */
+  CLIENT_API_KEY: 'vsweep_cli_2024_k7x9m2',
+};
+
+// ============================================
 // ENRICHMENT CONFIGURATION
 // ============================================
 
@@ -542,6 +587,7 @@ module.exports = {
   API_CONFIG,
   UI_CONFIG,
   PAYPAL_CONFIG,
+  LICENSE_API_CONFIG,
   ENRICHMENT_CONFIG,
   TRIAL_CONFIG,
   DEP_UPDATES_CONFIG,

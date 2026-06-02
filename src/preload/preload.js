@@ -104,10 +104,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /**
    * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
    * Resolves when the user completes payment (success URL detected) or closes
-   * the window without paying.
-   * @returns {Promise<{ ok: true, key: string } | { ok: false, cancelled?: true, error?: string }>}
+   * the window without paying. On success URL detection, resolves with
+   * { ok: false, needsVerification: true } to signal the verification phase.
+   * @returns {Promise<{ ok: false, needsVerification: true } | { ok: false, cancelled?: true, error?: string }>}
    */
   openPaymentWindow: (isPromo) => ipcRenderer.invoke('open-payment-window', isPromo),
+
+  /**
+   * Verifies a PayPal payment via the license Worker and generates a local license.
+   * Called after the user provides their transaction ID post-payment.
+   * @param {string} email - Email used for PayPal payment
+   * @param {string} transactionId - Transaction ID from PayPal receipt
+   * @returns {Promise<{ ok: true, key: string } | { ok: false, error: string }>}
+   */
+  verifyAndActivate: (email, transactionId) =>
+    ipcRenderer.invoke('verify-and-activate', email, transactionId),
 
   /**
    * Returns the active purchase price based on installation date.

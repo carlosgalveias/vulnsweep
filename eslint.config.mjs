@@ -49,6 +49,7 @@ export default [
         // Web-standard globals (available in both Node.js 10+ and browsers)
         URL: 'readonly',
         URLSearchParams: 'readonly',
+        AbortController: 'readonly',
         // Browser globals
         window: 'readonly',
         document: 'readonly',
@@ -152,6 +153,32 @@ export default [
         require: 'readonly',
         process: 'readonly',
       },
+    },
+  },
+
+  // Cloudflare Worker globals
+  {
+    files: ['license-worker/**/*.js'],
+    languageOptions: {
+      globals: {
+        Response: 'readonly',
+        Request: 'readonly',
+        TextEncoder: 'readonly',
+        btoa: 'readonly',
+        atob: 'readonly',
+        crypto: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        Headers: 'readonly',
+      },
+    },
+  },
+
+  // CLI and build scripts — allow console
+  {
+    files: ['src/cli/**/*.js', 'build-cli.js'],
+    rules: {
+      'no-console': 'off',
     },
   },
 

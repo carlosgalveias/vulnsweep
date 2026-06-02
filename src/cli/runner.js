@@ -9,24 +9,72 @@ const { scanProject } = require('../main/modules/scanner/scanner-orchestrator');
 const { version } = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
 
 /**
- * Creates a progress callback that writes to stderr.
+ * Source preset mappings — defines which vulnerability sources to query per preset.
+ * @type {Record<string, string[]>}
+ */
+const SOURCE_PRESETS = {
+  fast: ['npm-audit', 'osv'],
+  optimal: ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'],
+  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
+};
+
+/**
+ * Per-package timeout values per source preset (in ms).
+ * @type {Record<string, number>}
+ */
+const PRESET_TIMEOUTS = {
+  fast: 15000,
+  optimal: 30000,
+  full: 60000,
+};
+
+/**
+ * Creates a progress callback factory that writes to stderr.
  * Keeps stdout clean for piped data output.
+ *
+ * Returns a function that, given a project index/total/name, produces
+ * a per-project progress callback showing overall scan percentage and
+ * the package currently being analyzed.
  *
  * @param {boolean} quiet - Suppress progress output
  * @param {boolean} noColor - Disable ANSI color codes
- * @returns {function} Progress callback
+ * @param {string} scanType - Scan type label (e.g. 'audit', 'dependency')
+ * @returns {function} Factory: (projectIndex, totalProjects, projectName) => progressCb
  */
-function createProgressCb(quiet, noColor) {
-  if (quiet) return () => {};
+function createProgressFactory(quiet, noColor, scanType) {
+  if (quiet) return () => () => {};
 
   const dim = noColor ? '' : '\x1b[2m';
   const reset = noColor ? '' : '\x1b[0m';
+  const typeLabel = scanType || 'scan';
 
-  return (progress) => {
-    const { current, total, message, phase } = progress || {};
-    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-    const label = message || phase || '';
-    process.stderr.write(`\r  ${dim}[${pct}%] ${label}${reset}`);
+  return (projectIndex, totalProjects, projectName) => {
+    return (progress) => {
+      const { current, total, phase, packageName } = progress || {};
+
+      // Compute overall percentage across all projects.
+      // projectIndex is 0-based; within a project, current/total gives sub-progress.
+      const subProgress = total > 0 && current != null ? current / total : 0;
+      const overallPct = Math.round(((projectIndex + subProgress) / totalProjects) * 100);
+      const pct = Math.min(overallPct, 100);
+
+      // Build descriptive label
+      let detail = '';
+      if (phase === 'universe') {
+        detail = 'Building package list...';
+      } else if (phase === 'scanning' && packageName) {
+        detail = `Checking ${packageName}...`;
+      } else if (phase === 'complete') {
+        detail = 'Done';
+      } else {
+        detail = phase || '';
+      }
+
+      const line = `  ${dim}[${pct}%] ${projectName} [${typeLabel}] ${detail}${reset}`;
+      // Pad to overwrite any previous longer line
+      const padded = line.length < 120 ? line + ' '.repeat(120 - line.length) : line;
+      process.stderr.write(`\r${padded}`);
+    };
   };
 }
 
@@ -95,9 +143,27 @@ async function run(opts) {
   const { dir, type, quiet } = opts;
   const noColor = opts['no-color'] || false;
 
+  // 0. Resolve API keys: CLI param > VULNSWEEP_* env var > generic env var > undefined
+  const githubToken =
+    opts['github-token'] ||
+    process.env.VULNSWEEP_GITHUB_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    undefined;
+  const nvdApiKey =
+    opts['nvd-key'] || process.env.VULNSWEEP_NVD_KEY || process.env.NVD_API_KEY || undefined;
+
+  // Inject credentials into environment so ENRICHMENT_CONFIG getters pick them up.
+  // The ENRICHMENT_CONFIG.GITHUB_TOKEN getter falls back to process.env.GITHUB_TOKEN
+  // and ENRICHMENT_CONFIG.NVD_API_KEY falls back to process.env.NVD_API_KEY when
+  // the secure-store is unavailable (which it always is in CLI context).
+  if (githubToken) process.env.GITHUB_TOKEN = githubToken;
+  if (nvdApiKey) process.env.NVD_API_KEY = nvdApiKey;
+
   // 1. Banner
   if (!quiet) {
     process.stderr.write(`VulnSweep CLI v${version} - Scanning...\n`);
+    if (githubToken) process.stderr.write('  Using GitHub token (authenticated mode)\n');
+    if (nvdApiKey) process.stderr.write('  Using NVD API key (accelerated rate limit)\n');
   }
 
   // 2. Discover projects
@@ -124,16 +190,23 @@ async function run(opts) {
   }
 
   // 3. Execute scan based on type
-  const progressCb = createProgressCb(quiet, noColor);
+  const progressFactory = createProgressFactory(quiet, noColor, type);
+  const totalProjects = projects.length;
   const projectResults = [];
   let failCount = 0;
 
   if (type === 'audit') {
-    const scanOptions = { perPackageTimeoutMs: 30000 };
+    const sourcePreset = opts.sources || 'optimal';
+    const scanOptions = {
+      enabledSources: SOURCE_PRESETS[sourcePreset],
+      perPackageTimeoutMs: PRESET_TIMEOUTS[sourcePreset] || 30000,
+    };
 
-    for (const project of projects) {
+    for (let i = 0; i < projects.length; i++) {
+      const project = projects[i];
+      const projectProgressCb = progressFactory(i, totalProjects, project.name);
       try {
-        const result = await scanProject(project.path, scanOptions, progressCb);
+        const result = await scanProject(project.path, scanOptions, projectProgressCb);
         projectResults.push(result);
       } catch (err) {
         failCount++;
@@ -145,7 +218,7 @@ async function run(opts) {
     }
 
     // Clear progress line
-    if (!quiet) process.stderr.write('\n');
+    if (!quiet) process.stderr.write(`\r${' '.repeat(120)}\r`);
 
     // If ALL projects failed, exit with error code 3
     if (failCount === projects.length) {
@@ -167,9 +240,11 @@ async function run(opts) {
   }
 
   // type === 'dependency'
-  for (const project of projects) {
+  for (let i = 0; i < projects.length; i++) {
+    const project = projects[i];
+    const projectProgressCb = progressFactory(i, totalProjects, project.name);
     try {
-      const result = await scanDependencyUpdates(project.path, progressCb);
+      const result = await scanDependencyUpdates(project.path, projectProgressCb);
 
       if (result.success) {
         projectResults.push(result.content);
@@ -194,7 +269,7 @@ async function run(opts) {
   }
 
   // Clear progress line
-  if (!quiet) process.stderr.write('\n');
+  if (!quiet) process.stderr.write(`\r${' '.repeat(120)}\r`);
 
   // If ALL projects failed, exit with error code 3
   if (failCount === projects.length) {
