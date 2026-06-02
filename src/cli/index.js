@@ -13,6 +13,44 @@ const pkgPath = resolve(__dirname, '../../package.json');
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 const VERSION = pkg.version;
 
+// ─── Banner ────────────────────────────────────────────────────────────────────
+/**
+ * Prints a startup banner with tool name, version, and legal notice.
+ */
+function printBanner() {
+  const WIDTH = 85; // inner width between │ chars
+  const hr = '─'.repeat(WIDTH);
+  const pad = (str, align = 'left') => {
+    const gap = WIDTH - str.length;
+    if (align === 'center') {
+      const left = Math.floor(gap / 2);
+      const right = gap - left;
+      return ' '.repeat(left) + str + ' '.repeat(right);
+    }
+    return str + ' '.repeat(gap);
+  };
+
+  const title = `VulnSweep CLI v${VERSION}`;
+  const lines = [
+    `┌${hr}┐`,
+    `│${pad(title, 'center')}│`,
+    `│${pad('')}│`,
+    `│${pad('  \u26A0 By using this tool you accept our Privacy Policy and Disclaimer.')}│`,
+    `│${pad('    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/PRIVACY_POLICY.md')}│`,
+    `│${pad('    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/DISCLAIMER.md')}│`,
+    `└${hr}┘`,
+  ];
+
+  process.stderr.write(`\n${lines.join('\n')}\n\n`);
+}
+
+// ─── Show banner unless --help, -h, --version, -V ─────────────────────────────
+const skipBannerFlags = ['--help', '-h', '--version', '-V'];
+const shouldSkipBanner = process.argv.slice(2).some((a) => skipBannerFlags.includes(a));
+if (!shouldSkipBanner) {
+  printBanner();
+}
+
 // ─── Subcommand routing (before parseArgs to avoid unknown-positional errors) ──
 const subcommandArg = process.argv[2];
 

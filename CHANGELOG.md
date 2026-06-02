@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-06-02
+
+> **Sprint 2 — CLI Integration, Cloudflare Worker Payment Verification, Unified License Activation, Three-Phase UI Payment Flow, Security Hardening**
+
+### Added
+
+- **CLI Interface** — Full command-line interface for headless/SSH environments (`vulnsweep scan`, `vulnsweep activate`, `vulnsweep status`, `vulnsweep purchase`)
+- **Cloudflare Worker Payment Verification** — Server-side PayPal payment verification replacing the honor system. Prevents transaction reuse, rate limiting, HMAC-signed activation tokens
+- **Unified License Activation** — Both UI and CLI now verify purchases through the Worker before generating a license locally (sludge-crypt + file birthdate encryption preserved)
+- **Three-Phase UI Payment Flow** — BuyModal redesigned with email collection, PayPal payment, and transaction verification phases
+- **Security Hardening** — Pessimistic transaction locking, write-first rate limiting, structured token validation, restricted CORS, X-API-Key authentication
+
+### Fixed
+
+- Removed unused `os` import in scan-cache.js
+- ESLint configuration: Added Cloudflare Worker globals, CLI no-console override, AbortController global
+
+---
+
 ## [1.2.0] - 2025-06-02
 
 > **CLI Implementation — Full CLI interface for VulnSweep scanner (cross-platform Windows + Linux)**
