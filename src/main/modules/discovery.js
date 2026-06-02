@@ -117,7 +117,6 @@ async function discoverProjects(baseDirectory) {
 
   // Check if base directory itself has a package.json
   const baseValidation = await validateProject(baseDirectory);
-  console.log('Base directory validated:', baseDirectory, baseValidation);
   if (baseValidation.success) {
     try {
       const packageJsonPath = path.join(baseDirectory, 'package.json');
@@ -170,7 +169,6 @@ async function discoverProjects(baseDirectory) {
 async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
   // Check if base directory itself has a package.json
   const baseValidation = await validateProject(baseDirectory);
-  console.log('Base directory validated:', baseDirectory, baseValidation);
   if (baseValidation.success) {
     try {
       const packageJsonPath = path.join(baseDirectory, 'package.json');

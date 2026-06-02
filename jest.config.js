@@ -103,6 +103,13 @@ module.exports = {
       },
     },
     {
+      displayName: 'cli',
+      testEnvironment: 'node',
+      testMatch: ['**/__tests__/cli/**/*.test.js', '**/__tests__/cli/**/*.spec.js'],
+      roots: ['<rootDir>'],
+      modulePaths: ['<rootDir>'],
+    },
+    {
       displayName: 'frontend',
       testEnvironment: 'jsdom',
       testMatch: ['**/__tests__/renderer/**/*.test.jsx', '**/__tests__/renderer/**/*.spec.jsx'],

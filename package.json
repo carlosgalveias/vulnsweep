@@ -27,7 +27,14 @@
     "lint:fix": "eslint src/**/*.{js,jsx} --fix",
     "format": "prettier --write \"src/**/*.{js,jsx,css,html}\"",
     "format-check": "prettier --check \"src/**/*.{js,jsx,css,html}\"",
-    "prepare": "husky"
+    "prepare": "husky",
+    "build:cli": "node build-cli.js",
+    "cli": "node src/cli/index.js",
+    "cli:dev": "node src/cli/index.js",
+    "cli:prod": "node dist-cli/vulnsweep.js"
+  },
+  "bin": {
+    "vulnsweep": "./src/cli/index.js"
   },
   "keywords": [
     "electron",

@@ -3,4 +3,4 @@ dist
 dist-main
 dist-renderer
 package.json.backup
-
+dist-cli
