@@ -312,10 +312,11 @@ function buildVulnTable(vulnerabilities) {
       const pkg = esc(vuln.package || 'unknown');
       const ver = esc(vuln.installedVersion || '?');
       const title = esc(vuln.title || '');
-      const fixAvail = vuln.fixAvailable
+      const hasFix = vuln.strategy && vuln.strategy.type !== 'NO_FIX';
+      const fixAvail = hasFix
         ? '<span class="fix-yes">✓ Yes</span>'
         : '<span class="fix-no">✗ No</span>';
-      const fixVer = vuln.fixVersion ? esc(vuln.fixVersion) : '—';
+      const fixVer = hasFix ? esc(vuln.strategy.targetVersion || vuln.patchedVersion || '—') : '—';
 
       return `<tr>
       <td>${sev}</td>
@@ -355,12 +356,18 @@ function buildProjectSections(projects) {
       const name = esc(project.projectName || project.name || `Project ${idx + 1}`);
       const projPath = esc(project.projectPath || project.path || '.');
       const vulns = project.vulnerabilities || [];
+      const strategies = project.strategies || [];
+      // Map strategies onto vulnerabilities (index-aligned)
+      const enriched = vulns.map((vuln, i) => ({
+        ...vuln,
+        strategy: vuln.strategy || strategies[i] || null,
+      }));
       const count = vulns.length;
       const isOpen = idx === 0 ? ' open' : '';
 
       return `<details class="collapsible"${isOpen}>
   <summary>${name} <span style="color:#6b7280;font-weight:400;">(${projPath}) — ${count} vulnerabilit${count === 1 ? 'y' : 'ies'}</span></summary>
-  <div class="content">${buildVulnTable(vulns)}</div>
+  <div class="content">${buildVulnTable(enriched)}</div>
 </details>`;
     })
     .join('\n');

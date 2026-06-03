@@ -380,10 +380,12 @@ async function main() {
         const red = noColor ? '' : '\x1b[31m';
         const reset = noColor ? '' : '\x1b[0m';
         process.stderr.write(`${red}${evaluation.reason}${reset}\n`);
+        await analytics.flush();
         process.exit(1);
       }
     }
 
+    await analytics.flush();
     process.exit(0);
   } catch (err) {
     const noColor = process.argv.includes('--no-color') || process.env.NO_COLOR;
@@ -391,6 +393,7 @@ async function main() {
     const reset = noColor ? '' : '\x1b[0m';
 
     process.stderr.write(`${red}Error: ${err.message}${reset}\n`);
+    await analytics.flush();
     process.exit(3);
   }
 }

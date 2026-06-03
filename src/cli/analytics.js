@@ -15,6 +15,8 @@ const INGESTION_URL = 'https://eu.aptabase.com/api/v0/event';
 // Lazy-loaded to avoid startup cost
 let _sessionId = null;
 
+const _pending = [];
+
 function _getSessionId() {
   if (!_sessionId) {
     // Random session ID per CLI invocation (matches Aptabase SDK behavior)
@@ -50,8 +52,7 @@ function trackEvent(eventName, props) {
     props: { ...props, source: 'cli' },
   };
 
-  // Fire-and-forget: no await, no .catch() that would surface to user
-  fetch(INGESTION_URL, {
+  const promise = fetch(INGESTION_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -62,6 +63,9 @@ function trackEvent(eventName, props) {
   }).catch(() => {
     // Silently swallow. Analytics must NEVER break CLI operation.
   });
+
+  _pending.push(promise);
+  return promise;
 }
 
 let _version = null;
@@ -79,4 +83,11 @@ function _getVersion() {
   return _version;
 }
 
-module.exports = { trackEvent, isOptedOut };
+async function flush() {
+  if (_pending.length === 0) return;
+  const timeout = new Promise((resolve) => setTimeout(resolve, 2000));
+  await Promise.race([Promise.allSettled(_pending), timeout]);
+  _pending.splice(0);
+}
+
+module.exports = { trackEvent, isOptedOut, flush };

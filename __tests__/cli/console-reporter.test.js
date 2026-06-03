@@ -15,8 +15,7 @@ const mockAuditResult = {
           severity: 'critical',
           package: 'lodash',
           installedVersion: '4.17.15',
-          fixAvailable: true,
-          fixVersion: '4.17.21',
+          patchedVersion: '4.17.21',
           sources: ['nvd'],
         },
         {
@@ -25,12 +24,28 @@ const mockAuditResult = {
           severity: 'medium',
           package: 'axios',
           installedVersion: '0.21.0',
-          fixAvailable: false,
-          fixVersion: null,
+          patchedVersion: null,
           sources: ['osv'],
         },
       ],
-      strategies: [],
+      strategies: [
+        {
+          type: 'BUMP_DIRECT',
+          package: 'lodash',
+          currentVersion: '4.17.15',
+          targetVersion: '4.17.21',
+          riskLevel: 'LOW',
+          reason: 'Bump lodash to 4.17.21',
+        },
+        {
+          type: 'NO_FIX',
+          package: 'axios',
+          currentVersion: '0.21.0',
+          targetVersion: null,
+          riskLevel: null,
+          reason: 'No fix available upstream',
+        },
+      ],
       packages: [
         { name: 'lodash', version: '4.17.15' },
         { name: 'axios', version: '0.21.0' },
@@ -97,6 +112,12 @@ describe('console-reporter', () => {
       printAuditReport(mockAuditResult, { noColor: true });
       expect(output).toContain('CRITICAL: 1');
       expect(output).toContain('MEDIUM: 1');
+    });
+
+    it('displays fix info from strategy data', () => {
+      printAuditReport(mockAuditResult, { noColor: true });
+      expect(output).toContain('Fix: upgrade to 4.17.21');
+      expect(output).toContain('No fix available');
     });
 
     it('handles empty results gracefully', () => {

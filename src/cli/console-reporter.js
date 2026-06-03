@@ -202,11 +202,17 @@ function printAuditReport(result, opts) {
     writeln('│');
 
     const vulns = project.vulnerabilities || [];
+    const strategies = project.strategies || [];
 
     if (vulns.length === 0) {
       writeln('│  No vulnerabilities found');
     } else {
-      const sorted = sortBySeverity(vulns);
+      // Map strategies onto vulnerabilities before sorting (index-aligned)
+      const enriched = vulns.map((vuln, idx) => ({
+        ...vuln,
+        strategy: vuln.strategy || strategies[idx] || null,
+      }));
+      const sorted = sortBySeverity(enriched);
 
       for (const vuln of sorted) {
         const sev = formatSeverityLabel(vuln.severity, noColor);
@@ -219,8 +225,11 @@ function printAuditReport(result, opts) {
           writeln(`│    ${title}`);
         }
 
-        if (vuln.fixAvailable && vuln.fixVersion) {
-          writeln(`│    Fix: upgrade to ${vuln.fixVersion}`);
+        const hasfix = vuln.strategy && vuln.strategy.type !== 'NO_FIX';
+        const fixVer = vuln.strategy?.targetVersion || vuln.patchedVersion;
+
+        if (hasfix && fixVer) {
+          writeln(`│    Fix: upgrade to ${fixVer}`);
         } else {
           writeln(`│    ${color('No fix available', 'dim', noColor)}`);
         }

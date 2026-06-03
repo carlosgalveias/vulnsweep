@@ -18,8 +18,7 @@ const mockAuditResult = {
           severity: 'critical',
           package: 'lodash',
           installedVersion: '4.17.15',
-          fixAvailable: true,
-          fixVersion: '4.17.21',
+          patchedVersion: '4.17.21',
           sources: ['nvd'],
         },
         {
@@ -28,12 +27,28 @@ const mockAuditResult = {
           severity: 'medium',
           package: 'axios',
           installedVersion: '0.21.0',
-          fixAvailable: false,
-          fixVersion: null,
+          patchedVersion: null,
           sources: ['osv'],
         },
       ],
-      strategies: [],
+      strategies: [
+        {
+          type: 'BUMP_DIRECT',
+          package: 'lodash',
+          currentVersion: '4.17.15',
+          targetVersion: '4.17.21',
+          riskLevel: 'LOW',
+          reason: 'Bump lodash to 4.17.21',
+        },
+        {
+          type: 'NO_FIX',
+          package: 'axios',
+          currentVersion: '0.21.0',
+          targetVersion: null,
+          riskLevel: null,
+          reason: 'No fix available upstream',
+        },
+      ],
       packages: [
         { name: 'lodash', version: '4.17.15' },
         { name: 'axios', version: '0.21.0' },
@@ -126,5 +141,13 @@ describe('html-report-generator', () => {
     const result = await generateHtmlReport(mockAuditResult, { reportDir: tmpDir });
     const filename = path.basename(result);
     expect(filename).toMatch(/^vulnsweep-report-\d{4}-\d{2}-\d{2}\.html$/);
+  });
+
+  it('HTML contains fix status from strategy data', async () => {
+    const filePath = await generateHtmlReport(mockAuditResult, { reportDir: tmpDir });
+    const html = fs.readFileSync(filePath, 'utf8');
+    expect(html).toContain('fix-yes');
+    expect(html).toContain('fix-no');
+    expect(html).toContain('4.17.21');
   });
 });
