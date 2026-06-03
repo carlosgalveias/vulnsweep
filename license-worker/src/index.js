@@ -26,6 +26,10 @@ export default {
 
     const url = new URL(request.url);
 
+    if (url.pathname === '/dev/seed-transaction' && request.method === 'POST') {
+      return handleDevSeed(request, env);
+    }
+
     if (url.pathname === '/health' && request.method === 'GET') {
       return json({ status: 'ok', timestamp: new Date().toISOString() });
     }
@@ -254,6 +258,40 @@ async function checkRateLimit(ip, kv, maxRequests, windowSeconds) {
   const current = parseInt((await kv.get(key)) || '0') + 1;
   await kv.put(key, String(current), { expirationTtl: windowSeconds });
   return current <= maxRequests;
+}
+
+async function handleDevSeed(request, env) {
+  // Safety: only works when Worker is configured for sandbox
+  if (!env.PAYPAL_API_URL || !env.PAYPAL_API_URL.includes('sandbox')) {
+    return json({ error: 'not_available' }, 404);
+  }
+
+  // Same API key auth as /verify
+  const clientKey = request.headers.get('X-API-Key');
+  if (!clientKey || clientKey !== env.CLIENT_API_KEY) {
+    return json({ error: 'unauthorized' }, 401);
+  }
+
+  const body = await request.json();
+  const { email, transactionId, amount } = body;
+
+  if (!email || !transactionId) {
+    return json({ error: 'missing_fields' }, 400);
+  }
+
+  // Store in KV in the same format as a real verified transaction
+  const record = {
+    email: email.toLowerCase().trim(),
+    amount: amount || '29.99',
+    currency: 'EUR',
+    status: 'COMPLETED',
+    verifiedAt: new Date().toISOString(),
+    devSeeded: true,
+  };
+
+  await env.ACTIVATIONS.put(`txn:${transactionId}`, JSON.stringify(record));
+
+  return json({ seeded: true, transactionId }, 200);
 }
 
 function json(data, status = 200) {

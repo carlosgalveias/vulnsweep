@@ -1514,6 +1514,40 @@ ipcMain.handle('verify-and-activate', async (_event, email, transactionId) => {
 });
 
 // ============================================
+// IPC HANDLERS - DEV PAYMENT BYPASS
+// ============================================
+
+ipcMain.handle('seed-dev-transaction', async (_event, email, amount) => {
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (!isDevelopment) {
+    return { success: false, error: 'Not available in production' };
+  }
+
+  const { LICENSE_API_CONFIG } = require('./config/constants');
+  const transactionId = `DEV${Date.now()}`;
+
+  try {
+    const response = await fetch(`${LICENSE_API_CONFIG.URL}/dev/seed-transaction`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
+      },
+      body: JSON.stringify({ email, transactionId, amount: amount || '29.99' }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return { success: false, error: data.error || 'Seed failed' };
+    }
+
+    return { success: true, transactionId };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
 // IPC HANDLERS - APP INFO (B)
 // ============================================
 

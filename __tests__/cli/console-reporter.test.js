@@ -141,4 +141,25 @@ describe('console-reporter', () => {
       expect(output).not.toMatch(ansiRegex);
     });
   });
+
+  describe('box alignment', () => {
+    it('box lines have consistent width (no overflow)', () => {
+      // Use a result with multi-digit severity counts
+      const mockResult = {
+        type: 'audit',
+        projects: [
+          { name: 'test', path: '/test', findings: Array(123).fill({ severity: 'high' }) },
+        ],
+        summary: { total: 123, critical: 10, high: 99, medium: 12, low: 2, info: 0 },
+      };
+      printAuditReport(mockResult, { noColor: true });
+      const boxLines = output
+        .split('\n')
+        .filter(
+          (l) => l.startsWith('╔') || l.startsWith('║') || l.startsWith('╠') || l.startsWith('╚')
+        );
+      const widths = boxLines.map((l) => l.length);
+      expect(new Set(widths).size).toBe(1);
+    });
+  });
 });

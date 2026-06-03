@@ -18,6 +18,8 @@ import Spinner from './Spinner';
  *   isExpired         {boolean}   — true when the user has an expired annual license
  */
 const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = false }) => {
+  const isDevMode = !!window.electronAPI?.seedDevTransaction;
+
   const [phase, setPhase] = useState('checkout');
   const [email, setEmail] = useState('');
   const [transactionId, setTransactionId] = useState('');
@@ -113,6 +115,28 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
       }
     } catch (err) {
       setErrorMsg(`Payment failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Dev mode handler: Seed a test transaction and advance to verification.
+   */
+  const handleSimulatePayment = async () => {
+    if (!email) return;
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const result = await window.electronAPI.seedDevTransaction(email, '29.99');
+      if (!result.success) {
+        setErrorMsg(result.error || 'Seed failed');
+        return;
+      }
+      setTransactionId(result.transactionId);
+      setPhase('verification');
+    } catch (err) {
+      setErrorMsg(err.message || 'Seed failed');
     } finally {
       setLoading(false);
     }
@@ -262,6 +286,40 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
         <p className="text-xs text-center text-gray-500">
           You&apos;ll enter your Transaction ID after payment to verify.
         </p>
+
+        {isDevMode && (
+          <div
+            style={{
+              background: '#2d1b69',
+              border: '1px solid #7c3aed',
+              borderRadius: '8px',
+              padding: '16px',
+              marginTop: '16px',
+            }}
+          >
+            <p style={{ color: '#a78bfa', fontWeight: 600, marginBottom: '8px' }}>
+              🧪 Dev Mode — Sandbox
+            </p>
+            <p style={{ color: '#c4b5fd', fontSize: '0.85rem', marginBottom: '12px' }}>
+              No real payment required. A test transaction will be seeded.
+            </p>
+            <button
+              onClick={handleSimulatePayment}
+              disabled={!email || loading}
+              style={{
+                background: '#7c3aed',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '10px 20px',
+                cursor: 'pointer',
+                fontWeight: 600,
+              }}
+            >
+              {loading ? 'Seeding...' : 'Simulate Payment'}
+            </button>
+          </div>
+        )}
       </>
     );
   }

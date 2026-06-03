@@ -7,6 +7,8 @@
  * @module config/constants
  */
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
 // ============================================
 // GIT CONFIGURATION
 // ============================================
@@ -181,13 +183,17 @@ const PAYPAL_CONFIG = {
    * PayPal Payment Link URL for the promo price period.
    * @type {string}
    */
-  PAYMENT_URL_PROMO: 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
+  PAYMENT_URL_PROMO: IS_DEV
+    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_PROMO_ID'
+    : 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
 
   /**
    * PayPal Payment Link URL for the full (non-promo) price.
    * @type {string}
    */
-  PAYMENT_URL_FULL: 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
+  PAYMENT_URL_FULL: IS_DEV
+    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_FULL_ID'
+    : 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
 
   /**
    * Hostname of the success/return URL configured in the PayPal payment link.
@@ -218,7 +224,9 @@ const LICENSE_API_CONFIG = {
    * Base URL of the license verification Worker.
    * @type {string}
    */
-  URL: 'https://license.vulnsweep.workers.dev',
+  URL: IS_DEV
+    ? 'https://vulnsweep-license.crazyprints4u.workers.dev'
+    : 'https://vulnsweep-license-production.crazyprints4u.workers.dev',
 
   /**
    * Endpoint for verifying PayPal transactions.
@@ -245,7 +253,7 @@ const LICENSE_API_CONFIG = {
    * arbitrary access to the endpoint. Rotate annually.
    * @type {string}
    */
-  CLIENT_API_KEY: 'vsweep_cli_2024_k7x9m2',
+  CLIENT_API_KEY: '98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73',
 };
 
 // ============================================

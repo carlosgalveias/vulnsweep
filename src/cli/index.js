@@ -18,30 +18,26 @@ const VERSION = pkg.version;
  * Prints a startup banner with tool name, version, and legal notice.
  */
 function printBanner() {
-  const WIDTH = 85; // inner width between │ chars
-  const hr = '─'.repeat(WIDTH);
-  const pad = (str, align = 'left') => {
-    const gap = WIDTH - str.length;
-    if (align === 'center') {
-      const left = Math.floor(gap / 2);
-      const right = gap - left;
-      return ' '.repeat(left) + str + ' '.repeat(right);
-    }
-    return str + ' '.repeat(gap);
-  };
-
+  const { buildBox } = require('./utils');
   const title = `VulnSweep CLI v${VERSION}`;
-  const lines = [
-    `┌${hr}┐`,
-    `│${pad(title, 'center')}│`,
-    `│${pad('')}│`,
-    `│${pad('  \u26A0 By using this tool you accept our Privacy Policy and Disclaimer.')}│`,
-    `│${pad('    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/PRIVACY_POLICY.md')}│`,
-    `│${pad('    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/DISCLAIMER.md')}│`,
-    `└${hr}┘`,
+  const rows = [
+    { text: `  ${title}  `, align: 'center' },
+    { text: ' ', align: 'left' },
+    {
+      text: '  \u26A0 By using this tool you accept our Privacy Policy and Disclaimer.  ',
+      align: 'left',
+    },
+    {
+      text: '    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/PRIVACY_POLICY.md  ',
+      align: 'left',
+    },
+    {
+      text: '    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/DISCLAIMER.md  ',
+      align: 'left',
+    },
   ];
-
-  process.stderr.write(`\n${lines.join('\n')}\n\n`);
+  const box = buildBox(rows, { minWidth: 80, borderStyle: 'single' });
+  process.stderr.write(`\n${box}\n\n`);
 }
 
 // ─── Show banner unless --help, -h, --version, -V ─────────────────────────────

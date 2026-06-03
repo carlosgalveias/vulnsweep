@@ -4,12 +4,12 @@ compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
 binding = "ACTIVATIONS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+id = "6d7d3856dcac4fb4a5d344303de5026a"
+preview_id = "fb48422303db4c31bfff6266ef45b102"
 
 [vars]
 PAYPAL_API_URL = "https://api-m.sandbox.paypal.com"
-EXPECTED_AMOUNTS = "29.99,99.99"
+EXPECTED_AMOUNTS = "9.99,29.99"
 RATE_LIMIT_MAX = "5"
 RATE_LIMIT_WINDOW_SECONDS = "60"
 
@@ -19,14 +19,28 @@ RATE_LIMIT_WINDOW_SECONDS = "60"
 # HMAC_SECRET
 # CLIENT_API_KEY
 
+[env.production]
+name = "vulnsweep-license-production"
+workers_dev = false
+preview_urls = false
+
+[[env.production.kv_namespaces]]
+binding = "ACTIVATIONS"
+id = "6d7d3856dcac4fb4a5d344303de5026a"
+
 [env.production.vars]
 PAYPAL_API_URL = "https://api-m.paypal.com"
-EXPECTED_AMOUNTS = "29.99,99.99"
+EXPECTED_AMOUNTS = "9.99,29.99"
 RATE_LIMIT_MAX = "5"
 RATE_LIMIT_WINDOW_SECONDS = "60"
 
+[[env.staging.kv_namespaces]]
+binding = "ACTIVATIONS"
+id = "6d7d3856dcac4fb4a5d344303de5026a"
+preview_id = "fb48422303db4c31bfff6266ef45b102"
+
 [env.staging.vars]
 PAYPAL_API_URL = "https://api-m.sandbox.paypal.com"
-EXPECTED_AMOUNTS = "29.99,99.99"
+EXPECTED_AMOUNTS = "9.99,29.99"
 RATE_LIMIT_MAX = "10"
 RATE_LIMIT_WINDOW_SECONDS = "60"

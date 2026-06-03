@@ -121,6 +121,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('verify-and-activate', email, transactionId),
 
   /**
+   * Seeds a dev transaction in the sandbox Worker (dev mode only).
+   * @param {string} email - Email for the dev transaction
+   * @param {string} amount - Amount (defaults to '29.99')
+   * @returns {Promise<{ success: boolean, transactionId?: string, error?: string }>}
+   */
+  seedDevTransaction: (email, amount) => ipcRenderer.invoke('seed-dev-transaction', email, amount),
+
+  /**
    * Returns the active purchase price based on installation date.
    * Promo price applies within the first PROMO_DAYS days; full price after that.
    * @returns {Promise<{ price: number, isPromo: boolean, promoEndsAt: string|null }>}

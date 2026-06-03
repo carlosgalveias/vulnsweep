@@ -103,26 +103,20 @@ function sortBySeverity(vulns) {
  * @returns {string} Formatted header block
  */
 function buildHeaderBox(title, projectCount, findingCount, findingLabel, severitySummary, noColor) {
-  const width = 62;
-  const lines = [];
+  const { buildBox } = require('./utils');
+  const rows = [];
 
-  lines.push(`╔${'═'.repeat(width)}╗`);
+  // Title row (centered)
+  rows.push({ text: `  ${title}  `, align: 'center' });
+  rows.push({ separator: true });
 
-  // Title line - centered
-  const titlePad = Math.max(0, Math.floor((width - title.length) / 2));
-  const titleLine = `${' '.repeat(titlePad)}${title}${' '.repeat(width - titlePad - title.length)}`;
-  lines.push(`║${color(titleLine, 'bold', noColor)}║`);
+  // Stats row
+  const statsText = ` Scanned: ${projectCount} project(s)  │  Found: ${findingCount} ${findingLabel} `;
+  rows.push({ text: statsText, align: 'left' });
 
-  lines.push(`╠${'═'.repeat(width)}╣`);
-
-  // Stats line
-  const statsText = `Scanned: ${projectCount} project(s)  │  Found: ${findingCount} ${findingLabel}`;
-  const statsPad = Math.max(0, width - statsText.length - 2);
-  lines.push(`║ ${statsText}${' '.repeat(statsPad)} ║`);
-
-  // Severity breakdown (only for audit)
+  // Severity row (only for audit)
   if (severitySummary) {
-    lines.push(`╠${'═'.repeat(width)}╣`);
+    rows.push({ separator: true });
     const sevParts = [
       `CRITICAL: ${severitySummary.critical}`,
       `HIGH: ${severitySummary.high}`,
@@ -131,13 +125,16 @@ function buildHeaderBox(title, projectCount, findingCount, findingLabel, severit
       `INFO: ${severitySummary.info}`,
     ];
     const sevText = `  ${sevParts.join('  │  ')}  `;
-    const sevPad = Math.max(0, width - sevText.length);
-    lines.push(`║${sevText}${' '.repeat(sevPad)}║`);
+    rows.push({ text: sevText, align: 'left' });
   }
 
-  lines.push(`╚${'═'.repeat(width)}╝`);
-
-  return lines.join('\n');
+  // Build the box, then apply bold color to title line only
+  const box = buildBox(rows, { minWidth: 40, borderStyle: 'double' });
+  const outputLines = box.split('\n');
+  // Title is at index 1 (after top border)
+  const titleContent = outputLines[1].slice(1, -1); // strip ║ on both sides
+  outputLines[1] = `║${color(titleContent, 'bold', noColor)}║`;
+  return outputLines.join('\n');
 }
 
 /**
