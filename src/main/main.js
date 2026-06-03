@@ -513,6 +513,13 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     analytics.trackEvent('repository_scanned', {
       repoCount: results.length,
       totalVulnerabilities: results.reduce((s, r) => s + (r.content?.summary?.total || 0), 0),
+      critical: results.reduce((s, r) => s + (r.content?.summary?.critical || 0), 0),
+      high: results.reduce((s, r) => s + (r.content?.summary?.high || 0), 0),
+      medium: results.reduce(
+        (s, r) => s + (r.content?.summary?.medium || r.content?.summary?.moderate || 0),
+        0
+      ),
+      low: results.reduce((s, r) => s + (r.content?.summary?.low || 0), 0),
     });
     return { success: true, content: results };
   } catch (error) {
@@ -641,12 +648,21 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
         total: projectPaths.length,
       });
     }
+    const _sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const r of results) {
+      for (const v of r.content?.vulnerabilities || []) {
+        let sev = (v.severity || '').toLowerCase();
+        if (sev === 'moderate') sev = 'medium';
+        if (_sevCounts[sev] !== undefined) _sevCounts[sev]++;
+      }
+    }
     analytics.trackEvent('scan_completed', {
       repoCount: results.length,
       totalVulnerabilities: results.reduce(
         (s, r) => s + (r.content?.vulnerabilities?.length || 0),
         0
       ),
+      ..._sevCounts,
     });
     return { success: true, content: results };
   } catch (err) {

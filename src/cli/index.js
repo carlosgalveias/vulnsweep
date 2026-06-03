@@ -3,6 +3,7 @@
 
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
+const analytics = require('./analytics.js');
 const { parseCliArgs } = require('./arg-parser.js');
 const { printAuditReport, printDependencyReport } = require('./console-reporter.js');
 const { run } = require('./runner.js');
@@ -45,6 +46,10 @@ const skipBannerFlags = ['--help', '-h', '--version', '-V'];
 const shouldSkipBanner = process.argv.slice(2).some((a) => skipBannerFlags.includes(a));
 if (!shouldSkipBanner) {
   printBanner();
+  console.log(
+    '\n  🔒 Your code never leaves your machine. All scanning and analysis is performed locally.'
+  );
+  console.log('     We only collect anonymous usage statistics — see documentation for opt-out.\n');
 }
 
 // ─── Subcommand routing (before parseArgs to avoid unknown-positional errors) ──
@@ -119,6 +124,8 @@ OPTIONS:
   -f, --format <fmt>        SBOM format: cyclonedx | spdx (default: cyclonedx)
   -a, --autofix             Auto-fix vulnerable dependencies
   -l, --fix-level <level>   Fix risk: low | high (default: low)
+  -c, --commit              Commit and push changes after autofix
+  -b, --bump                Bump patch version after applying fixes (requires --autofix)
   -u, --update-level <lvl>  Update scope: low | high (default: low)
   -r, --report-dir <dir>    Generate HTML report in directory
   -T, --threshold <sev>     CI/CD fail threshold (default: high)
@@ -142,6 +149,7 @@ EXAMPLES:
   vulnsweep -s report.json -f spdx     Generate SPDX SBOM
   vulnsweep -r ./reports               Generate HTML report
   vulnsweep -T critical                Only fail on critical vulnerabilities
+  vulnsweep -a -c -b                   Autofix, bump version, commit & push
   vulnsweep status                     Show license and fix usage
   vulnsweep purchase                   Buy a license from the CLI
   vulnsweep --github-token ghp_xxx     Scan with GitHub authenticated mode
@@ -153,6 +161,10 @@ EXIT CODES:
   2   Invalid arguments
   3   Scan error
   4   No projects found
+
+TELEMETRY:
+  VulnSweep CLI sends anonymous usage analytics (event counts only).
+  To disable: set VULNSWEEP_NO_TELEMETRY=1 or DO_NOT_TRACK=1
 `.trimStart();
 
   process.stdout.write(help);
@@ -163,6 +175,7 @@ EXIT CODES:
  */
 async function main() {
   process.on('SIGINT', () => process.exit(130));
+  analytics.trackEvent('app_initialized');
 
   let opts;
   try {
@@ -188,6 +201,23 @@ async function main() {
     process.exit(0);
   }
 
+  // Save original intent before license gate may disable autofix
+  const userRequestedAutofix = opts.autofix;
+
+  // ─── Headless/CI gate: disable destructive flags in unattended environments ───
+  const { isHeadlessEnvironment } = require('./utils');
+  if ((opts.autofix || opts.commit || opts.bump) && isHeadlessEnvironment()) {
+    const noColor = opts['no-color'] || process.env.NO_COLOR;
+    const yellow = noColor ? '' : '\x1b[33m';
+    const reset = noColor ? '' : '\x1b[0m';
+    process.stderr.write(
+      `${yellow}⚠ Autofix is not available in headless or CI/CD environments.${reset}\n`
+    );
+    opts.autofix = false;
+    opts.commit = false;
+    opts.bump = false;
+  }
+
   // License gate: check if autofix is allowed before scanning
   if (opts.autofix) {
     const { canAutofix } = require('./license-manager');
@@ -203,14 +233,46 @@ async function main() {
     }
   }
 
+  // Validate commit/bump require autofix
+  if (opts.commit && !opts.autofix && userRequestedAutofix) {
+    // License gate killed autofix — commit is implicitly disabled, no confusing warning needed
+    opts.commit = false;
+  } else if (opts.commit && !opts.autofix) {
+    process.stderr.write('  ⚠ --commit requires --autofix. Ignoring.\n');
+    opts.commit = false;
+  }
+  if (opts.bump && !opts.autofix && userRequestedAutofix) {
+    // License gate killed autofix — bump is implicitly disabled, no confusing warning needed
+    opts.bump = false;
+  } else if (opts.bump && !opts.autofix) {
+    process.stderr.write('  ⚠ --bump requires --autofix. Ignoring.\n');
+    opts.bump = false;
+  }
+
+  // Validate --bump not supported for dependency scans
+  if (opts.bump && opts.type === 'dependency') {
+    console.warn('⚠ --bump is not supported for dependency update scans. Ignoring.');
+    opts.bump = false;
+  }
+
   try {
     const result = await run(opts);
+
+    analytics.trackEvent('scan_completed', {
+      repoCount: result.projects ? result.projects.filter(Boolean).length : 0,
+      totalVulnerabilities: result.summary ? result.summary.total : 0,
+      critical: result.summary ? result.summary.critical : 0,
+      high: result.summary ? result.summary.high : 0,
+      medium: result.summary ? result.summary.medium : 0,
+      low: result.summary ? result.summary.low : 0,
+    });
 
     // Generate SBOM if requested
     if (opts.sbom) {
       const { writeSbom } = require('./sbom-writer');
       await writeSbom(result, opts);
       process.stderr.write(`SBOM written to ${opts.sbom}\n`);
+      analytics.trackEvent('sbom_generated', { format: opts.format || 'cyclonedx' });
     }
 
     // Generate HTML report if requested
@@ -242,12 +304,69 @@ async function main() {
       // Consume fix credits for all successful fixes applied
       if (fixResult.applied > 0) {
         consumeFixes(fixResult.applied);
+        analytics.trackEvent('vulnerability_fixed', {
+          fixCount: fixResult.applied,
+          skipped: fixResult.skipped,
+          failed: fixResult.failed,
+        });
       }
 
       if (!opts.quiet) {
         process.stderr.write(
           `\n  Auto-fix summary: ${fixResult.applied} applied, ${fixResult.skipped} skipped, ${fixResult.failed} failed\n`
         );
+      }
+
+      // Commit and push if requested
+      if (
+        opts.commit &&
+        fixResult.applied > 0 &&
+        fixResult.modifiedPaths &&
+        fixResult.modifiedPaths.length > 0
+      ) {
+        const { commitAndPush } = require('../main/modules/git');
+        const commitMessage = opts.bump
+          ? 'fix(security): update vulnerable dependencies and bump version'
+          : 'fix(security): update vulnerable dependencies';
+        let committed = 0;
+        let commitFailed = 0;
+
+        for (const modPath of fixResult.modifiedPaths) {
+          try {
+            const gitResult = await commitAndPush(modPath, commitMessage);
+            if (gitResult.success) {
+              committed++;
+            } else {
+              commitFailed++;
+            }
+          } catch (err) {
+            commitFailed++;
+            if (!opts.quiet) {
+              console.error(`  ✗ Commit failed for ${modPath}: ${err.message}`);
+            }
+          }
+        }
+
+        if (committed > 0) {
+          analytics.trackEvent('commit_pushed', {
+            committed,
+            commitFailed,
+            fixCount: fixResult.applied,
+          });
+        }
+
+        if (!opts.quiet) {
+          if (commitFailed === 0) {
+            process.stderr.write(
+              `  \u2713 Committed and pushed changes for ${committed} project(s)\n`
+            );
+          } else {
+            if (committed > 0) {
+              process.stderr.write(`  \u2713 Committed and pushed: ${committed} project(s)\n`);
+            }
+            process.stderr.write(`  \u2717 Failed to commit: ${commitFailed} project(s)\n`);
+          }
+        }
       }
     }
 

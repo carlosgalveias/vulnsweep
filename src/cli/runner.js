@@ -207,6 +207,10 @@ async function run(opts) {
       const projectProgressCb = progressFactory(i, totalProjects, project.name);
       try {
         const result = await scanProject(project.path, scanOptions, projectProgressCb);
+        if (result) {
+          result.projectName =
+            project.packageJson?.name || project.name || path.basename(project.path);
+        }
         projectResults.push(result);
       } catch (err) {
         failCount++;
@@ -247,7 +251,16 @@ async function run(opts) {
       const result = await scanDependencyUpdates(project.path, projectProgressCb);
 
       if (result.success) {
-        projectResults.push(result.content);
+        const depResult = result.content;
+        if (depResult && Array.isArray(depResult)) {
+          for (const repo of depResult) {
+            if (repo) {
+              repo.projectName =
+                project.packageJson?.name || project.name || path.basename(project.path);
+            }
+          }
+        }
+        projectResults.push(depResult);
       } else {
         failCount++;
         if (!quiet) {

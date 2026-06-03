@@ -68,7 +68,7 @@ describe('analytics module', () => {
       const a = load(true, true, null, false, false, false);
       a.init();
       a.trackEvent('e', { x: 1 });
-      expect(mockTrack).toHaveBeenCalledWith('e', { x: 1 });
+      expect(mockTrack).toHaveBeenCalledWith('e', { x: 1, source: 'ui' });
     });
   });
 
@@ -141,6 +141,24 @@ describe('analytics module', () => {
       a.init();
       a.init();
       expect(mockInit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('trackEvent() injects source: "ui" into props', () => {
+    jest.isolateModules(() => {
+      const a = load(true, true, null, false, false, false);
+      a.init();
+      a.trackEvent('test_event', { x: 1 });
+      expect(mockTrack).toHaveBeenCalledWith('test_event', { x: 1, source: 'ui' });
+    });
+  });
+
+  it('trackEvent() injects source: "ui" even when props is undefined', () => {
+    jest.isolateModules(() => {
+      const a = load(true, true, null, false, false, false);
+      a.init();
+      a.trackEvent('bare_event');
+      expect(mockTrack).toHaveBeenCalledWith('bare_event', { source: 'ui' });
     });
   });
 });

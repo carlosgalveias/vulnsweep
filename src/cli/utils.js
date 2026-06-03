@@ -1,5 +1,7 @@
 'use strict';
 
+const { existsSync } = require('node:fs');
+
 /**
  * Shared utility functions for VulnSweep CLI modules.
  *
@@ -78,4 +80,35 @@ function buildBox(rows, { minWidth = 40, borderStyle = 'double' } = {}) {
   return output.join('\n');
 }
 
-module.exports = { extractUpdatesFromArray, buildBox };
+/**
+ * Detects whether the CLI is running in a headless/CI/CD environment.
+ * Checks common CI environment variables and Docker container indicators.
+ *
+ * @returns {boolean} true if a headless/CI environment is detected
+ */
+function isHeadlessEnvironment() {
+  const CI_ENV_VARS = [
+    'CI',
+    'GITHUB_ACTIONS',
+    'GITLAB_CI',
+    'JENKINS_URL',
+    'CIRCLECI',
+    'TRAVIS',
+    'BITBUCKET_BUILD_NUMBER',
+    'TF_BUILD',
+    'CODEBUILD_BUILD_ID',
+    'DRONE',
+    'BUILD_ID',
+    'TEAMCITY_VERSION',
+  ];
+
+  for (const varName of CI_ENV_VARS) {
+    if (process.env[varName]) return true;
+  }
+
+  if (existsSync('/.dockerenv')) return true;
+
+  return false;
+}
+
+module.exports = { extractUpdatesFromArray, buildBox, isHeadlessEnvironment };

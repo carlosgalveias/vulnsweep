@@ -32,6 +32,8 @@ const OPTIONS_CONFIG = {
   'fix-level': { type: 'string', short: 'l', default: 'low' },
   'update-level': { type: 'string', short: 'u', default: 'low' },
   'report-dir': { type: 'string', short: 'r' },
+  commit: { type: 'boolean', short: 'c', default: false },
+  bump: { type: 'boolean', short: 'b', default: false },
   threshold: { type: 'string', short: 'T', default: 'high' },
   quiet: { type: 'boolean', short: 'q', default: false },
   'no-color': { type: 'boolean', default: false },

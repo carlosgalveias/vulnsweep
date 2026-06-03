@@ -143,6 +143,10 @@ function AboutTab({
             Disclaimer
           </button>
         </div>
+        <p className="text-red-400 font-bold text-xs mt-3">
+          🔒 Your code never leaves your machine. All scanning and analysis is performed locally. We
+          only collect anonymous usage statistics (opt-out available below).
+        </p>
       </div>
 
       <div className={card}>

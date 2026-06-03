@@ -72,7 +72,7 @@ function logProgress(msg, quiet) {
  *
  * @param {object} result - Run result from runner.js
  * @param {object} opts - CLI options
- * @returns {Promise<{applied: number, failed: number, skipped: number, total: number}>}
+ * @returns {Promise<{applied: number, failed: number, skipped: number, total: number, modifiedPaths: string[]}>}
  */
 async function applyAuditFixes(result, opts) {
   const fixLevel = opts['fix-level'] || opts.fixLevel || 'low';
@@ -81,6 +81,7 @@ async function applyAuditFixes(result, opts) {
   let failed = 0;
   let skipped = 0;
   let total = 0;
+  const modifiedPaths = [];
 
   const projects = (result.projects || []).filter(Boolean);
 
@@ -121,7 +122,7 @@ async function applyAuditFixes(result, opts) {
 
     // Apply all eligible strategies for this project via fix-applier
     try {
-      const fixResult = await applyFixes(projectPath, eligible, false);
+      const fixResult = await applyFixes(projectPath, eligible, !!opts.bump);
 
       if (fixResult.success) {
         const appliedCount =
@@ -129,6 +130,7 @@ async function applyAuditFixes(result, opts) {
             ? fixResult.content.applied.length
             : eligible.length;
         applied += appliedCount;
+        if (appliedCount > 0) modifiedPaths.push(projectPath);
         logProgress(`✓ Applied ${appliedCount} fixes in ${projectName}`, quiet);
       } else {
         // Bulk apply failed — attempt individual npm installs as fallback
@@ -136,6 +138,7 @@ async function applyAuditFixes(result, opts) {
         applied += individualResults.applied;
         failed += individualResults.failed;
         if (individualResults.applied > 0) {
+          modifiedPaths.push(projectPath);
           logProgress(
             `✓ Applied ${individualResults.applied} fixes in ${projectName} (${individualResults.failed} failed)`,
             quiet
@@ -150,6 +153,7 @@ async function applyAuditFixes(result, opts) {
       applied += individualResults.applied;
       failed += individualResults.failed;
       if (individualResults.applied > 0) {
+        modifiedPaths.push(projectPath);
         logProgress(
           `✓ Applied ${individualResults.applied} fixes in ${projectName} (${individualResults.failed} failed)`,
           quiet
@@ -160,7 +164,7 @@ async function applyAuditFixes(result, opts) {
     }
   }
 
-  return { applied, failed, skipped, total };
+  return { applied, failed, skipped, total, modifiedPaths: [...new Set(modifiedPaths)] };
 }
 
 /**
@@ -206,7 +210,7 @@ async function applyIndividualFixes(strategies, projectPath, quiet) {
  *
  * @param {object} result - Run result from runner.js
  * @param {object} opts - CLI options
- * @returns {Promise<{applied: number, failed: number, skipped: number, total: number}>}
+ * @returns {Promise<{applied: number, failed: number, skipped: number, total: number, modifiedPaths: string[]}>}
  */
 async function applyDependencyUpdates(result, opts) {
   const updateLevel = opts['update-level'] || opts.updateLevel || 'low';
@@ -215,6 +219,7 @@ async function applyDependencyUpdates(result, opts) {
   let failed = 0;
   let skipped = 0;
   let total = 0;
+  const modifiedPaths = [];
 
   const projects = (result.projects || []).filter(Boolean);
 
@@ -269,6 +274,7 @@ async function applyDependencyUpdates(result, opts) {
 
         if (updateResult.success) {
           applied += eligible.length;
+          modifiedPaths.push(repoPath);
           logProgress(`✓ Updated ${eligible.length} dependencies in ${repoName}`, quiet);
         } else {
           // Bulk failed — try individual installs
@@ -276,6 +282,7 @@ async function applyDependencyUpdates(result, opts) {
           applied += individualResults.applied;
           failed += individualResults.failed;
           if (individualResults.applied > 0) {
+            modifiedPaths.push(repoPath);
             logProgress(
               `✓ Updated ${individualResults.applied} dependencies in ${repoName} (${individualResults.failed} failed)`,
               quiet
@@ -293,6 +300,7 @@ async function applyDependencyUpdates(result, opts) {
         applied += individualResults.applied;
         failed += individualResults.failed;
         if (individualResults.applied > 0) {
+          modifiedPaths.push(repoPath);
           logProgress(
             `✓ Updated ${individualResults.applied} dependencies in ${repoName} (${individualResults.failed} failed)`,
             quiet
@@ -304,7 +312,7 @@ async function applyDependencyUpdates(result, opts) {
     }
   }
 
-  return { applied, failed, skipped, total };
+  return { applied, failed, skipped, total, modifiedPaths: [...new Set(modifiedPaths)] };
 }
 
 /**
@@ -342,11 +350,11 @@ async function applyIndividualUpdates(updates, quiet) {
  *
  * @param {object} result - The run result from runner.js (contains `projects` array)
  * @param {object} opts - CLI options including autofix, fixLevel, updateLevel, type, quiet, noColor
- * @returns {Promise<{applied: number, failed: number, skipped: number, total: number}>}
+ * @returns {Promise<{applied: number, failed: number, skipped: number, total: number, modifiedPaths: string[]}>}
  */
 async function applyAutofix(result, opts) {
   if (!result || !Array.isArray(result.projects)) {
-    return { applied: 0, failed: 0, skipped: 0, total: 0 };
+    return { applied: 0, failed: 0, skipped: 0, total: 0, modifiedPaths: [] };
   }
 
   const type = result.type || opts.type || 'audit';
