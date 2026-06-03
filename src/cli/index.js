@@ -126,6 +126,9 @@ OPTIONS:
   -l, --fix-level <level>   Fix risk: low | high (default: low)
   -c, --commit              Commit and push changes after autofix
   -b, --bump                Bump patch version after applying fixes (requires --autofix)
+      --allow-reset         Reset git state before applying fixes
+      --remove-package-lock Remove package-lock.json before npm install
+      --remove-overrides    Remove overrides/resolutions from package.json
   -u, --update-level <lvl>  Update scope: low | high (default: low)
   -r, --report-dir <dir>    Generate HTML report in directory
   -T, --threshold <sev>     CI/CD fail threshold (default: high)

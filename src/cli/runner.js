@@ -2,31 +2,12 @@
 
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
+const { SOURCE_PRESETS, PRESET_TIMEOUTS } = require('../main/config/source-presets');
 const { scanDependencyUpdates } = require('../main/modules/dep-updates/dep-updates-scanner');
 const { discoverProjects } = require('../main/modules/discovery');
 const { scanProject } = require('../main/modules/scanner/scanner-orchestrator');
 
 const { version } = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
-
-/**
- * Source preset mappings — defines which vulnerability sources to query per preset.
- * @type {Record<string, string[]>}
- */
-const SOURCE_PRESETS = {
-  fast: ['npm-audit', 'osv'],
-  optimal: ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'],
-  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
-};
-
-/**
- * Per-package timeout values per source preset (in ms).
- * @type {Record<string, number>}
- */
-const PRESET_TIMEOUTS = {
-  fast: 15000,
-  optimal: 30000,
-  full: 60000,
-};
 
 /**
  * Creates a progress callback factory that writes to stderr.

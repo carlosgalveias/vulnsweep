@@ -66,9 +66,12 @@ describe('parseCliArgs', () => {
 
     const resultSpdx = parseCliArgs(['--format', 'spdx']);
     expect(resultSpdx.format).toBe('spdx');
+
+    const resultCsv = parseCliArgs(['--format', 'csv']);
+    expect(resultCsv.format).toBe('csv');
   });
 
   it('rejects invalid --format value', () => {
-    expect(() => parseCliArgs(['--format', 'csv'])).toThrow(/Invalid value "csv" for --format/);
+    expect(() => parseCliArgs(['--format', 'xml'])).toThrow(/Invalid value "xml" for --format/);
   });
 });

@@ -319,7 +319,7 @@ const ENRICHMENT_CONFIG = {
     } catch {
       // secure-store unavailable (e.g. CI environment) — fall through to env var
     }
-    return process.env.NVD_API_KEY || undefined;
+    return process.env.VULNSWEEP_NVD_KEY || process.env.NVD_API_KEY || undefined;
   },
 
   /**
@@ -341,7 +341,7 @@ const ENRICHMENT_CONFIG = {
     } catch {
       // secure-store unavailable (e.g. CI environment) — fall through to env var
     }
-    return process.env.GITHUB_TOKEN || undefined;
+    return process.env.VULNSWEEP_GITHUB_TOKEN || process.env.GITHUB_TOKEN || undefined;
   },
 
   /**

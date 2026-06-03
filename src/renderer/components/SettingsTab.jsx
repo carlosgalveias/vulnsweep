@@ -1,5 +1,6 @@
-﻿import PropTypes from 'prop-types';
+import PropTypes from 'prop-types';
 import { useState } from 'react';
+import { SOURCE_PRESETS, ALL_SOURCES } from '../../main/config/source-presets';
 import useCredentials from '../hooks/useCredentials';
 import useSettings from '../hooks/useSettings';
 import CredentialsPanel from './CredentialsPanel';
@@ -13,18 +14,13 @@ const SOURCE_LABELS = {
   epss: 'EPSS (Exploit Prediction Scoring System)',
 };
 
-const ALL_SOURCE_IDS = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
-
-// Preset source lists for scan modes
-const FAST_SOURCES = ['npm-audit', 'osv'];
-const FULL_SOURCES = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
-const OPTIMAL_SOURCES = ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'];
+const ALL_SOURCE_IDS = ALL_SOURCES;
 
 // Map preset name → source array (KISS: map, not nested ternary)
 const PRESET_SOURCES = Object.freeze({
-  fast: FAST_SOURCES,
-  optimal: OPTIMAL_SOURCES,
-  full: FULL_SOURCES,
+  fast: SOURCE_PRESETS.fast,
+  optimal: SOURCE_PRESETS.optimal,
+  full: SOURCE_PRESETS.full,
 });
 
 // Pre-sorted keys for active-preset detection (avoids sorting on every render)
@@ -61,7 +57,7 @@ function SettingsTab({
 
   // Apply a preset by writing the source list directly
   const handlePresetChange = (preset) => {
-    saveSettings({ enabledSources: PRESET_SOURCES[preset] ?? FULL_SOURCES });
+    saveSettings({ enabledSources: PRESET_SOURCES[preset] ?? SOURCE_PRESETS.full });
   };
 
   const handleSourceToggle = (sourceId) => {
@@ -94,7 +90,7 @@ function SettingsTab({
   };
 
   // Derive the active preset from current enabledSources — do not store in state
-  const enabledSources = settings.enabledSources ?? FULL_SOURCES;
+  const enabledSources = settings.enabledSources ?? SOURCE_PRESETS.full;
   const enabledKey = [...enabledSources].sort().join(',');
   const activePreset =
     Object.entries(PRESET_KEYS).find(([, key]) => key === enabledKey)?.[0] ?? null;

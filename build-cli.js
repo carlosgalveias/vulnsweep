@@ -41,7 +41,7 @@ async function buildCli() {
 
   // Write dist-cli/package.json for standalone npm global install
   const distPkg = {
-    name: '@vulnsweep/cli',
+    name: 'vulnsweep',
     version: pkg.version,
     description: 'VulnSweep CLI - npm vulnerability scanner',
     bin: { vulnsweep: './vulnsweep.js' },

@@ -10,7 +10,7 @@ const { parseArgs } = require('node:util');
  */
 const ENUM_VALUES = {
   type: ['audit', 'dependency'],
-  format: ['cyclonedx', 'spdx'],
+  format: ['cyclonedx', 'spdx', 'csv'],
   'fix-level': ['low', 'high'],
   'update-level': ['low', 'high'],
   threshold: ['none', 'critical', 'high', 'medium', 'low', 'any'],
@@ -34,6 +34,9 @@ const OPTIONS_CONFIG = {
   'report-dir': { type: 'string', short: 'r' },
   commit: { type: 'boolean', short: 'c', default: false },
   bump: { type: 'boolean', short: 'b', default: false },
+  'allow-reset': { type: 'boolean', default: false },
+  'remove-package-lock': { type: 'boolean', default: false },
+  'remove-overrides': { type: 'boolean', default: false },
   threshold: { type: 'string', short: 'T', default: 'high' },
   quiet: { type: 'boolean', short: 'q', default: false },
   'no-color': { type: 'boolean', default: false },

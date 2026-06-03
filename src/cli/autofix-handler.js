@@ -1,6 +1,8 @@
 'use strict';
 
 const { execFile } = require('node:child_process');
+const { existsSync, readFileSync, writeFileSync, unlinkSync } = require('node:fs');
+const { join } = require('node:path');
 const { promisify } = require('node:util');
 const { applyFixes } = require('../main/modules/audit/appliers/fix-applier');
 const { applyUpdates } = require('../main/modules/dep-updates/dep-updates-scanner');
@@ -352,9 +354,99 @@ async function applyIndividualUpdates(updates, quiet) {
  * @param {object} opts - CLI options including autofix, fixLevel, updateLevel, type, quiet, noColor
  * @returns {Promise<{applied: number, failed: number, skipped: number, total: number, modifiedPaths: string[]}>}
  */
+/**
+ * Runs preparation steps before fix application.
+ * Order: git reset → remove overrides → delete package-lock.json
+ *
+ * @param {string[]} projectPaths - Array of project directory paths
+ * @param {object} opts - CLI options
+ */
+async function runPreparationSteps(projectPaths, opts) {
+  const quiet = opts.quiet || false;
+  const allowReset = opts['allow-reset'] || opts.allowReset || false;
+  const removePackageLock = opts['remove-package-lock'] || opts.removePackageLock || false;
+  const removeOverrides = opts['remove-overrides'] || opts.removeOverrides || false;
+
+  if (!allowReset && !removePackageLock && !removeOverrides) return;
+
+  for (const projectPath of projectPaths) {
+    // 1. git reset --hard
+    if (allowReset) {
+      try {
+        await execFileAsync('git', ['reset', '--hard'], {
+          cwd: projectPath,
+          encoding: 'utf8',
+        });
+        logProgress('✓ git reset --hard completed', quiet);
+      } catch (err) {
+        logProgress(`⚠ git reset --hard failed: ${err.message}`, quiet);
+      }
+    }
+
+    // 2. Remove overrides/resolutions from package.json
+    if (removeOverrides) {
+      try {
+        const pkgPath = join(projectPath, 'package.json');
+        if (existsSync(pkgPath)) {
+          const raw = readFileSync(pkgPath, 'utf8');
+          const pkg = JSON.parse(raw);
+          let modified = false;
+          if (pkg.overrides) {
+            delete pkg.overrides;
+            modified = true;
+          }
+          if (pkg.resolutions) {
+            delete pkg.resolutions;
+            modified = true;
+          }
+          if (modified) {
+            writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
+            logProgress('✓ Removed overrides/resolutions from package.json', quiet);
+          }
+        }
+      } catch (err) {
+        logProgress(`⚠ Failed to remove overrides: ${err.message}`, quiet);
+      }
+    }
+
+    // 3. Delete package-lock.json
+    if (removePackageLock) {
+      try {
+        const lockPath = join(projectPath, 'package-lock.json');
+        if (existsSync(lockPath)) {
+          unlinkSync(lockPath);
+          logProgress('✓ Removed package-lock.json', quiet);
+        }
+      } catch (err) {
+        logProgress(`⚠ Failed to remove package-lock.json: ${err.message}`, quiet);
+      }
+    }
+  }
+}
+
 async function applyAutofix(result, opts) {
   if (!result || !Array.isArray(result.projects)) {
     return { applied: 0, failed: 0, skipped: 0, total: 0, modifiedPaths: [] };
+  }
+
+  // Collect project paths for preparation steps
+  const projectPaths = [];
+  for (const project of result.projects) {
+    if (!project) continue;
+    if (project.projectPath) {
+      projectPaths.push(project.projectPath);
+    } else if (project.repoPath) {
+      projectPaths.push(project.repoPath);
+    } else if (Array.isArray(project)) {
+      for (const repo of project) {
+        if (repo && repo.repoPath) projectPaths.push(repo.repoPath);
+      }
+    }
+  }
+
+  // Run preparation steps before applying fixes
+  if (projectPaths.length > 0) {
+    await runPreparationSteps([...new Set(projectPaths)], opts);
   }
 
   const type = result.type || opts.type || 'audit';
