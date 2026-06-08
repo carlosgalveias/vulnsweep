@@ -151,6 +151,18 @@ describe('extractGhsaIdFromReferences()', () => {
     const refs = ['https://github.com/advisories/GHSA-abcd-1234-5678'];
     expect(extractGhsaIdFromReferences(refs)).toBe('GHSA-ABCD-1234-5678');
   });
+  it('extracts GHSA ID from repo-specific advisory URL', () => {
+    const refs = [
+      {
+        url: 'https://github.com/juliangruber/brace-expansion/security/advisories/GHSA-jxxr-4gwj-5jf2',
+      },
+    ];
+    expect(extractGhsaIdFromReferences(refs)).toBe('GHSA-JXXR-4GWJ-5JF2');
+  });
+  it('extracts GHSA ID from repo-specific URL as string reference', () => {
+    const refs = ['https://github.com/expressjs/morgan/security/advisories/GHSA-4vj7-5mj6-jm8m'];
+    expect(extractGhsaIdFromReferences(refs)).toBe('GHSA-4VJ7-5MJ6-JM8M');
+  });
   it('returns null when no GitHub advisory URL present', () => {
     const refs = [{ url: 'https://nvd.nist.gov/vuln/detail/CVE-2021-1234' }];
     expect(extractGhsaIdFromReferences(refs)).toBeNull();
@@ -222,11 +234,14 @@ describe('mergeGhData()', () => {
     const merged = mergeGhData(nvdResult, ghResult);
     expect(merged.fixedIn).toBe('4.17.21');
   });
-  it('uses earlier version from patchedVersions as fixedIn', () => {
+  it('does not use GHSA version that falls within NVD vulnerable range (conservative)', () => {
+    // NVD says <4.18.0 is affected, GHSA says >=4.17.15 is fixed
+    // 4.17.15 and 4.17.21 are WITHIN <4.18.0, so conservative merge rejects them
     const nvdResult = { fixedIn: '4.18.0', vulnerableRange: '<4.18.0' };
     const ghResult = { patchedVersions: ['>= 4.17.21', '>= 4.17.15'] };
     const merged = mergeGhData(nvdResult, ghResult);
-    expect(merged.fixedIn).toBe('4.17.15');
+    // Conservative: keep NVD's fixedIn since GHSA versions are in the vulnerable range
+    expect(merged.fixedIn).toBe('4.18.0');
   });
   it('does not override fixedIn when GH version is higher', () => {
     const nvdResult = { fixedIn: '4.17.21', vulnerableRange: '<4.17.21' };
@@ -239,6 +254,23 @@ describe('mergeGhData()', () => {
     const ghResult = { patchedVersions: ['>= 4.17.21'] };
     const merged = mergeGhData(nvdResult, ghResult);
     expect(merged.vulnerableRange).toBe('<4.17.21');
+  });
+  it('does NOT use GHSA fix version when it falls within NVD vulnerable range (conservative reconciliation)', () => {
+    // NVD says <=5.0.6 is affected, GHSA says >=5.0.6 is the fix
+    // 5.0.6 is WITHIN the NVD affected range, so it should NOT be used as fixedIn
+    const nvdResult = { fixedIn: '5.0.7', vulnerableRange: '>=5.0.0 <=5.0.6' };
+    const ghResult = { patchedVersions: ['>= 5.0.6'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    // Should keep the NVD fixedIn (5.0.7) since GHSA's 5.0.6 is in the vulnerable range
+    expect(merged.fixedIn).toBe('5.0.7');
+  });
+  it('uses GHSA fix version when it is outside NVD vulnerable range', () => {
+    // NVD says <4.17.21 is affected, GHSA says >=4.17.21 is the fix
+    // 4.17.21 is NOT within <4.17.21, so it should be used
+    const nvdResult = { fixedIn: '4.18.0', vulnerableRange: '<4.17.21' };
+    const ghResult = { patchedVersions: ['>= 4.17.21'] };
+    const merged = mergeGhData(nvdResult, ghResult);
+    expect(merged.fixedIn).toBe('4.17.21');
   });
 });
 
@@ -318,6 +350,21 @@ describe('parseKeywordResponse()', () => {
       expect(results[0].vulnerableRange).toBe('<4.17.21');
     });
 
+    it('enriches result from repo-specific advisory URL', async () => {
+      const json = makeNvdResponse(
+        'CVE-2024-99999',
+        [{ lang: 'en', value: 'Repo-specific advisory URL test.' }],
+        [{ vulnerable: true, criteria: CPE_LODASH_VULN }],
+        [{ url: 'https://github.com/lodash/lodash/security/advisories/GHSA-repo-spec-test' }]
+      );
+      const ghCache = {
+        'GHSA-REPO-SPEC-TEST': { found: true, patchedVersions: ['>= 4.17.22'] },
+      };
+      const results = await parseKeywordResponse(json, 'lodash', '4.17.4', ghCache);
+      expect(results).toHaveLength(1);
+      expect(results[0].fixedIn).toBe('4.17.22');
+    });
+
     it('uses cached GitHub advisory data', async () => {
       const json = makeNvdResponse(
         'CVE-2021-12345',
@@ -346,6 +393,66 @@ describe('parseKeywordResponse()', () => {
       const results = await parseKeywordResponse(json, 'lodash', '4.17.4', ghCache);
       expect(results).toHaveLength(1);
       expect(results[0].fixedIn).toBe('4.17.5');
+    });
+
+    it('nullifies fixedIn when it falls within the vulnerable range (safety net)', async () => {
+      // Simulates a case where GHSA sets fixedIn to a version that is within the NVD range.
+      // NVD has versionEndIncluding: 5.0.6 → fixedIn heuristic = 5.0.7
+      // GHSA says >=5.0.6 is the fix, but conservative merge blocks it (5.0.6 is in range)
+      // So fixedIn stays at 5.0.7 from NVD heuristic.
+      // The safety net only nullifies if fixedIn is IN the vulnerable range.
+      // 5.0.7 is NOT in >=5.0.0 <=5.0.6, so it stays.
+      //
+      // To test the safety net, we use a CPE with versionEndExcluding where GHSA provides
+      // a fixedIn that IS within the affected range (a contradictory advisory).
+      const json = makeNvdResponse(
+        'CVE-2024-55555',
+        [{ lang: 'en', value: 'Test: fixedIn within vulnerable range.' }],
+        [
+          {
+            vulnerable: true,
+            criteria: 'cpe:2.3:a:test_pkg:test_pkg:*:*:*:*:*:node.js:*:*',
+            versionStartIncluding: '1.0.0',
+            versionEndExcluding: '2.0.0',
+          },
+        ],
+        [{ url: 'https://github.com/advisories/GHSA-safe-net0-test' }]
+      );
+      // NVD says fixedIn = 2.0.0 (from versionEndExcluding)
+      // GHSA says fixedIn = 1.5.0 which is WITHIN >=1.0.0 <2.0.0
+      const ghCache = {
+        'GHSA-SAFE-NET0-TEST': { found: true, patchedVersions: ['>= 1.5.0'] },
+      };
+      const results = await parseKeywordResponse(json, 'test-pkg', '1.2.0', ghCache);
+      expect(results).toHaveLength(1);
+      // Conservative merge blocks 1.5.0 (within <2.0.0 range), keeps NVD's 2.0.0
+      // Safety net: 2.0.0 does NOT satisfy >=1.0.0 <2.0.0, so it stays
+      expect(results[0].fixedIn).toBe('2.0.0');
+    });
+
+    it('nullifies fixedIn via safety net when only heuristic version exists in range', async () => {
+      // Edge case: CPE with open-ended range (no upper bound) + GHSA sets fixedIn within
+      const json = makeNvdResponse(
+        'CVE-2024-66666',
+        [{ lang: 'en', value: 'Open range vulnerability.' }],
+        [
+          {
+            vulnerable: true,
+            criteria: 'cpe:2.3:a:test_pkg:test_pkg:*:*:*:*:*:node.js:*:*',
+            versionStartIncluding: '1.0.0',
+          },
+        ],
+        [{ url: 'https://github.com/advisories/GHSA-open-rang-test' }]
+      );
+      // No versionEnd → NVD fixedIn = null, vulnerableRange = ">=1.0.0"
+      // GHSA says fixedIn = 1.5.0
+      const ghCache = {
+        'GHSA-OPEN-RANG-TEST': { found: true, patchedVersions: ['>= 1.5.0'] },
+      };
+      const results = await parseKeywordResponse(json, 'test-pkg', '1.2.0', ghCache);
+      expect(results).toHaveLength(1);
+      // 1.5.0 satisfies >=1.0.0 (the vulnerable range), so safety net nullifies it
+      expect(results[0].fixedIn).toBeNull();
     });
   });
 

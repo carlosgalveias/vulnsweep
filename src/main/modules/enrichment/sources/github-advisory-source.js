@@ -242,4 +242,83 @@ async function queryGitHubAdvisory(id, signal) {
   }, signal);
 }
 
-module.exports = { queryGitHubAdvisory };
+/**
+ * Queries GitHub Advisory API for all advisories affecting a specific npm package.
+ * Uses the ?affects= parameter for package-level discovery — independent of OSV.
+ *
+ * Endpoint: GET https://api.github.com/advisories?ecosystem=npm&affects=<packageName>
+ *
+ * Returns raw advisory objects from the GitHub API. Each advisory has:
+ *   - ghsa_id: string
+ *   - cve_id: string|null
+ *   - severity: string
+ *   - summary: string
+ *   - html_url: string
+ *   - vulnerabilities[]: { package: { ecosystem, name }, vulnerable_version_range, patched_versions, ... }
+ *
+ * Rate limiting: uses the same rateLimiter.enqueue() mechanism — adds ONE API call per package.
+ *
+ * @param {string} packageName - npm package name
+ * @param {AbortSignal} [signal] - Abort signal
+ * @returns {Promise<object[]>} Array of raw advisory objects from GitHub API
+ */
+async function queryGitHubAdvisoryByPackage(packageName, signal) {
+  if (!packageName || typeof packageName !== 'string') return [];
+
+  if (ENRICHMENT_CONFIG.GITHUB_TOKEN && !_authLogEmitted) {
+    _authLogEmitted = true;
+    console.log('[GitHubAdvisory] Authenticated API access active (5,000 req/hr limit)');
+  }
+
+  const url = `${ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL}?ecosystem=npm&per_page=100&affects=${encodeURIComponent(packageName)}`;
+
+  return rateLimiter.enqueue(async (sig) => {
+    for (let attempt = 0; attempt <= GIT_CONFIG.GITHUB_MAX_RETRIES; attempt++) {
+      if (sig?.aborted) {
+        throw new Error('Request aborted');
+      }
+
+      try {
+        const result = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, sig);
+
+        if (sig?.aborted) {
+          throw new Error('Request aborted');
+        }
+
+        if (!result.body || result.statusCode === 404) {
+          return [];
+        }
+
+        // The ?affects= endpoint returns an array of advisory objects
+        if (Array.isArray(result.body)) {
+          return result.body;
+        }
+
+        return [];
+      } catch (err) {
+        if (err.isRateLimit && attempt < GIT_CONFIG.GITHUB_MAX_RETRIES) {
+          const delay = err.retryAfterMs != null ? err.retryAfterMs : computeBackoffDelay(attempt);
+          rateLimiter.setRateLimited(delay);
+          console.warn(
+            `[github] Rate limited (${err.statusCode || 429}), retry ${attempt + 1}/${GIT_CONFIG.GITHUB_MAX_RETRIES} after ${delay}ms`
+          );
+          await sleep(delay);
+          continue;
+        }
+        if (err.isRateLimit) {
+          console.warn(
+            `[github] Rate limit retries exhausted after ${GIT_CONFIG.GITHUB_MAX_RETRIES} attempts for package ${packageName}`
+          );
+          return [];
+        }
+        console.warn(
+          `[github-advisory-source] queryGitHubAdvisoryByPackage error for ${packageName}: ${err.message}`
+        );
+        return [];
+      }
+    }
+    return [];
+  }, signal);
+}
+
+module.exports = { queryGitHubAdvisory, queryGitHubAdvisoryByPackage };

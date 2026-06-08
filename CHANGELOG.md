@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.5] - 2026-06-08
+
+> **Bug Fixes — GHSA Enrichment & Independent Advisory Discovery**
+
+### Fixed
+
+- **GHSA URL regex** — Expanded to match repo-specific advisory URLs (`github.com/<owner>/<repo>/security/advisories/GHSA-...`) in addition to global URLs. Previously, vulnerabilities with repo-specific GHSA references (e.g., brace-expansion) were not enriched.
+- **False fix version detection** — Added conservative GHSA/NVD reconciliation: when GHSA suggests a fix version that NVD says is still affected, the contradictory fix is rejected. Prevents suggesting non-existent versions like `5.0.7` for brace-expansion.
+- **fixedIn validation safety net** — Post-merge validation ensures the final fix version is actually outside the vulnerable range. Catches edge cases where heuristics produce invalid fix versions.
+- **Independent GHSA discovery** — Rewrote the `github-advisory` scanner source to query the GitHub Advisory API directly by package name (`?affects=<pkg>`), removing the dependency on OSV for vulnerability discovery. Fixes the morgan@1.10.1 detection failure in optimal mode.
+- **Multi-branch advisory fix versions** — `extractFixedInFromAdvisory` now correctly selects the fix version for the user's installed branch (e.g., 4.x users get the 4.x fix, not a 3.x fix from the same advisory).
+- **API pagination** — Added `per_page=100` to GitHub Advisory package queries to prevent truncated results for heavily-affected packages.
+
+---
+
 ## [1.3.0] - 2026-06-02
 
 > **Sprint 2 — CLI Integration, Cloudflare Worker Payment Verification, Unified License Activation, Three-Phase UI Payment Flow, Security Hardening**

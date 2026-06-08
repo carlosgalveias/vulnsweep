@@ -310,7 +310,8 @@ function parseCvss(metrics) {
  */
 function extractGhsaIdFromReferences(references) {
   if (!Array.isArray(references) || references.length === 0) return null;
-  const GHSA_PATTERN = /github\.com\/advisories\/(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i;
+  const GHSA_PATTERN =
+    /github\.com\/(?:[^/]+\/[^/]+\/security\/)?advisories\/(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i;
   for (const ref of references) {
     const url = typeof ref === 'string' ? ref : ref.url;
     if (typeof url === 'string') {
@@ -341,7 +342,21 @@ function mergeGhData(nvdResult, ghResult) {
         (min, v) => (semver.lt(v, min) ? v : min),
         semverVersions[0]
       );
-      if (!merged.fixedIn || (minFixed && semver.lt(minFixed, merged.fixedIn))) {
+      // Conservative reconciliation: if NVD has a vulnerableRange and the GHSA
+      // fix version falls WITHIN it, do not use it (NVD says it's still affected).
+      // This prevents contradictory data from setting an invalid fix version.
+      let ghFixValid = true;
+      if (merged.vulnerableRange && minFixed) {
+        try {
+          const coercedMin = semver.coerce(minFixed);
+          if (coercedMin && semver.satisfies(coercedMin.version, merged.vulnerableRange)) {
+            ghFixValid = false;
+          }
+        } catch {
+          /* if range parsing fails, allow the GH fix */
+        }
+      }
+      if (ghFixValid && (!merged.fixedIn || (minFixed && semver.lt(minFixed, merged.fixedIn)))) {
         merged.fixedIn = minFixed;
       }
     }
@@ -423,6 +438,20 @@ async function parseKeywordResponse(json, pkgName, pkgVersion, ghCache = {}, sig
         const merged = mergeGhData({ fixedIn, vulnerableRange }, ghData);
         fixedIn = merged.fixedIn;
         vulnerableRange = merged.vulnerableRange;
+      }
+    }
+
+    // Safety net: validate that fixedIn is actually outside the vulnerable range.
+    // If fixedIn is itself satisfied by the vulnerable range, it's not a real fix
+    // (e.g., NVD says <=5.0.6 is affected but GHSA/heuristic says fixedIn=5.0.6).
+    if (fixedIn && vulnerableRange) {
+      try {
+        const coercedFix = semver.coerce(fixedIn);
+        if (coercedFix && semver.satisfies(coercedFix.version, vulnerableRange)) {
+          fixedIn = null;
+        }
+      } catch {
+        /* keep fixedIn as-is if range parsing fails */
       }
     }
 
