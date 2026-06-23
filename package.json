@@ -31,7 +31,8 @@
     "build:cli": "node build-cli.js",
     "cli": "node src/cli/index.js",
     "cli:dev": "node src/cli/index.js",
-    "cli:prod": "node dist-cli/vulnsweep.js"
+    "cli:prod": "node dist-cli/vulnsweep.js",
+    "nuke": "node scripts/nuke-all-data.js"
   },
   "bin": {
     "vulnsweep": "./src/cli/index.js"

@@ -18,7 +18,7 @@ import Spinner from './Spinner';
  *   isExpired         {boolean}   — true when the user has an expired annual license
  */
 const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = false }) => {
-  const isDevMode = !!window.electronAPI?.seedDevTransaction;
+  const isDevMode = import.meta.env.DEV && !!window.electronAPI?.seedDevTransaction;
 
   const [phase, setPhase] = useState('checkout');
   const [email, setEmail] = useState('');

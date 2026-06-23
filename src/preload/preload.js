@@ -122,11 +122,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /**
    * Seeds a dev transaction in the sandbox Worker (dev mode only).
+   * Only exposed when building in development mode.
    * @param {string} email - Email for the dev transaction
    * @param {string} amount - Amount (defaults to '29.99')
    * @returns {Promise<{ success: boolean, transactionId?: string, error?: string }>}
    */
-  seedDevTransaction: (email, amount) => ipcRenderer.invoke('seed-dev-transaction', email, amount),
+  ...(process.env.VULNSWEEP_DEV === 'true'
+    ? {
+        seedDevTransaction: (email, amount) =>
+          ipcRenderer.invoke('seed-dev-transaction', email, amount),
+      }
+    : {}),
 
   /**
    * Returns the active purchase price based on installation date.

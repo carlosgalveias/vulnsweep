@@ -39,6 +39,9 @@ const preloadBuildOptions = {
   minify: isProduction,
   sourcemap: !isProduction,
   treeShaking: true,
+  define: {
+    'process.env.VULNSWEEP_DEV': isProduction ? '"false"' : '"true"',
+  },
   ...(isProduction && {
     minifyWhitespace: true,
     minifyIdentifiers: true,
