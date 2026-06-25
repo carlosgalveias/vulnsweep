@@ -122,6 +122,7 @@ module.exports = {
               ['@babel/preset-env', { targets: { node: 'current' } }],
               ['@babel/preset-react', { runtime: 'automatic' }],
             ],
+            plugins: ['./__tests__/utils/babel-import-meta-plugin.js'],
           },
         ],
       },

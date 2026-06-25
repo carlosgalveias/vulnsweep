@@ -50,9 +50,22 @@ function mockMakeRetry(failCount, hdrs429, okBody) {
 }
 
 describe('Group 1: Authorization header (GITHUB_TOKEN)', () => {
-  beforeEach(() => jest.resetModules());
+  const origVulnsweep = process.env.VULNSWEEP_GITHUB_TOKEN;
+  beforeEach(() => {
+    jest.resetModules();
+    // Prevent secure-store from returning real credentials during tests
+    jest.mock('../../../../../src/main/utils/secure-store', () => ({
+      storeGet: jest.fn(() => null),
+      storeSet: jest.fn(),
+      storeDelete: jest.fn(),
+    }));
+  });
   afterEach(() => {
     delete process.env.GITHUB_TOKEN;
+    delete process.env.VULNSWEEP_GITHUB_TOKEN;
+  });
+  afterAll(() => {
+    if (origVulnsweep !== undefined) process.env.VULNSWEEP_GITHUB_TOKEN = origVulnsweep;
   });
 
   it('1.1 sets Authorization: Bearer when token present', async () => {

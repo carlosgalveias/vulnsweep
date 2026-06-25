@@ -13,6 +13,9 @@ const excluded_folders = [
   'temp',
 ];
 
+/** Maximum recursion depth for directory traversal (prevents OOM from symlink loops or deep trees) */
+const MAX_RECURSION_DEPTH = 10;
+
 /**
  * Validates if a directory is a valid Node.js project.
  * A valid project must have package.json. package-lock.json is NOT required
@@ -37,10 +40,15 @@ async function validateProject(projectPath) {
  * @param {string} dirPath - Directory path to scan
  * @param {string} baseDirectory - Original base directory for relative path calculation
  * @param {string[]} discoveredPaths - Array of already-discovered project paths to avoid duplicates
+ * @param {number} depth - Current recursion depth (capped at MAX_RECURSION_DEPTH)
  * @returns {Promise<Array>} - Array of discovered projects
  */
-async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths) {
+async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths, depth = 0) {
   const projects = [];
+
+  if (depth >= MAX_RECURSION_DEPTH) {
+    return projects;
+  }
 
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -81,7 +89,8 @@ async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths
       const nestedProjects = await discoverProjectsRecursive(
         projectPath,
         baseDirectory,
-        discoveredPaths
+        discoveredPaths,
+        depth + 1
       );
       projects.push(...nestedProjects);
     }
@@ -164,9 +173,28 @@ async function discoverProjects(baseDirectory) {
  * Yields projects as they are discovered (recursive)
  * @param {string} baseDirectory - Base directory path to scan
  * @param {string[]} discoveredPaths - Internal use: tracks discovered paths to avoid duplicates
+ * @param {number} depth - Current recursion depth (capped at MAX_RECURSION_DEPTH)
  * @yields {Object} - Project object
  */
-async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
+async function* discoverProjectsStream(baseDirectory, discoveredPaths = [], depth = 0) {
+  if (depth >= MAX_RECURSION_DEPTH) {
+    return;
+  }
+
+  // Validate base directory exists on the initial call (depth 0)
+  if (depth === 0) {
+    try {
+      await fs.access(baseDirectory, fsConstants.R_OK);
+      const baseStat = await fs.stat(baseDirectory);
+      if (!baseStat.isDirectory()) {
+        throw new Error(`Invalid base directory: Path is not a directory: ${baseDirectory}`);
+      }
+    } catch (error) {
+      if (error.message.startsWith('Invalid base directory')) throw error;
+      throw new Error(`Invalid base directory: ${error.message}`);
+    }
+  }
+
   // Check if base directory itself has a package.json
   const baseValidation = await validateProject(baseDirectory);
   if (baseValidation.success) {
@@ -201,7 +229,7 @@ async function* discoverProjectsStream(baseDirectory, discoveredPaths = []) {
       }
 
       // Recursively yield projects from subdirectories
-      yield* discoverProjectsStream(projectPath, discoveredPaths);
+      yield* discoverProjectsStream(projectPath, discoveredPaths, depth + 1);
     }
   } catch {
     // Skip directories with access issues

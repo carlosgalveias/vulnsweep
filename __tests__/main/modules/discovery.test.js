@@ -83,14 +83,25 @@ describe('discovery module', () => {
 
   describe('discoverProjects', () => {
     it('should discover valid Node.js projects at immediate level', async () => {
-      fs.access.mockResolvedValue();
+      // Base dir itself is NOT a project (no package.json), but children are
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'project1', isDirectory: () => true },
-        { name: 'project2', isDirectory: () => true },
-        { name: 'file.txt', isDirectory: () => false },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'project1', isDirectory: () => true },
+            { name: 'project2', isDirectory: () => true },
+            { name: 'file.txt', isDirectory: () => false },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -104,21 +115,26 @@ describe('discovery module', () => {
 
     it('should discover nested projects with relative path names', async () => {
       const baseDir = '/Work/projects';
+      const myProjDir = path.join(baseDir, 'my_proj');
+      const demoDir = path.join(myProjDir, 'demo');
 
-      fs.access.mockResolvedValue();
+      // Base dir does NOT have package.json; child dirs do
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      // First call for /Work/projects - returns one subdir 'my_proj'
       fs.readdir.mockImplementation((dirPath) => {
         if (dirPath === baseDir) {
           return Promise.resolve([{ name: 'my_proj', isDirectory: () => true }]);
         }
-        // Second call for /Work/projects/my_proj - returns 'demo'
-        if (dirPath === '/Work/projects/my_proj') {
+        if (dirPath === myProjDir) {
           return Promise.resolve([{ name: 'demo', isDirectory: () => true }]);
         }
-        // Third call for /Work/projects/my_proj/demo - no subdirs
-        if (dirPath === '/Work/projects/my_proj/demo') {
+        if (dirPath === demoDir) {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -135,23 +151,31 @@ describe('discovery module', () => {
         (p) => p.name.includes(path.sep) || p.name.includes('/')
       );
       expect(nestedProject).toBeDefined();
-      expect(nestedProject.path).toBe('/Work/projects/my_proj/demo');
+      expect(nestedProject.path).toBe(demoDir);
     });
 
     it('should discover nested projects when parent is already a project', async () => {
       const baseDir = '/Work/projects';
+      const parentDir = path.join(baseDir, 'project-with-nested');
+      const childDir = path.join(parentDir, 'nested-child');
 
-      fs.access.mockResolvedValue();
+      // Base dir itself does NOT have package.json; children do
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
       fs.readdir.mockImplementation((dirPath) => {
         if (dirPath === baseDir) {
           return Promise.resolve([{ name: 'project-with-nested', isDirectory: () => true }]);
         }
-        if (dirPath === '/Work/projects/project-with-nested') {
+        if (dirPath === parentDir) {
           return Promise.resolve([{ name: 'nested-child', isDirectory: () => true }]);
         }
-        if (dirPath === '/Work/projects/project-with-nested/nested-child') {
+        if (dirPath === childDir) {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -165,7 +189,7 @@ describe('discovery module', () => {
       // Should find both the parent and the nested child
       expect(result.content).toHaveLength(2);
       expect(result.content[0].name).toBe('project-with-nested');
-      expect(result.content[1].name).toBe('project-with-nested/nested-child');
+      expect(result.content[1].name).toContain('nested-child');
     });
 
     it('should check if base directory itself has package.json', async () => {
@@ -195,7 +219,12 @@ describe('discovery module', () => {
       });
 
       fs.stat.mockResolvedValue({ isDirectory: () => true });
-      fs.readdir.mockResolvedValue([{ name: 'not-a-project', isDirectory: () => true }]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([{ name: 'not-a-project', isDirectory: () => true }]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await discovery.discoverProjects('/base/dir');
 
@@ -206,6 +235,10 @@ describe('discovery module', () => {
 
     it('should discover projects even when package-lock.json is absent', async () => {
       fs.access.mockImplementation((filePath) => {
+        // Base dir has no package.json; children do (but lack lock file)
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
         if (filePath.endsWith('package-lock.json')) {
           return Promise.reject(new Error('ENOENT'));
         }
@@ -213,7 +246,12 @@ describe('discovery module', () => {
       });
 
       fs.stat.mockResolvedValue({ isDirectory: () => true });
-      fs.readdir.mockResolvedValue([{ name: 'no-lockfile-project', isDirectory: () => true }]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([{ name: 'no-lockfile-project', isDirectory: () => true }]);
+        }
+        return Promise.resolve([]);
+      });
       fs.readFile.mockResolvedValue(
         JSON.stringify({ name: 'no-lockfile-project', version: '1.0.0' })
       );
@@ -226,14 +264,22 @@ describe('discovery module', () => {
     });
 
     it('should skip directories with invalid package.json', async () => {
+      // access resolves for all (base + children have package.json) but readFile
+      // returns invalid JSON for all, so no projects are counted.
       fs.access.mockResolvedValue();
       fs.stat.mockResolvedValue({ isDirectory: () => true });
-      fs.readdir.mockResolvedValue([{ name: 'bad-project', isDirectory: () => true }]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([{ name: 'bad-project', isDirectory: () => true }]);
+        }
+        return Promise.resolve([]);
+      });
       fs.readFile.mockResolvedValue('{ invalid json }');
 
       const result = await discovery.discoverProjects('/base/dir');
 
       expect(result.success).toBe(true);
+      // Both base dir and bad-project have invalid JSON, so 0 projects
       expect(result.content).toHaveLength(0);
     });
 
@@ -259,13 +305,24 @@ describe('discovery module', () => {
     it('should find projects inside a numeric-prefixed parent folder (01_utils regression)', async () => {
       const baseDir = '/Work/cognus-voice/01_utils';
 
-      fs.access.mockResolvedValue();
+      // Base dir does not have package.json
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'some-project', isDirectory: () => true },
-        { name: 'another-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'some-project', isDirectory: () => true },
+            { name: 'another-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'some-project', version: '1.0.0' }));
 
@@ -281,6 +338,10 @@ describe('discovery module', () => {
       const baseDir = '/Work/cognus-voice/01_utils';
 
       fs.access.mockImplementation((filePath) => {
+        // Base dir has no package.json
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
         if (filePath.endsWith('package-lock.json')) {
           return Promise.reject(new Error('ENOENT'));
         }
@@ -289,10 +350,15 @@ describe('discovery module', () => {
 
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'some-project', isDirectory: () => true },
-        { name: 'another-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'some-project', isDirectory: () => true },
+            { name: 'another-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'child-project', version: '1.0.0' }));
 
@@ -303,13 +369,23 @@ describe('discovery module', () => {
     });
 
     it('should skip node_modules directory in discoverProjects', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'node_modules', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'node_modules', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -321,16 +397,26 @@ describe('discovery module', () => {
     });
 
     it('should skip hidden directories (starting with .) in discoverProjects', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: '.git', isDirectory: () => true },
-        { name: '.idea', isDirectory: () => true },
-        { name: '.vscode', isDirectory: () => true },
-        { name: '.hidden-folder', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: '.git', isDirectory: () => true },
+            { name: '.idea', isDirectory: () => true },
+            { name: '.vscode', isDirectory: () => true },
+            { name: '.hidden-folder', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -342,16 +428,26 @@ describe('discovery module', () => {
     });
 
     it('should skip coverage, dist, tmp, and temp directories in discoverProjects', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'coverage', isDirectory: () => true },
-        { name: 'dist', isDirectory: () => true },
-        { name: 'tmp', isDirectory: () => true },
-        { name: 'temp', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'coverage', isDirectory: () => true },
+            { name: 'dist', isDirectory: () => true },
+            { name: 'tmp', isDirectory: () => true },
+            { name: 'temp', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -365,13 +461,24 @@ describe('discovery module', () => {
 
   describe('discoverProjectsStream', () => {
     it('should yield projects as they are discovered', async () => {
-      fs.access.mockResolvedValue();
+      // Base dir does not have package.json, but children do
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'project1', isDirectory: () => true },
-        { name: 'project2', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'project1', isDirectory: () => true },
+            { name: 'project2', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -385,13 +492,23 @@ describe('discovery module', () => {
     });
 
     it('should skip invalid projects without throwing', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'good-project', isDirectory: () => true },
-        { name: 'bad-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'good-project', isDirectory: () => true },
+            { name: 'bad-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       let callCount = 0;
       fs.readFile.mockImplementation(() => {
@@ -422,13 +539,24 @@ describe('discovery module', () => {
     it('should yield projects inside numeric-prefixed folder without .git (regression)', async () => {
       const baseDir = '/Work/cognus-voice/01_utils';
 
-      fs.access.mockResolvedValue();
+      // Base dir does not have package.json, but children do
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'some-project', isDirectory: () => true },
-        { name: 'another-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'some-project', isDirectory: () => true },
+            { name: 'another-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'child-project', version: '2.0.0' }));
 
@@ -443,13 +571,23 @@ describe('discovery module', () => {
     });
 
     it('should skip node_modules directory in discoverProjectsStream', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'node_modules', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'node_modules', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -463,16 +601,26 @@ describe('discovery module', () => {
     });
 
     it('should skip hidden directories (starting with .) in discoverProjectsStream', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: '.git', isDirectory: () => true },
-        { name: '.idea', isDirectory: () => true },
-        { name: '.vscode', isDirectory: () => true },
-        { name: '.hidden-folder', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: '.git', isDirectory: () => true },
+            { name: '.idea', isDirectory: () => true },
+            { name: '.vscode', isDirectory: () => true },
+            { name: '.hidden-folder', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
@@ -486,16 +634,26 @@ describe('discovery module', () => {
     });
 
     it('should skip coverage, dist, tmp, and temp directories in discoverProjectsStream', async () => {
-      fs.access.mockResolvedValue();
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
       fs.stat.mockResolvedValue({ isDirectory: () => true });
 
-      fs.readdir.mockResolvedValue([
-        { name: 'coverage', isDirectory: () => true },
-        { name: 'dist', isDirectory: () => true },
-        { name: 'tmp', isDirectory: () => true },
-        { name: 'temp', isDirectory: () => true },
-        { name: 'valid-project', isDirectory: () => true },
-      ]);
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === '/base/dir') {
+          return Promise.resolve([
+            { name: 'coverage', isDirectory: () => true },
+            { name: 'dist', isDirectory: () => true },
+            { name: 'tmp', isDirectory: () => true },
+            { name: 'temp', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 

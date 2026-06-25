@@ -297,7 +297,7 @@ async function query(pkg, signal) {
               title: advisory.summary || '',
               description: null,
               fixedIn,
-              url: advisory.html_url || null,
+              url: ghsaId ? `https://github.com/advisories/${ghsaId}` : advisory.html_url || null,
               cvssScore: null,
               cvssVector: null,
               cisaKnownExploited: false,

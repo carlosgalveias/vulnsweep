@@ -1,0 +1,7 @@
+{
+  "name": "morgan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/expressjs/morgan.git"
+  }
+}

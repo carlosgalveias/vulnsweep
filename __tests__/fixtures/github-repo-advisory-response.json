@@ -1,0 +1,21 @@
+[
+  {
+    "ghsa_id": "GHSA-4vj7-5mj6-jm8m",
+    "cve_id": "CVE-2026-5078",
+    "severity": "medium",
+    "summary": "Morgan allows log injection via crafted request headers",
+    "state": "published",
+    "html_url": "https://github.com/expressjs/morgan/security/advisories/GHSA-4vj7-5mj6-jm8m",
+    "vulnerabilities": [
+      {
+        "package": {
+          "name": "morgan",
+          "ecosystem": "npm"
+        },
+        "vulnerable_version_range": ">= 1.2.0, <= 1.10.1",
+        "patched_versions": ">= 1.11.0",
+        "first_patched_version": { "identifier": "1.11.0" }
+      }
+    ]
+  }
+]

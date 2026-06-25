@@ -621,7 +621,10 @@ describe('App component', () => {
 
       // depUpdatesDirty is false on initial render, so commitAndPush must not
       // call the IPC endpoint for any repo.
-      expect(window.electronAPI.invoke).not.toHaveBeenCalled();
+      // Note: invoke may be called for other purposes (e.g. BuyModal fetches pricing),
+      // so we assert specifically that OP_COMMIT_AND_PUSH (0x04) was never dispatched.
+      const commitCalls = window.electronAPI.invoke.mock.calls.filter((args) => args[0] === 0x04);
+      expect(commitCalls).toHaveLength(0);
     });
   });
 });
