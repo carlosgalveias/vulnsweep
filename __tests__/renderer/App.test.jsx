@@ -547,19 +547,13 @@ describe('App component', () => {
     const REPO2 = '/workspace/repo2';
 
     beforeEach(() => {
-      // Initialise window.electronAPI for jsdom — not provided by the test
-      // environment and must be set before any test that assigns to its props.
+      // Initialise window.electronAPI for jsdom — dispatch-based mock
       window.electronAPI = {
-        getCommercialStatus: jest.fn().mockResolvedValue({ isCommercial: false, isLicensed: true }),
-        getTrialStatus: jest.fn().mockResolvedValue({}),
-        getInstallInfo: jest.fn().mockResolvedValue({}),
-        scanDepUpdates: jest.fn().mockResolvedValue({ success: true, content: [] }),
-        applyDepUpdates: jest
-          .fn()
-          .mockResolvedValue({ success: true, commitMessage: 'chore: update deps' }),
-        commitAndPush: jest.fn().mockResolvedValue({ success: true }),
-        scanProjects: jest.fn().mockResolvedValue([]),
-        onScanProgress: jest.fn().mockReturnValue(() => {}),
+        invoke: jest.fn((_op, ..._args) => {
+          return Promise.resolve(undefined);
+        }),
+        on: jest.fn(() => jest.fn()),
+        off: jest.fn(),
       };
     });
 
@@ -603,13 +597,10 @@ describe('App component', () => {
       expect(repos.size).toBe(1);
     });
 
-    it('commitAndPush does not call electronAPI.commitAndPush before apply', () => {
-      // Regression guard: confirm that before any apply action the commit spy
-      // receives zero calls.  The real scoping correctness is validated by the
-      // pure key-derivation tests above, which mirror the exact logic in
-      // commitAndPush after the fix.
-      const commitSpy = jest.fn().mockResolvedValue({ success: true });
-      window.electronAPI.commitAndPush = commitSpy;
+    it('commitAndPush does not call electronAPI.invoke for commit before apply', () => {
+      // Regression guard: confirm that before any apply action the invoke spy
+      // receives zero calls for COMMIT_AND_PUSH. The real scoping correctness
+      // is validated by the pure key-derivation tests above.
 
       useProjectDiscovery.mockReturnValue({
         selectedFolder: '/workspace',
@@ -630,7 +621,7 @@ describe('App component', () => {
 
       // depUpdatesDirty is false on initial render, so commitAndPush must not
       // call the IPC endpoint for any repo.
-      expect(commitSpy).not.toHaveBeenCalled();
+      expect(window.electronAPI.invoke).not.toHaveBeenCalled();
     });
   });
 });

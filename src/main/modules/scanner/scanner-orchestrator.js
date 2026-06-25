@@ -1,6 +1,7 @@
 'use strict';
 
 const { SCANNER_CONFIG } = require('../../config/constants');
+const { SOURCE_PRESETS } = require('../../config/source-presets');
 const scanTelemetry = require('../../utils/scan-telemetry');
 const { clearNvdSessionCache } = require('../enrichment/sources/nvd-source');
 const { buildPackageUniverse, getUniqueQueryTargets } = require('./package-universe-builder');
@@ -50,12 +51,17 @@ function emit(cb, payload) {
 // Resolve active source plugins from options.enabledSources.
 // Fast/Full presets in the UI write enabledSources directly; the scanner reads only that.
 function resolvePlugins(options) {
-  const FALLBACK_IDS = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
   const ids =
     Array.isArray(options.enabledSources) && options.enabledSources.length > 0
       ? options.enabledSources
-      : FALLBACK_IDS;
-  return ids.filter((id) => ALL_SOURCES[id]).map((id) => ALL_SOURCES[id]);
+      : SOURCE_PRESETS.optimal;
+  const plugins = ids.filter((id) => ALL_SOURCES[id]).map((id) => ALL_SOURCES[id]);
+  if (plugins.length === 0) {
+    console.warn(
+      '[scanner-orchestrator] No valid source plugins resolved — scan will produce no results'
+    );
+  }
+  return plugins;
 }
 
 function pluginsToIds(plugins) {

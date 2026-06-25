@@ -1,8 +1,23 @@
-import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from 'fs';
 import { platform } from 'os';
 import esbuild from 'esbuild';
+import JavaScriptObfuscator from 'javascript-obfuscator';
+import { cliConfig } from './obfuscation.config.js';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf-8'));
+const skipObfuscation = process.env.SKIP_OBFUSCATION === 'true';
+
+/**
+ * Obfuscates a built JS file in-place using javascript-obfuscator.
+ * @param {string} filePath - Path to the file to obfuscate
+ * @param {object} config - Obfuscation config object
+ */
+function obfuscateFile(filePath, config) {
+  const code = readFileSync(filePath, 'utf-8');
+  const result = JavaScriptObfuscator.obfuscate(code, config);
+  writeFileSync(filePath, result.getObfuscatedCode());
+  console.log(`  ✓ Obfuscated: ${filePath}`);
+}
 
 async function buildCli() {
   console.log('Building VulnSweep CLI...');
@@ -35,6 +50,22 @@ async function buildCli() {
   let bundle = readFileSync('dist-cli/vulnsweep.js', 'utf-8');
   bundle = bundle.replaceAll('../../package.json', './package.json');
   writeFileSync('dist-cli/vulnsweep.js', bundle);
+
+  // Remove any stale source maps
+  try {
+    unlinkSync('dist-cli/vulnsweep.js.map');
+  } catch {
+    /* not present — OK */
+  }
+
+  // Production obfuscation step
+  if (!skipObfuscation) {
+    console.log('\nApplying production obfuscation...');
+    obfuscateFile('dist-cli/vulnsweep.js', cliConfig);
+    console.log('✓ Obfuscation complete');
+  } else {
+    console.log('\n⚠ Obfuscation skipped (SKIP_OBFUSCATION=true)');
+  }
 
   // Generate platform-specific launcher scripts
   generateLaunchers();

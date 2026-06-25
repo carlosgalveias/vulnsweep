@@ -1,4 +1,10 @@
 /* eslint-disable react/prop-types */
+import {
+  OP_OPEN_PAYMENT_WINDOW,
+  OP_VERIFY_AND_ACTIVATE,
+  OP_SEED_DEV_TRANSACTION,
+  OP_GET_ACTIVE_PRICE,
+} from '@shared/renderer-api-opcodes.js';
 import { useState, useEffect } from 'react';
 import Spinner from './Spinner';
 
@@ -18,7 +24,7 @@ import Spinner from './Spinner';
  *   isExpired         {boolean}   — true when the user has an expired annual license
  */
 const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = false }) => {
-  const isDevMode = import.meta.env.DEV && !!window.electronAPI?.seedDevTransaction;
+  const isDevMode = import.meta.env.DEV;
 
   const [phase, setPhase] = useState('checkout');
   const [email, setEmail] = useState('');
@@ -49,7 +55,7 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
   useEffect(() => {
     if (!isOpen) return;
     window.electronAPI
-      .getActivePrice()
+      .invoke(OP_GET_ACTIVE_PRICE)
       .then((info) => {
         if (info) setPriceInfo(info);
       })
@@ -102,7 +108,7 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
     setErrorMsg('');
 
     try {
-      const result = await window.electronAPI.openPaymentWindow(isPromo);
+      const result = await window.electronAPI.invoke(OP_OPEN_PAYMENT_WINDOW, isPromo);
 
       if (result?.needsVerification) {
         // Payment success detected — advance to verification phase
@@ -128,7 +134,7 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
     setLoading(true);
     setErrorMsg('');
     try {
-      const result = await window.electronAPI.seedDevTransaction(email, '29.99');
+      const result = await window.electronAPI.invoke(OP_SEED_DEV_TRANSACTION, email, '29.99');
       if (!result.success) {
         setErrorMsg(result.error || 'Seed failed');
         return;
@@ -161,7 +167,11 @@ const BuyModal = ({ isOpen, onClose, onPaymentSuccess, installInfo, isExpired = 
     setErrorMsg('');
 
     try {
-      const result = await window.electronAPI.verifyAndActivate(email.trim(), trimmedTxn);
+      const result = await window.electronAPI.invoke(
+        OP_VERIFY_AND_ACTIVATE,
+        email.trim(),
+        trimmedTxn
+      );
 
       if (result?.ok === true) {
         onPaymentSuccess({ licenseKey: result.key });

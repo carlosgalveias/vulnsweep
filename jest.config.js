@@ -129,6 +129,7 @@ module.exports = {
         '\\.(css|less|scss|sass)$': '<rootDir>/__tests__/utils/style-mock.js',
         '\\.(jpg|jpeg|png|gif|svg)$': '<rootDir>/__tests__/utils/file-mock.js',
         '^lucide-react$': '<rootDir>/__tests__/utils/lucide-mock.js',
+        '^@shared/(.*)$': '<rootDir>/src/shared/$1',
       },
     },
   ],

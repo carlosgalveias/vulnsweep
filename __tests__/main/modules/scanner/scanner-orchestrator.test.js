@@ -159,14 +159,17 @@ describe('scanner-orchestrator scanProject()', () => {
     expect(result.sources).not.toContain('nvd');
   });
 
-  it('unknown mode option falls back to all sources (mode is no longer handled)', async () => {
+  it('unknown mode option falls back to optimal preset (no nvd)', async () => {
     buildPackageUniverse.mockResolvedValue([]);
     getUniqueQueryTargets.mockReturnValue([]);
-    // Passing a legacy mode option without enabledSources triggers full fallback
+    // Passing a legacy mode option without enabledSources triggers optimal fallback
     const result = await scanProject(PROJECT, { mode: 'fast' });
     expect(result.sources).toContain('npm-audit');
     expect(result.sources).toContain('osv');
-    expect(result.sources).toContain('nvd');
+    expect(result.sources).toContain('github-advisory');
+    expect(result.sources).toContain('cisa-kev');
+    expect(result.sources).toContain('epss');
+    expect(result.sources).not.toContain('nvd');
   });
 
   it('legacy: progress callback as second arg (no options)', async () => {

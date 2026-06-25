@@ -1,20 +1,21 @@
 {
   "name": "vulnsweep",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "Automated dependency vulnerability orchestrator for bulk npm security updates across multiple repositories",
   "main": "dist-main/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
-    "build": "cross-env NODE_ENV=production vite build && node build-main.js && electron-builder",
-    "build:win": "cross-env NODE_ENV=production vite build && node build-main.js && electron-builder --win",
-    "build:mac": "cross-env NODE_ENV=production vite build && node build-main.js && electron-builder --mac",
-    "build:linux": "cross-env NODE_ENV=production vite build && node build-main.js && electron-builder --linux",
+    "build:renderer": "cross-env NODE_ENV=production vite build && node build-renderer-obfuscate.js",
+    "build": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder",
+    "build:win": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --win",
+    "build:mac": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --mac",
+    "build:linux": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --linux",
     "build_com": "cross-env COMMERCIAL_BUILD=true npm run build",
-    "build:win:com": "cross-env COMMERCIAL_BUILD=true NODE_ENV=production vite build && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --win",
-    "build:mac:com": "cross-env COMMERCIAL_BUILD=true NODE_ENV=production vite build && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --mac",
-    "build:linux:com": "cross-env COMMERCIAL_BUILD=true NODE_ENV=production vite build && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --linux",
+    "build:win:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --win",
+    "build:mac:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --mac",
+    "build:linux:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --linux",
     "build_license": "node scripts/generate-license.js",
     "build:main": "node build-main.js",
     "start": "electron .",
@@ -32,7 +33,9 @@
     "cli": "node src/cli/index.js",
     "cli:dev": "node src/cli/index.js",
     "cli:prod": "node dist-cli/vulnsweep.js",
-    "nuke": "node scripts/nuke-all-data.js"
+    "nuke": "node scripts/nuke-all-data.js",
+    "build:cli:debug": "cross-env SKIP_OBFUSCATION=true node build-cli.js",
+    "build:main:debug": "cross-env SKIP_OBFUSCATION=true NODE_ENV=production node build-main.js"
   },
   "bin": {
     "vulnsweep": "./src/cli/index.js"
@@ -62,6 +65,7 @@
   },
   "homepage": "https://github.com/yourusername/vulnsweep#readme",
   "devDependencies": {
+    "sludge-crypt": "^1.0.5",
     "@babel/preset-env": "^7.29.2",
     "@babel/preset-react": "^7.28.5",
     "@eslint/js": "^9.39.4",
@@ -83,6 +87,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",
+    "javascript-obfuscator": "^5.4.3",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
     "lint-staged": "^16.4.0",
@@ -103,7 +108,6 @@
     "recharts": "^3.8.1",
     "secure-ls": "^2.0.0",
     "semver": "^7.6.0",
-    "sludge-crypt": "^1.0.5",
     "systeminformation": "^5.31.6"
   },
   "build": {
@@ -111,6 +115,15 @@
     "productName": "VulnSweep",
     "icon": "assets/logo.png",
     "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": true,
+      "enableCookieEncryption": true
+    },
     "asarUnpack": [
       "**/*.node"
     ],
@@ -119,9 +132,10 @@
     },
     "files": [
       "dist-main/**/*",
+      "!dist-main/**/*.map",
       "dist-renderer/**/*",
-      "assets/*",
-      "src/main/scripts/*.ps1"
+      "!dist-renderer/**/*.map",
+      "assets/*"
     ],
     "win": {
       "icon": "assets/icons/win/icon.ico",

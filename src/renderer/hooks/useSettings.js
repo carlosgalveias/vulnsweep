@@ -1,3 +1,4 @@
+import { OP_GET_SETTINGS, OP_SET_SETTINGS } from '@shared/renderer-api-opcodes.js';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 // Optimal = all sources except NVD (avoids rate limits while keeping broad coverage)
@@ -50,7 +51,7 @@ export default function useSettings() {
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await window.electronAPI.getSettings();
+      const r = await window.electronAPI.invoke(OP_GET_SETTINGS);
       if (r && r.success && r.content && Object.keys(r.content).length > 0) {
         setSettings((prev) => ({ ...prev, ...r.content }));
       }
@@ -70,7 +71,7 @@ export default function useSettings() {
       const next = { ...settingsRef.current, ...patch };
       setSettings(next);
       try {
-        const r = await window.electronAPI.setSettings(next);
+        const r = await window.electronAPI.invoke(OP_SET_SETTINGS, next);
         if (r && r.success) {
           flashSaved();
         } else {

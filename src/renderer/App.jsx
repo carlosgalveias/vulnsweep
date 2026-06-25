@@ -1,5 +1,17 @@
 /* eslint-disable import/order */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import {
+  OP_GET_TRIAL_STATUS,
+  OP_GET_COMMERCIAL_STATUS,
+  OP_GET_INSTALL_INFO,
+  OP_GET_APP_VERSION,
+  OP_GET_ANALYTICS_OPT_OUT,
+  OP_SET_ANALYTICS_OPT_OUT,
+  OP_COMMIT_AND_PUSH,
+  OP_SCAN_LICENSES,
+  OP_SCAN_DEP_UPDATES,
+  OP_APPLY_DEP_UPDATES,
+} from '@shared/renderer-api-opcodes.js';
 import FirstRunModal from './components/FirstRunModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
@@ -83,7 +95,7 @@ function App() {
 
   const refreshTrialStatus = useCallback(async () => {
     try {
-      const status = await window.electronAPI.getTrialStatus();
+      const status = await window.electronAPI.invoke(OP_GET_TRIAL_STATUS);
       setTrialStatus(status);
     } catch (err) {
       console.error('Failed to get trial status', err);
@@ -93,9 +105,9 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const status = await window.electronAPI.getCommercialStatus();
+        const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
         setLicStatus(status);
-        const info = await window.electronAPI.getInstallInfo();
+        const info = await window.electronAPI.invoke(OP_GET_INSTALL_INFO);
         setInstallInfo(info);
         if (status.isCommercial && (!status.isLicensed || status.isExpired)) {
           setShowBuyModal(true);
@@ -112,9 +124,9 @@ function App() {
   useEffect(() => {
     const load = async () => {
       try {
-        const vInfo = await window.electronAPI.getAppVersion();
+        const vInfo = await window.electronAPI.invoke(OP_GET_APP_VERSION);
         setAppVersion(vInfo.version || '');
-        const optInfo = await window.electronAPI.getAnalyticsOptOut();
+        const optInfo = await window.electronAPI.invoke(OP_GET_ANALYTICS_OPT_OUT);
         setAnalyticsOptOut(optInfo.optOut || false);
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -125,7 +137,7 @@ function App() {
 
   const handleAnalyticsOptOutChange = useCallback(async (newValue) => {
     try {
-      await window.electronAPI.setAnalyticsOptOut(newValue);
+      await window.electronAPI.invoke(OP_SET_ANALYTICS_OPT_OUT, newValue);
       setAnalyticsOptOut(newValue);
     } catch (err) {
       console.error('Failed to save analytics preference:', err);
@@ -134,7 +146,7 @@ function App() {
 
   const handleLicenseRestored = useCallback(async () => {
     try {
-      const status = await window.electronAPI.getCommercialStatus();
+      const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
       setLicStatus(status);
     } catch (err) {
       console.error('Failed to refresh license after restore:', err);
@@ -216,7 +228,7 @@ function App() {
       for (const repoPath of repoPathsSet) {
         addLog('info', `Committing dep updates in ${repoPath}...`);
         try {
-          const result = await window.electronAPI.commitAndPush(repoPath, {
+          const result = await window.electronAPI.invoke(OP_COMMIT_AND_PUSH, repoPath, {
             message: depCommitMessage,
             vulnerabilities: [],
           });
@@ -307,7 +319,7 @@ function App() {
     setLicenseScanError(null);
     try {
       const results = await Promise.all(
-        projectPaths.map((p) => window.electronAPI.scanLicenses(p))
+        projectPaths.map((p) => window.electronAPI.invoke(OP_SCAN_LICENSES, p))
       );
       const successful = results.filter((r) => r.success).map((r) => r.content);
       if (successful.length === 0) {
@@ -391,7 +403,7 @@ function App() {
       setAppliedDepPackages(new Set());
     }
     try {
-      const r = await window.electronAPI.scanDepUpdates(selectedFolder, allowReset, {
+      const r = await window.electronAPI.invoke(OP_SCAN_DEP_UPDATES, selectedFolder, allowReset, {
         removeOverrides,
         removePackageLock,
       });
@@ -423,7 +435,7 @@ function App() {
     setDepApplyStatus('applying');
     setDepApplyError(null);
     try {
-      const r = await window.electronAPI.applyDepUpdates(selectedFolder, updates);
+      const r = await window.electronAPI.invoke(OP_APPLY_DEP_UPDATES, selectedFolder, updates);
       if (r.success) {
         const msg = r.commitMessage || updates.map((u) => `${u.name}@${u.toVersion}`).join(', ');
         setDepCommitMessage(msg);
@@ -715,7 +727,7 @@ function App() {
           isExpired={licStatus?.isExpired === true}
           onPaymentSuccess={async ({ licenseKey }) => {
             try {
-              const status = await window.electronAPI.getCommercialStatus();
+              const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
               setLicStatus(status);
               setShowBuyModal(false);
               addLog('info', `Commercial license activated! Key: ${licenseKey}`);

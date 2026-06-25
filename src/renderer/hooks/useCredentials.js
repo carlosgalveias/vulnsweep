@@ -1,3 +1,8 @@
+import {
+  OP_GET_CREDENTIAL_STATUS,
+  OP_SET_CREDENTIAL,
+  OP_DELETE_CREDENTIAL,
+} from '@shared/renderer-api-opcodes.js';
 import { useState, useEffect, useCallback } from 'react';
 
 /**
@@ -29,7 +34,7 @@ export default function useCredentials() {
   const loadCredentialStatus = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await window.electronAPI.getCredentialStatus();
+      const r = await window.electronAPI.invoke(OP_GET_CREDENTIAL_STATUS);
       if (r.success) {
         setCredentials(r.content);
       }
@@ -54,7 +59,7 @@ export default function useCredentials() {
    */
   const saveCredential = useCallback(async (sourceId, plaintext) => {
     const r = await window.electronAPI
-      .setCredential(sourceId, plaintext)
+      .invoke(OP_SET_CREDENTIAL, sourceId, plaintext)
       .catch((e) => ({ success: false, error: e.message }));
 
     if (r.success) {
@@ -75,7 +80,7 @@ export default function useCredentials() {
    */
   const deleteCredential = useCallback(async (sourceId) => {
     const r = await window.electronAPI
-      .deleteCredential(sourceId)
+      .invoke(OP_DELETE_CREDENTIAL, sourceId)
       .catch((e) => ({ success: false, error: e.message }));
 
     if (r.success) {

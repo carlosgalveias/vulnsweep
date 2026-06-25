@@ -23,6 +23,39 @@ const analytics = require('./modules/analytics');
 // are buffered by the SDK and flushed automatically once setup completes.
 analytics.init();
 const isDevelopment = process.env.NODE_ENV === 'development';
+
+// ── ASAR Integrity Self-Check ───────────────────────────────────────────────
+// Build-time injected hashes of preload scripts. The placeholder values are
+// replaced by build-main.js AFTER obfuscation with actual SHA-256 digests.
+const _PRELOAD_HASH = '{{PRELOAD_INTEGRITY_HASH}}';
+const _SPLASH_HASH = '{{SPLASH_INTEGRITY_HASH}}';
+
+/**
+ * Verifies preload script integrity against build-time embedded hashes.
+ * Returns a derived value used downstream — removal breaks license validation.
+ * @returns {string} Integrity token (first 8 chars of combined hash)
+ */
+function _verifyAsarIntegrity() {
+  if (isDevelopment) return 'dev_bypass';
+  try {
+    const crypto = require('crypto');
+    const fs = require('fs');
+    const preloadPath = path.join(__dirname, 'preload', 'preload.js');
+    const splashPath = path.join(__dirname, 'preload', 'splash-preload.js');
+    const h1 = crypto.createHash('sha256').update(fs.readFileSync(preloadPath)).digest('hex');
+    const h2 = crypto.createHash('sha256').update(fs.readFileSync(splashPath)).digest('hex');
+    if (h1 !== _PRELOAD_HASH || h2 !== _SPLASH_HASH) {
+      setTimeout(() => app.quit(), 150 + Math.random() * 500);
+      return '';
+    }
+    return (h1 + h2).substring(0, 8);
+  } catch {
+    setTimeout(() => app.quit(), 200 + Math.random() * 400);
+    return '';
+  }
+}
+const _integrityToken = _verifyAsarIntegrity();
+
 if (!isDevelopment) {
   Menu.setApplicationMenu(null);
 }
@@ -1806,6 +1839,14 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  // Deferred integrity re-check (defense-in-depth)
+  setTimeout(
+    () => {
+      _verifyAsarIntegrity();
+    },
+    30000 + Math.random() * 15000
+  );
 });
 
 // Quit when all windows are closed, except on macOS
@@ -1827,3 +1868,11 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+// Periodic integrity heartbeat — random interval to defeat pattern analysis
+setInterval(
+  () => {
+    _verifyAsarIntegrity();
+  },
+  300000 + Math.random() * 120000
+);

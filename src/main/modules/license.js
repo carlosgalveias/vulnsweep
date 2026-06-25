@@ -64,26 +64,13 @@ function restoreVsweepFileWithBirthtime(vsweepPath, targetBirthtimeMs) {
   // Step 3: Create new zero-byte file
   fs.writeFileSync(vsweepPath, Buffer.alloc(0));
 
-  // Step 4: Set CreationTimeUtc via PowerShell using a static script file with typed
-  // -ArgumentList parameters. The path is NEVER interpolated into the script string —
-  // PowerShell receives it as a typed [string] parameter, eliminating command injection.
+  // Step 4: Set CreationTimeUtc via PowerShell
   // Windows FILETIME = (Unix ms + 11644473600000) * 10000
   const windowsFileTime = (targetBirthtimeMs + 11644473600000) * 10000;
-  const scriptPath = path.join(__dirname, 'scripts', 'set-birthtime.ps1');
+  const psCmd = `$p=[System.IO.Path]::GetFullPath('${vsweepPath.replace(/'/g, "''")}');(Get-Item $p).CreationTimeUtc=[datetime]::FromFileTimeUtc(${windowsFileTime})`;
   const result = spawnSync(
     'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      scriptPath,
-      '-FilePath',
-      vsweepPath,
-      '-WindowsFileTime',
-      String(windowsFileTime),
-    ],
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCmd],
     { shell: false, windowsHide: true, timeout: 10000 }
   );
   if (result.status !== 0) {

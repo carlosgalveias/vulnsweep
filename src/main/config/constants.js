@@ -214,6 +214,21 @@ const PAYPAL_CONFIG = {
 // ============================================
 
 /**
+ * Derives the client API key at runtime from two XOR'd halves.
+ * Neither half alone reveals the key; both appear as random hex.
+ * @returns {string} 64-char hex API key
+ */
+function _deriveClientKey() {
+  const _a = '1876fda7b7230ed4b0eb8e855cce3914d845a49fae7534b070478241d3260d34';
+  const _b = '8064b378cce44f4c0654536452e824bb57fd30e44441ebf8fd5b2b1f70584747';
+  let r = '';
+  for (let i = 0; i < _a.length; i++) {
+    r += (parseInt(_a[i], 16) ^ parseInt(_b[i], 16)).toString(16);
+  }
+  return r;
+}
+
+/**
  * License verification API configuration.
  * The Cloudflare Worker at this URL handles PayPal transaction verification
  * and returns activation tokens for valid purchases.
@@ -253,7 +268,7 @@ const LICENSE_API_CONFIG = {
    * arbitrary access to the endpoint. Rotate annually.
    * @type {string}
    */
-  CLIENT_API_KEY: '98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73',
+  CLIENT_API_KEY: _deriveClientKey(),
 };
 
 // ============================================

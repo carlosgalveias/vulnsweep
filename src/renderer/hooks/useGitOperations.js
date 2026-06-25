@@ -1,3 +1,4 @@
+import { OP_COMMIT_AND_PUSH } from '@shared/renderer-api-opcodes.js';
 import { useState, useCallback } from 'react';
 import { DEFAULT_COMMIT_MESSAGE } from '../constants.js';
 
@@ -66,7 +67,7 @@ export default function useGitOperations(addLog, vulnerabilitiesRef, onRepoCommi
 
         // Commit and push changes with vulnerability data
         addLog('info', `Committing and pushing ${projectName}...`);
-        const pushResult = await window.electronAPI.commitAndPush(projectPath, {
+        const pushResult = await window.electronAPI.invoke(OP_COMMIT_AND_PUSH, projectPath, {
           message: DEFAULT_COMMIT_MESSAGE,
           vulnerabilities: projectVulnerabilities,
         });

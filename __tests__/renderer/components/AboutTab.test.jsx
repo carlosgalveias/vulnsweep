@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import AboutTab from '../../../src/renderer/components/AboutTab';
+import { createElectronAPIMock, OP } from '../../utils/electron-api-mock';
 
 const LIC_VALID = {
   isLicensed: true,
@@ -33,12 +34,12 @@ const defaultProps = {
 };
 
 beforeEach(() => {
-  window.electronAPI = {
-    licenseBackup: jest.fn().mockResolvedValue({ success: true }),
-    licenseRestore: jest.fn().mockResolvedValue({ success: true }),
-    openLocalDoc: jest.fn().mockResolvedValue({ success: true }),
-    openExternal: jest.fn().mockResolvedValue(undefined),
-  };
+  window.electronAPI = createElectronAPIMock({
+    [OP.OP_LICENSE_BACKUP]: () => Promise.resolve({ success: true }),
+    [OP.OP_LICENSE_RESTORE]: () => Promise.resolve({ success: true }),
+    [OP.OP_OPEN_LOCAL_DOC]: () => Promise.resolve({ success: true }),
+    [OP.OP_OPEN_EXTERNAL]: () => Promise.resolve(undefined),
+  });
   jest.clearAllMocks();
 });
 
@@ -113,13 +114,13 @@ describe('AboutTab — Backup & Restore', () => {
   it('calls licenseBackup IPC when Backup button is clicked', async () => {
     render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
     fireEvent.click(screen.getByRole('button', { name: /Backup License/i }));
-    expect(window.electronAPI.licenseBackup).toHaveBeenCalledTimes(1);
+    expect(window.electronAPI.invoke).toHaveBeenCalledWith(OP.OP_LICENSE_BACKUP);
   });
 
   it('calls licenseRestore IPC when Restore button is clicked', async () => {
     render(<AboutTab {...defaultProps} licStatus={null} />);
     fireEvent.click(screen.getByRole('button', { name: /Restore License/i }));
-    expect(window.electronAPI.licenseRestore).toHaveBeenCalledTimes(1);
+    expect(window.electronAPI.invoke).toHaveBeenCalledWith(OP.OP_LICENSE_RESTORE);
   });
 });
 
@@ -169,13 +170,16 @@ describe('AboutTab — Documentation & Support', () => {
   it('calls openLocalDoc with PRIVACY_POLICY.md when Privacy Policy is clicked', () => {
     render(<AboutTab {...defaultProps} />);
     fireEvent.click(screen.getByRole('button', { name: /Privacy Policy/i }));
-    expect(window.electronAPI.openLocalDoc).toHaveBeenCalledWith('PRIVACY_POLICY.md');
+    expect(window.electronAPI.invoke).toHaveBeenCalledWith(
+      OP.OP_OPEN_LOCAL_DOC,
+      'PRIVACY_POLICY.md'
+    );
   });
 
   it('calls openLocalDoc with DISCLAIMER.md when Disclaimer is clicked', () => {
     render(<AboutTab {...defaultProps} />);
     fireEvent.click(screen.getByRole('button', { name: /Disclaimer/i }));
-    expect(window.electronAPI.openLocalDoc).toHaveBeenCalledWith('DISCLAIMER.md');
+    expect(window.electronAPI.invoke).toHaveBeenCalledWith(OP.OP_OPEN_LOCAL_DOC, 'DISCLAIMER.md');
   });
 
   it('renders GitHub issues link as an anchor with correct href', () => {
@@ -194,7 +198,10 @@ describe('AboutTab — Documentation & Support', () => {
     render(<AboutTab {...defaultProps} />);
     const link = screen.getByRole('link', { name: /Report an issue/i });
     fireEvent.click(link);
-    expect(window.electronAPI.openExternal).not.toHaveBeenCalled();
+    expect(window.electronAPI.invoke).not.toHaveBeenCalledWith(
+      OP.OP_OPEN_EXTERNAL,
+      expect.anything()
+    );
   });
 });
 
