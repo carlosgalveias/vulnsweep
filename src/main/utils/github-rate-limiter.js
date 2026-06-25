@@ -151,4 +151,12 @@ function getQueueDepth() {
   return _queueDepth;
 }
 
-module.exports = { enqueue, setRateLimited, resetQueue, getQueueDepth };
+/**
+ * Returns true if the rate limiter is currently in a backoff period.
+ * @returns {boolean}
+ */
+function isRateLimited() {
+  return _rateLimitedUntil > Date.now();
+}
+
+module.exports = { enqueue, setRateLimited, resetQueue, getQueueDepth, isRateLimited };

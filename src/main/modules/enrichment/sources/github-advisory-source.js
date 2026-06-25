@@ -265,6 +265,15 @@ async function queryGitHubAdvisory(id, signal) {
 async function queryGitHubAdvisoryByPackage(packageName, signal) {
   if (!packageName || typeof packageName !== 'string') return [];
 
+  // GUARD: If rate-limited and queue is deep, skip to prevent timeout starvation
+  const MAX_QUEUE_DEPTH = 50;
+  if (rateLimiter.isRateLimited() && rateLimiter.getQueueDepth() >= MAX_QUEUE_DEPTH) {
+    console.warn(
+      `[github-advisory-source] Skipping ${packageName}: rate-limited with queue depth ${rateLimiter.getQueueDepth()}`
+    );
+    return [];
+  }
+
   if (ENRICHMENT_CONFIG.GITHUB_TOKEN && !_authLogEmitted) {
     _authLogEmitted = true;
     console.log('[GitHubAdvisory] Authenticated API access active (5,000 req/hr limit)');
@@ -321,4 +330,86 @@ async function queryGitHubAdvisoryByPackage(packageName, signal) {
   }, signal);
 }
 
-module.exports = { queryGitHubAdvisory, queryGitHubAdvisoryByPackage };
+/**
+ * Queries repo-level security advisories for a specific GitHub repository.
+ * These are advisories created by repo maintainers that may NOT be in the
+ * global GitHub Advisory Database yet.
+ *
+ * Endpoint: GET /repos/{owner}/{repo}/security-advisories
+ * REQUIRES authentication (GITHUB_TOKEN). Returns 401 without it.
+ *
+ * Uses the same rateLimiter.enqueue() mechanism as all other GitHub API calls.
+ *
+ * @param {string} owner - GitHub repo owner (e.g. "expressjs")
+ * @param {string} repo - GitHub repo name (e.g. "morgan")
+ * @param {AbortSignal} [signal] - Abort signal
+ * @returns {Promise<object[]>} Array of raw repo-level advisory objects (published only)
+ */
+async function queryRepoLevelAdvisories(owner, repo, signal) {
+  // Hard gate: this endpoint REQUIRES authentication
+  if (!ENRICHMENT_CONFIG.GITHUB_TOKEN) return [];
+
+  if (!owner || !repo || typeof owner !== 'string' || typeof repo !== 'string') return [];
+
+  // GUARD: If rate-limited and queue is deep, skip
+  const MAX_QUEUE_DEPTH = 50;
+  if (rateLimiter.isRateLimited() && rateLimiter.getQueueDepth() >= MAX_QUEUE_DEPTH) {
+    console.warn(
+      `[github-advisory-source] Skipping repo-level query for ${owner}/${repo}: rate-limited with queue depth ${rateLimiter.getQueueDepth()}`
+    );
+    return [];
+  }
+
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/security-advisories?per_page=100&state=published`;
+
+  return rateLimiter.enqueue(async (sig) => {
+    for (let attempt = 0; attempt <= GIT_CONFIG.GITHUB_MAX_RETRIES; attempt++) {
+      if (sig?.aborted) {
+        throw new Error('Request aborted');
+      }
+
+      try {
+        const result = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, sig);
+
+        if (sig?.aborted) {
+          throw new Error('Request aborted');
+        }
+
+        // 404 = repo not found or no security advisories feature enabled
+        if (!result.body || result.statusCode === 404) {
+          return [];
+        }
+
+        // Response is an array of advisory objects
+        if (Array.isArray(result.body)) {
+          // Double-filter by state === 'published' (belt-and-suspenders;
+          // the query param should handle it but the API docs are ambiguous)
+          return result.body.filter((adv) => adv.state === 'published');
+        }
+
+        return [];
+      } catch (err) {
+        if (err.isRateLimit && attempt < GIT_CONFIG.GITHUB_MAX_RETRIES) {
+          const delay = err.retryAfterMs != null ? err.retryAfterMs : computeBackoffDelay(attempt);
+          rateLimiter.setRateLimited(delay);
+          console.warn(
+            `[github] Rate limited (${err.statusCode || 429}), retry ${attempt + 1}/${GIT_CONFIG.GITHUB_MAX_RETRIES} after ${delay}ms`
+          );
+          await sleep(delay);
+          continue;
+        }
+        if (err.isRateLimit) {
+          console.warn(`[github] Rate limit retries exhausted for repo ${owner}/${repo}`);
+          return [];
+        }
+        console.warn(
+          `[github-advisory-source] queryRepoLevelAdvisories error for ${owner}/${repo}: ${err.message}`
+        );
+        return [];
+      }
+    }
+    return [];
+  }, signal);
+}
+
+module.exports = { queryGitHubAdvisory, queryGitHubAdvisoryByPackage, queryRepoLevelAdvisories };

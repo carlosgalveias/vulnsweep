@@ -72,14 +72,14 @@ function cvssScoreToCategory(cvssScore) {
  *   discrepancyDetails: string|null
  * }}
  */
-function mergeSeverity(npmSeverity, osvSeverity, nvdCvssScore) {
+function mergeSeverity(npmSeverity, osvSeverity, nvdCvssScore, ghaSeverity = null) {
   const nvdCategory = cvssScoreToCategory(nvdCvssScore);
 
-  const candidates = [npmSeverity, osvSeverity, nvdCategory].filter(Boolean);
+  const candidates = [npmSeverity, osvSeverity, nvdCategory, ghaSeverity].filter(Boolean);
 
   let mergedSeverity = null;
   for (const c of candidates) {
-    if (score(c) > score(mergedSeverity)) mergedSeverity = norm(c);
+    if (mergedSeverity === null || score(c) > score(mergedSeverity)) mergedSeverity = norm(c);
   }
 
   // Discrepancy: npm and NVD both known, and they differ by more than one tier

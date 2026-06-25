@@ -13,4 +13,5 @@ module.exports = {
   setRateLimited: jest.fn(),
   resetQueue: jest.fn(),
   getQueueDepth: jest.fn(() => 0),
+  isRateLimited: jest.fn(() => false),
 };

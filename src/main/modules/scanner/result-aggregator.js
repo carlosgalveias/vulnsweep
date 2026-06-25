@@ -214,11 +214,13 @@ function mergeUrls(g) {
 function mergeGroupSeverity(g) {
   const nv = find(g, 'nvd'),
     np = find(g, 'npm-audit'),
-    os = find(g, 'osv');
+    os = find(g, 'osv'),
+    gh = find(g, 'github-advisory');
   const nvdCvssScore = nv && typeof nv.cvssScore === 'number' ? nv.cvssScore : null;
   const osvSeverity = os ? os.severity || null : null;
   const npmSeverity = np ? np.severity || null : null;
-  return mergeSeverity(npmSeverity, osvSeverity, nvdCvssScore);
+  const ghaSeverity = gh ? gh.severity || null : null;
+  return mergeSeverity(npmSeverity, osvSeverity, nvdCvssScore, ghaSeverity);
 }
 
 function mergePatchedVersion(g) {

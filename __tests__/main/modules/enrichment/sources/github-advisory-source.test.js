@@ -242,3 +242,42 @@ describe('Group 5: retry exhaustion', () => {
     expect(result.patchedVersions).toContain('>= 4.17.21');
   });
 });
+
+describe('Group 6: queue-depth guard in queryGitHubAdvisoryByPackage', () => {
+  beforeEach(() => {
+    jest.resetModules();
+  });
+
+  it('6.1 returns [] immediately when isRateLimited=true and queueDepth >= 50', async () => {
+    const rateLimiter = require('../../../../../src/main/utils/github-rate-limiter');
+    rateLimiter.isRateLimited.mockReturnValue(true);
+    rateLimiter.getQueueDepth.mockReturnValue(50);
+    jest.mock('https', () => ({ request: mockMake(200, [], {}) }));
+    const mod = require('../../../../../src/main/modules/enrichment/sources/github-advisory-source');
+    const result = await mod.queryGitHubAdvisoryByPackage('lodash');
+    expect(result).toEqual([]);
+    expect(rateLimiter.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('6.2 proceeds normally when isRateLimited=false', async () => {
+    const rateLimiter = require('../../../../../src/main/utils/github-rate-limiter');
+    rateLimiter.isRateLimited.mockReturnValue(false);
+    rateLimiter.getQueueDepth.mockReturnValue(100);
+    jest.mock('https', () => ({ request: mockMake(200, [], {}) }));
+    const mod = require('../../../../../src/main/modules/enrichment/sources/github-advisory-source');
+    const result = await mod.queryGitHubAdvisoryByPackage('lodash');
+    expect(rateLimiter.enqueue).toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+
+  it('6.3 proceeds normally when queueDepth < 50 even if rate-limited', async () => {
+    const rateLimiter = require('../../../../../src/main/utils/github-rate-limiter');
+    rateLimiter.isRateLimited.mockReturnValue(true);
+    rateLimiter.getQueueDepth.mockReturnValue(49);
+    jest.mock('https', () => ({ request: mockMake(200, [], {}) }));
+    const mod = require('../../../../../src/main/modules/enrichment/sources/github-advisory-source');
+    const result = await mod.queryGitHubAdvisoryByPackage('lodash');
+    expect(rateLimiter.enqueue).toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+});

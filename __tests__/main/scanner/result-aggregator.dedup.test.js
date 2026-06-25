@@ -351,4 +351,28 @@ describe('result-aggregator deduplication regression tests', () => {
       expect(merged.cveIds).toContain(cveB);
     });
   });
+
+  describe('Test 8: GHA-only severity source is used in mergeGroupSeverity', () => {
+    it('passes ghaSeverity to mergeSeverity when only github-advisory provides severity', async () => {
+      mergeSeverity.mockImplementationOnce((npmSev, osvSev, nvdScore, ghaSev) => ({
+        mergedSeverity: ghaSev || npmSev || osvSev || null,
+        nvdCategory: null,
+        severityDiscrepancy: false,
+        discrepancyDetails: null,
+      }));
+      const results = [
+        sr({
+          sourceId: 'github-advisory',
+          cveIds: ['CVE-2024-99999'],
+          aliases: ['GHSA-test-1234-abcd'],
+          severity: 'high',
+        }),
+      ];
+      const result = await aggregate(mkp(), [results]);
+      expect(result.vulnCount).toBe(1);
+      expect(result.vulnerabilities[0].severity).toBe('high');
+      // Verify mergeSeverity was called with ghaSeverity as 4th arg
+      expect(mergeSeverity).toHaveBeenCalledWith(null, null, null, 'high');
+    });
+  });
 });

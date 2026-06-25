@@ -12,6 +12,7 @@ const {
   SOURCE_ID,
   isVersionAffectedByAdvisory,
   extractFixedInFromAdvisory,
+  inferFixedInFromRange,
 } = require('../../../../../src/main/modules/scanner/sources/github-advisory-source');
 
 describe('github-advisory-source (scanner)', () => {
@@ -171,6 +172,112 @@ describe('github-advisory-source (scanner)', () => {
       ]);
       // User on 4.10.0 matches both ranges, should get the earlier fix
       expect(extractFixedInFromAdvisory(advisory, 'express', '4.10.0')).toBe('4.17.3');
+    });
+    it('infers fixedIn from vulnerable_version_range when patched_versions is undefined', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'uuid' },
+          vulnerable_version_range: '< 14.0.0',
+          // patched_versions intentionally omitted
+        },
+      ]);
+      expect(extractFixedInFromAdvisory(advisory, 'uuid', '11.1.1')).toBe('14.0.0');
+    });
+
+    it('infers fixedIn from multi-constraint range when patched_versions is null', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'foo' },
+          vulnerable_version_range: '>= 1.0.0, < 2.3.1',
+          patched_versions: null,
+          first_patched_version: null,
+        },
+      ]);
+      expect(extractFixedInFromAdvisory(advisory, 'foo', '1.5.0')).toBe('2.3.1');
+    });
+
+    it('returns null when range has only inclusive upper bound', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'bar' },
+          vulnerable_version_range: '<= 13.9.9',
+          patched_versions: undefined,
+        },
+      ]);
+      expect(extractFixedInFromAdvisory(advisory, 'bar', '13.0.0')).toBeNull();
+    });
+
+    it('prefers patched_versions over range inference', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'baz' },
+          vulnerable_version_range: '< 14.0.0',
+          patched_versions: '>= 12.0.1',
+        },
+      ]);
+      // patched_versions says 12.0.1, range says 14.0.0 — patched_versions wins
+      expect(extractFixedInFromAdvisory(advisory, 'baz', '11.0.0')).toBe('12.0.1');
+    });
+
+    it('uses first_patched_version as intermediate fallback (object form)', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'qux' },
+          vulnerable_version_range: '< 5.0.0',
+          patched_versions: undefined,
+          first_patched_version: { identifier: '5.0.0' },
+        },
+      ]);
+      expect(extractFixedInFromAdvisory(advisory, 'qux', '4.0.0')).toBe('5.0.0');
+    });
+
+    it('uses first_patched_version as intermediate fallback (string form)', () => {
+      const advisory = makeAdvisory([
+        {
+          package: { ecosystem: 'npm', name: 'qux' },
+          vulnerable_version_range: '< 5.0.0',
+          patched_versions: undefined,
+          first_patched_version: '5.0.0',
+        },
+      ]);
+      expect(extractFixedInFromAdvisory(advisory, 'qux', '4.0.0')).toBe('5.0.0');
+    });
+  });
+
+  describe('inferFixedInFromRange()', () => {
+    it('extracts version from simple exclusive upper bound "< X.Y.Z"', () => {
+      expect(inferFixedInFromRange('< 14.0.0')).toBe('14.0.0');
+    });
+
+    it('extracts version from multi-constraint range', () => {
+      expect(inferFixedInFromRange('>= 1.0.0, < 2.3.1')).toBe('2.3.1');
+    });
+
+    it('returns null for inclusive upper bound "<= X.Y.Z"', () => {
+      expect(inferFixedInFromRange('<= 13.9.9')).toBeNull();
+    });
+
+    it('returns null when no upper bound exists', () => {
+      expect(inferFixedInFromRange('>= 1.0.0')).toBeNull();
+    });
+
+    it('returns null for null/undefined/empty input', () => {
+      expect(inferFixedInFromRange(null)).toBeNull();
+      expect(inferFixedInFromRange(undefined)).toBeNull();
+      expect(inferFixedInFromRange('')).toBeNull();
+    });
+
+    it('returns null for non-string input', () => {
+      expect(inferFixedInFromRange(42)).toBeNull();
+      expect(inferFixedInFromRange({})).toBeNull();
+    });
+
+    it('handles pre-release versions', () => {
+      expect(inferFixedInFromRange('< 2.0.0-rc.1')).toBe('2.0.0-rc.1');
+    });
+
+    it('handles extra whitespace', () => {
+      expect(inferFixedInFromRange('<   3.0.0  ')).toBe('3.0.0');
     });
   });
 
