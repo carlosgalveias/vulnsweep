@@ -31,7 +31,7 @@ function sr(o) {
   return {
     sourceId: o.sourceId || 'npm-audit',
     packageName: o.packageName || 'minimatch',
-    packageVersion: o.packageVersion || '9.0.5',
+    packageVersion: o.packageVersion || '9.0.4',
     severity: sev,
     cveIds: o.cveIds || [],
     aliases: o.aliases || [],
@@ -176,7 +176,14 @@ describe('result-aggregator deduplication regression tests', () => {
       const cve = 'CVE-2022-44444';
       const [r9, r3] = await Promise.all([
         aggregate(mkp({ name: 'minimatch', version: '9.0.5' }), [
-          [sr({ packageName: 'minimatch', packageVersion: '9.0.5', cveIds: [cve] })],
+          [
+            sr({
+              packageName: 'minimatch',
+              packageVersion: '9.0.5',
+              cveIds: [cve],
+              vulnerableRange: '<=9.0.5',
+            }),
+          ],
         ]),
         aggregate(mkp({ name: 'minimatch', version: '3.1.2' }), [
           [sr({ packageName: 'minimatch', packageVersion: '3.1.2', cveIds: [cve] })],

@@ -7,7 +7,11 @@ jest.mock('../../../src/main/modules/audit/commands/npm-audit', () => ({
 }));
 
 const { runNpmAudit } = require('../../../src/main/modules/audit/commands/npm-audit');
-const { query, clearCache } = require('../../../src/main/modules/scanner/sources/npm-audit-source');
+const {
+  query,
+  clearCache,
+  isInstalledVersionVulnerable,
+} = require('../../../src/main/modules/scanner/sources/npm-audit-source');
 
 function makeAuditResult(vulnerabilities) {
   return {
@@ -22,7 +26,7 @@ function makePkg(overrides) {
   const o = overrides || {};
   return {
     name: o.name || 'minimatch',
-    version: o.version || '9.0.5',
+    version: o.version || '9.0.4',
     projectPath: o.projectPath || '/mock/project',
     resolved: null,
   };
@@ -264,7 +268,7 @@ describe('npm-audit-source deduplication regression tests', () => {
       const r = results[0];
       expect(r.sourceId).toBe('npm-audit');
       expect(r.packageName).toBe('minimatch');
-      expect(r.packageVersion).toBe('9.0.5');
+      expect(r.packageVersion).toBe('9.0.4');
       expect(r.severity).toBe('high');
       expect(Array.isArray(r.cveIds)).toBe(true);
       expect(Array.isArray(r.aliases)).toBe(true);
@@ -277,5 +281,181 @@ describe('npm-audit-source deduplication regression tests', () => {
       expect(r.rawData).toHaveProperty('via');
       expect(r.rawData).toHaveProperty('resolvesDependents');
     });
+  });
+});
+
+describe('Version range filtering (false positive prevention)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    clearCache();
+  });
+
+  it('returns empty when installed version is ABOVE the vulnerable range', async () => {
+    runNpmAudit.mockResolvedValue(
+      makeAuditResult({
+        'path-to-regexp': {
+          name: 'path-to-regexp',
+          severity: 'high',
+          isDirect: false,
+          via: [
+            {
+              source: 1,
+              name: 'path-to-regexp',
+              title: 'ReDoS vulnerability',
+              url: 'https://github.com/advisories/GHSA-test-1234-abcd',
+              severity: 'high',
+              range: '<8.4.0',
+            },
+          ],
+          range: '<8.4.0',
+          nodes: ['node_modules/path-to-regexp'],
+          fixAvailable: { name: 'path-to-regexp', version: '8.4.0', isSemVerMajor: false },
+        },
+      })
+    );
+    const results = await query(makePkg({ name: 'path-to-regexp', version: '8.4.2' }));
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns empty when installed version equals the fix version (at boundary)', async () => {
+    runNpmAudit.mockResolvedValue(
+      makeAuditResult({
+        'path-to-regexp': {
+          name: 'path-to-regexp',
+          severity: 'high',
+          isDirect: false,
+          via: [
+            {
+              source: 1,
+              name: 'path-to-regexp',
+              title: 'ReDoS',
+              url: 'https://github.com/advisories/GHSA-test-0000-0000',
+              severity: 'high',
+              range: '<8.4.0',
+            },
+          ],
+          range: '<8.4.0',
+          nodes: ['node_modules/path-to-regexp'],
+          fixAvailable: { name: 'path-to-regexp', version: '8.4.0', isSemVerMajor: false },
+        },
+      })
+    );
+    const results = await query(makePkg({ name: 'path-to-regexp', version: '8.4.0' }));
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns results when installed version IS within the vulnerable range', async () => {
+    runNpmAudit.mockResolvedValue(
+      makeAuditResult({
+        'path-to-regexp': {
+          name: 'path-to-regexp',
+          severity: 'high',
+          isDirect: false,
+          via: [
+            {
+              source: 1,
+              name: 'path-to-regexp',
+              title: 'ReDoS',
+              url: 'https://github.com/advisories/GHSA-test-1111-2222',
+              severity: 'high',
+              range: '<8.4.0',
+            },
+          ],
+          range: '<8.4.0',
+          nodes: ['node_modules/path-to-regexp'],
+          fixAvailable: { name: 'path-to-regexp', version: '8.4.0', isSemVerMajor: false },
+        },
+      })
+    );
+    const results = await query(makePkg({ name: 'path-to-regexp', version: '7.2.0' }));
+    expect(results).toHaveLength(1);
+    expect(results[0].vulnerableRange).toBe('<8.4.0');
+  });
+
+  it('returns results when range is null (conservative: assume vulnerable)', async () => {
+    runNpmAudit.mockResolvedValue(
+      makeAuditResult({
+        minimatch: {
+          name: 'minimatch',
+          severity: 'high',
+          isDirect: false,
+          via: [
+            {
+              source: 1,
+              name: 'minimatch',
+              title: 'ReDoS',
+              url: 'https://github.com/advisories/GHSA-null-rang-test',
+              severity: 'high',
+            },
+          ],
+          range: null,
+          nodes: ['node_modules/minimatch'],
+          fixAvailable: false,
+        },
+      })
+    );
+    const results = await query(makePkg({ name: 'minimatch', version: '9.0.5' }));
+    expect(results).toHaveLength(1);
+  });
+
+  it('handles complex OR ranges like ">=4.0.0 <4.0.10 || >=5.0.0 <5.0.3"', async () => {
+    runNpmAudit.mockResolvedValue(
+      makeAuditResult({
+        express: {
+          name: 'express',
+          severity: 'medium',
+          isDirect: true,
+          via: [
+            {
+              source: 1,
+              name: 'express',
+              title: 'Open Redirect',
+              url: 'https://github.com/advisories/GHSA-expr-test-1234',
+              severity: 'medium',
+            },
+          ],
+          range: '>=4.0.0 <4.0.10 || >=5.0.0 <5.0.3',
+          nodes: ['node_modules/express'],
+          fixAvailable: { name: 'express', version: '5.0.3', isSemVerMajor: true },
+        },
+      })
+    );
+    // 4.0.5 is in the vulnerable range
+    const vulnResults = await query(
+      makePkg({ name: 'express', version: '4.0.5', projectPath: '/p1' })
+    );
+    expect(vulnResults).toHaveLength(1);
+
+    clearCache();
+    // 4.1.0 is NOT in the vulnerable range
+    const safeResults = await query(
+      makePkg({ name: 'express', version: '4.1.0', projectPath: '/p2' })
+    );
+    expect(safeResults).toHaveLength(0);
+  });
+});
+
+describe('isInstalledVersionVulnerable() unit tests', () => {
+  it('returns false when version is above range', () => {
+    expect(isInstalledVersionVulnerable('8.4.2', '<8.4.0')).toBe(false);
+  });
+  it('returns false when version equals exclusive upper bound', () => {
+    expect(isInstalledVersionVulnerable('8.4.0', '<8.4.0')).toBe(false);
+  });
+  it('returns true when version is within range', () => {
+    expect(isInstalledVersionVulnerable('7.2.0', '<8.4.0')).toBe(true);
+  });
+  it('returns true when range is null (conservative)', () => {
+    expect(isInstalledVersionVulnerable('1.0.0', null)).toBe(true);
+  });
+  it('returns true when range is empty string (conservative)', () => {
+    expect(isInstalledVersionVulnerable('1.0.0', '')).toBe(true);
+  });
+  it('returns true when version cannot be parsed (conservative)', () => {
+    expect(isInstalledVersionVulnerable('not-a-version', '<2.0.0')).toBe(true);
+  });
+  it('handles inclusive ranges correctly', () => {
+    expect(isInstalledVersionVulnerable('2.0.0', '<=2.0.0')).toBe(true);
+    expect(isInstalledVersionVulnerable('2.0.1', '<=2.0.0')).toBe(false);
   });
 });

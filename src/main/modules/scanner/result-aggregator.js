@@ -3,6 +3,7 @@
 const semver = require('semver');
 const { determineFixStrategy } = require('../audit/strategies/fix-strategy');
 const { mergeSeverity } = require('../enrichment/severity-merger');
+const { isInstalledVersionVulnerable } = require('./sources/npm-audit-source');
 
 const SOURCE_PRIORITY = Object.freeze([
   'nvd',
@@ -455,9 +456,19 @@ async function aggregate(pkg, allSourceResults) {
     .flat()
     .filter((r) => r && typeof r === 'object');
 
+  // Safety-net: Remove source results where the installed version does NOT satisfy
+  // the reported vulnerableRange. This catches false positives from any source that
+  // fails to perform version filtering (defense-in-depth).
+  const filtered = flat.filter((r) => {
+    if (!r.vulnerableRange || typeof r.vulnerableRange !== 'string') return true;
+    const version = r.packageVersion || (pkg && pkg.version);
+    if (!version) return true;
+    return isInstalledVersionVulnerable(version, r.vulnerableRange);
+  });
+
   // Pass 1: Group by advisory ID to correlate source enrichment data correctly
   // (ensures NVD CVSS, OSV severity, and npm-audit data for the same CVE are paired)
-  const advisoryGroups = groupResultsByAdvisoryId(flat);
+  const advisoryGroups = groupResultsByAdvisoryId(filtered);
 
   // Pass 2: Merge each advisory group into one UnifiedVulnerability
   const perAdvisoryVulns = await Promise.all(advisoryGroups.map((g) => mergeGroup(g, pkg)));

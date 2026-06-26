@@ -49,6 +49,30 @@ function isVersionAffectedByAdvisory(installedVersion, advisory, packageName) {
 
     try {
       if (semver.satisfies(cleanVersion, semverRange)) {
+        // Version is within the vulnerable range — but check if it's already patched.
+        // GitHub advisories may report open-ended ranges like ">=8.0.0" with a separate
+        // patched_versions field (e.g. ">=8.4.0" or "8.4.0"). If the installed version
+        // is at or above the patched version, it is NOT affected.
+        const patchedRaw = vuln.patched_versions;
+        if (patchedRaw && typeof patchedRaw === 'string') {
+          const patchedCleaned = patchedRaw.replace(/^>=\s*/, '').trim();
+          const patchedCoerced = semver.coerce(patchedCleaned);
+          if (patchedCoerced) {
+            // If installed version >= patched version, this vuln entry is resolved
+            if (semver.gte(cleanVersion, patchedCoerced.version)) {
+              continue; // Skip this entry — already patched
+            }
+          }
+        }
+        // Also check first_patched_version (object or string form)
+        const fpv = vuln.first_patched_version;
+        const fpvStr = fpv && typeof fpv === 'object' ? fpv.identifier : fpv;
+        if (fpvStr && typeof fpvStr === 'string') {
+          const fpvCoerced = semver.coerce(fpvStr);
+          if (fpvCoerced && semver.gte(cleanVersion, fpvCoerced.version)) {
+            continue; // Skip this entry — already patched
+          }
+        }
         return true;
       }
     } catch {

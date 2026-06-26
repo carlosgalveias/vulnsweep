@@ -1,5 +1,6 @@
 'use strict';
 
+const semver = require('semver');
 const { runNpmAudit } = require('../../audit/commands/npm-audit');
 
 const SOURCE_ID = 'npm-audit';
@@ -84,6 +85,29 @@ function extractFixedIn(auditEntry, pkgName) {
     return auditEntry.fixAvailable.version || null;
   }
   return null;
+}
+
+/**
+ * Returns true if the installed version falls within the vulnerable semver range
+ * reported by npm audit. If the range is missing/unparseable, returns true
+ * (conservative: assume vulnerable when we cannot determine otherwise).
+ *
+ * @param {string} installedVersion - The installed package version
+ * @param {string|null|undefined} vulnerableRange - Semver range from auditEntry.range
+ * @returns {boolean}
+ */
+function isInstalledVersionVulnerable(installedVersion, vulnerableRange) {
+  if (!vulnerableRange || typeof vulnerableRange !== 'string') return true;
+
+  const coerced = semver.coerce(installedVersion);
+  const cleanVersion = semver.clean(installedVersion) || (coerced && coerced.version);
+  if (!cleanVersion) return true; // Can't parse version — assume vulnerable (conservative)
+
+  try {
+    return semver.satisfies(cleanVersion, vulnerableRange);
+  } catch {
+    return true; // Unparseable range — assume vulnerable (conservative)
+  }
 }
 
 /**
@@ -217,6 +241,10 @@ async function query(pkg, signal) {
     const auditEntry = auditData.vulnerabilities[pkg.name];
     if (!auditEntry) return [];
 
+    // Early exit: if the installed version does NOT fall within the vulnerable
+    // range, this package is already patched — skip it entirely.
+    if (!isInstalledVersionVulnerable(pkg.version, auditEntry.range)) return [];
+
     const via = Array.isArray(auditEntry.via) ? auditEntry.via : [];
     const fixedIn = extractFixedIn(auditEntry, pkg.name);
 
@@ -299,4 +327,4 @@ async function prewarmCache(projectPath) {
   await auditCache.get(projectPath);
 }
 
-module.exports = { query, clearCache, prewarmCache, SOURCE_ID };
+module.exports = { query, clearCache, prewarmCache, SOURCE_ID, isInstalledVersionVulnerable };
