@@ -268,10 +268,18 @@ function printDependencyReport(result, opts) {
       ? extractUpdatesFromArray(project)
       : project.updates || project.candidates || [];
 
+    // When project is an array, extract name from the first repo element
+    const name = Array.isArray(project)
+      ? project[0]?.projectName || 'unknown'
+      : project.projectName || project.name || 'unknown';
+    const projPath = Array.isArray(project)
+      ? project[0]?.repoPath || '.'
+      : project.projectPath || project.path || '.';
+
     totalUpdates += updates.length;
     normalizedProjects.push({
-      name: project.projectName || project.name || 'unknown',
-      path: project.projectPath || project.path || '.',
+      name,
+      path: projPath,
       updates,
     });
   }

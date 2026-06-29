@@ -1,0 +1,55 @@
+{
+  "name": "cognus-api",
+  "version": "0.0.1",
+  "description": "IBM SAIP",
+  "private": true,
+  "scripts": {
+    "test": "node ./node_modules/mocha/bin/mocha test --timeout 30000 --recursive --exit",
+    "coverage": "nyc --reporter=lcov npm run test",
+    "start": "node api/local.js",
+    "alterdb": "node alterdb.js",
+    "dev": "nodemon --inspect api/local.js",
+    "seed": "node dev/db/seed.js"
+  },
+  "main": "index.js",
+  "author": {
+    "name": "Carlos Galveias",
+    "email": "carlos.galveias@pt.softinsa.com",
+    "url": "www.softinsa.pt"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "license": "IBM",
+  "bugs": "-",
+  "dependencies": {
+    "aws-sdk": "^2.1296.0",
+    "basic-ftp": "6.0.1",
+    "dotenv": "^16.0.3",
+    "es6-promise-pool": "^2.5.0",
+    "fs-extra": "^11.1.0",
+    "image-size": "^1.0.2",
+    "imap": "^0.8.19",
+    "ioredis": "^5.2.5",
+    "json-orm": "^0.0.23",
+    "jsonwebtoken": "^9.0.0",
+    "mime-types": "^2.1.35",
+    "moment": "^2.29.4",
+    "path": "^0.12.7",
+    "pluralize": "^8.0.0",
+    "qs": "6.15.2",
+    "redis": "^4.5.1",
+    "s3": "github:carlosgalveias/node-s3-client",
+    "safe-eval-2": "^0.4.2",
+    "underscore": "1.13.8",
+    "uuid": "11.1.1",
+    "water-orm": "^0.0.6"
+  },
+  "devDependencies": {},
+  "overrides": {
+    "uuid": "11.1.1",
+    "underscore": "1.13.8",
+    "semver": "5.7.2"
+  }
+}

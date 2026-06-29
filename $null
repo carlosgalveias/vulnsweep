@@ -1,0 +1,3 @@
+npm warn Unknown user config "msvc_version". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "python". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "unsafe-perm". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
