@@ -1,6 +1,6 @@
 {
   "name": "vulnsweep",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "description": "Automated dependency vulnerability orchestrator for bulk npm security updates across multiple repositories",
   "main": "dist-main/main.js",
   "scripts": {
