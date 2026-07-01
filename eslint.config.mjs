@@ -18,9 +18,74 @@ export default [
     ],
   },
 
-  // JavaScript files
+  // JavaScript files (non-JSX) — no React plugin
   {
-    files: ['**/*.js', '**/*.jsx'],
+    files: ['**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        // Node.js globals
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        module: 'readonly',
+        require: 'readonly',
+        exports: 'readonly',
+        global: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly',
+        // Web-standard globals (available in both Node.js 10+ and browsers)
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        AbortController: 'readonly',
+        // Browser globals
+        window: 'readonly',
+        document: 'readonly',
+        navigator: 'readonly',
+        localStorage: 'readonly',
+        sessionStorage: 'readonly',
+        fetch: 'readonly',
+      },
+    },
+    plugins: {
+      import: importPlugin,
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+
+      // General JavaScript rules
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'no-var': 'error',
+      'prefer-const': 'error',
+      'prefer-arrow-callback': 'warn',
+      'prefer-template': 'warn',
+      'object-shorthand': 'warn',
+      'no-duplicate-imports': 'error',
+
+      // Import rules (disabled — eslint-plugin-import incompatible with ESLint 10.x)
+      'import/order': 'off',
+
+      // Async/await best practices
+      'no-async-promise-executor': 'error',
+      'require-atomic-updates': 'error',
+
+      // Error handling
+      'no-throw-literal': 'error',
+      'prefer-promise-reject-errors': 'error',
+    },
+  },
+
+  // JSX files — includes React plugin and rules
+  {
+    files: ['**/*.jsx'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -90,15 +155,8 @@ export default [
       'object-shorthand': 'warn',
       'no-duplicate-imports': 'error',
 
-      // Import rules
-      'import/order': [
-        'warn',
-        {
-          groups: ['builtin', 'external', 'internal', 'parent', 'sibling', 'index'],
-          'newlines-between': 'never',
-          alphabetize: { order: 'asc', caseInsensitive: true },
-        },
-      ],
+      // Import rules (disabled — eslint-plugin-import incompatible with ESLint 10.x)
+      'import/order': 'off',
 
       // Async/await best practices
       'no-async-promise-executor': 'error',

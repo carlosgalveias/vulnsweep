@@ -53,7 +53,9 @@ function computeBackoffDelay(attempt) {
   return Math.min(exponential + jitter, GIT_CONFIG.GITHUB_RETRY_MAX_DELAY_MS);
 }
 
-function httpsGet(url, timeoutMs, signal) {
+const MAX_REDIRECTS = 3;
+
+function httpsGet(url, timeoutMs, signal, _redirectCount = 0) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error('Request aborted'));
@@ -85,6 +87,18 @@ function httpsGet(url, timeoutMs, signal) {
         res.on('end', () => {
           if (signal?.aborted) {
             reject(new Error('Request aborted'));
+            return;
+          }
+          // --- Handle HTTP redirects (301, 302, 307, 308) ---
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            if (_redirectCount >= MAX_REDIRECTS) {
+              reject(new Error(`GitHub Advisory: too many redirects (max ${MAX_REDIRECTS})`));
+              return;
+            }
+            const redirectUrl = new URL(res.headers.location, url).href;
+            httpsGet(redirectUrl, timeoutMs, signal, _redirectCount + 1)
+              .then(resolve)
+              .catch(reject);
             return;
           }
           if (res.statusCode === 404) {
