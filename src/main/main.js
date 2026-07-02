@@ -1,4 +1,3 @@
-/* eslint-disable import/order */
 const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
@@ -332,8 +331,18 @@ ipcMain.handle('discover-projects', async (event, basePath) => {
     // Validate and sanitize path
     const sanitized = sanitizePath(basePath);
 
+    // Read recursive setting from stored settings
+    let recursive = false;
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      recursive = saved.recursive === true;
+    } catch {
+      /* use default */
+    }
+
     // Discover projects - returns Result object { success, data, message }
-    const result = await discovery.discoverProjects(sanitized);
+    const result = await discovery.discoverProjects(sanitized, { recursive, ignore: [] });
 
     // Check if discovery failed
     if (!result.success) {
@@ -851,6 +860,16 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
 
     const { scanDependencyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
 
+    // Read recursive setting from stored settings
+    let recursive = false;
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      recursive = saved.recursive === true;
+    } catch {
+      /* use default */
+    }
+
     const progressCb = ({ current, total, repoName, packageName }) => {
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('dep-update-progress', {
@@ -865,25 +884,13 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
     // Mirror audit scan: run git prepare (reset+pull+removeOverrides+removePackageLock)
     // per repo whenever any prep option is active.
     if (allowReset || removeOverrides || removePackageLock) {
-      const fs = require('fs');
-      const path_ = require('path');
-      let repos = [];
-      try {
-        const entries = await fs.promises.readdir(sanitized, { withFileTypes: true });
-        const dirs = entries.filter((e) => e.isDirectory());
-        for (const d of dirs) {
-          const rp = path_.join(sanitized, d.name);
-          try {
-            await fs.promises.access(path_.join(rp, 'package.json'));
-            repos.push(rp);
-          } catch {
-            /* skip */
-          }
-        }
-        if (repos.length === 0) repos = [sanitized]; // single-repo fallback
-      } catch {
-        repos = [sanitized];
-      }
+      const discovery = require('./modules/discovery');
+      const prepDiscovery = await discovery.discoverProjects(sanitized, { recursive });
+      const repos =
+        prepDiscovery.success && prepDiscovery.content.length > 0
+          ? prepDiscovery.content.map((p) => p.path)
+          : [sanitized];
+
       for (const repoPath of repos) {
         sendLogMessage('info', `Preparing repository: ${path.basename(repoPath)}...`);
         try {
@@ -897,7 +904,7 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
       }
     }
 
-    const result = await scanDependencyUpdates(sanitized, progressCb);
+    const result = await scanDependencyUpdates(sanitized, progressCb, { recursive });
 
     if (!result.success) {
       console.error(`[IPC] scan-dep-updates error: ${result.error}`);
@@ -1290,6 +1297,7 @@ ipcMain.handle('settings:set', (_event, settingsObj) => {
       'bumpVersion',
       'removePackageLock',
       'removeOverrides',
+      'recursive',
     ];
     for (const key of BOOLEAN_SETTING_KEYS) {
       if (key in settingsObj && typeof settingsObj[key] !== 'boolean') {

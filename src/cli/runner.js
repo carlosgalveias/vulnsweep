@@ -40,7 +40,7 @@ function createProgressFactory(quiet, noColor, scanType) {
       const pct = Math.min(overallPct, 100);
 
       // Build descriptive label
-      let detail = '';
+      let detail;
       if (phase === 'universe') {
         detail = 'Building package list...';
       } else if (phase === 'scanning' && packageName) {
@@ -148,7 +148,10 @@ async function run(opts) {
   }
 
   // 2. Discover projects
-  const discoveryResult = await discoverProjects(dir);
+  const discoveryResult = await discoverProjects(dir, {
+    recursive: opts.recursive ?? false,
+    ignore: opts.ignore || [],
+  });
 
   if (!discoveryResult.success) {
     if (!quiet) {

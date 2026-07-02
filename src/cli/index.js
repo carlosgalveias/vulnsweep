@@ -105,7 +105,9 @@ function printHelp() {
 VulnSweep CLI v${VERSION} - npm vulnerability scanner
 
 USAGE:
-  vulnsweep [command] [options]
+  vulnsweep <path> [options]
+  vulnsweep --dir <path> [options]
+  vulnsweep [command]
 
 SUBCOMMANDS:
   purchase                         Show payment instructions
@@ -113,7 +115,7 @@ SUBCOMMANDS:
   status                           Show license and fix usage status
 
 OPTIONS:
-  -d, --dir <path>          Root directory to scan (default: current directory)
+  -d, --dir <path>          Root directory to scan (REQUIRED)
   -t, --type <type>         Scan type: audit | dependency (default: audit)
   -S, --sources <preset>    Source preset: fast | optimal | full (default: optimal)
                             fast = npm-audit + osv
@@ -146,17 +148,17 @@ API KEYS (parameter overrides environment variable):
                               Request at: https://nvd.nist.gov/developers/request-an-api-key
 
 EXAMPLES:
-  vulnsweep                            Scan current directory for vulnerabilities
+  vulnsweep ./my-project               Scan directory for vulnerabilities
   vulnsweep -d ./my-project -o         Scan specific dir, print results
-  vulnsweep -t dependency -a           Check for outdated deps, auto-fix
-  vulnsweep -s report.json -f spdx     Generate SPDX SBOM
-  vulnsweep -r ./reports               Generate HTML report
-  vulnsweep -T critical                Only fail on critical vulnerabilities
-  vulnsweep -a -c -b                   Autofix, bump version, commit & push
+  vulnsweep . -t dependency -a         Check for outdated deps, auto-fix
+  vulnsweep . -s report.json -f spdx   Generate SPDX SBOM
+  vulnsweep . -r ./reports             Generate HTML report
+  vulnsweep . -T critical              Only fail on critical vulnerabilities
+  vulnsweep . -a -c -b                 Autofix, bump version, commit & push
   vulnsweep status                     Show license and fix usage
   vulnsweep purchase                   Buy a license from the CLI
-  vulnsweep --github-token ghp_xxx     Scan with GitHub authenticated mode
-  VULNSWEEP_NVD_KEY=abc vulnsweep      Scan with NVD API key from env var
+  vulnsweep . --github-token ghp_xxx   Scan with GitHub authenticated mode
+  VULNSWEEP_NVD_KEY=abc vulnsweep .    Scan with NVD API key from env var
 
 EXIT CODES:
   0   Scan passed (no vulnerabilities above threshold)

@@ -19,12 +19,31 @@ const path = require('path');
 
 /** @type {Record<string, string>} */
 const SPDX_NORM_MAP = {
+  // === Apache ===
+  'apache-2.0': 'Apache-2.0',
   'apache 2.0': 'Apache-2.0',
+  apache2: 'Apache-2.0',
   'apache-2': 'Apache-2.0',
   'apache 2': 'Apache-2.0',
   'apache license 2.0': 'Apache-2.0',
   'apache license, version 2.0': 'Apache-2.0',
+  'apache license version 2.0': 'Apache-2.0',
+  'apache software license 2.0': 'Apache-2.0',
+  'apache-1.1': 'Apache-1.1',
+  'apache 1.1': 'Apache-1.1',
+
+  // === MIT ===
+  mit: 'MIT',
+  'mit license': 'MIT',
+  'the mit license': 'MIT',
+  'mit/x11': 'MIT',
+  expat: 'MIT',
+  x11: 'MIT',
+
+  // === BSD ===
   bsd: 'BSD-2-Clause',
+  'bsd-2-clause': 'BSD-2-Clause',
+  'bsd-3-clause': 'BSD-3-Clause',
   'bsd-2': 'BSD-2-Clause',
   'bsd-3': 'BSD-3-Clause',
   'bsd 2-clause': 'BSD-2-Clause',
@@ -32,27 +51,83 @@ const SPDX_NORM_MAP = {
   'bsd-2-clause-freebsd': 'BSD-2-Clause',
   '2-clause bsd': 'BSD-2-Clause',
   '3-clause bsd': 'BSD-3-Clause',
-  'mit/x11': 'MIT',
-  'mit license': 'MIT',
-  expat: 'MIT',
+  'simplified bsd': 'BSD-2-Clause',
+  'new bsd': 'BSD-3-Clause',
+  'modified bsd': 'BSD-3-Clause',
+  freebsd: 'BSD-2-Clause',
+  'revised bsd': 'BSD-3-Clause',
+
+  // === ISC ===
+  isc: 'ISC',
   'isc license': 'ISC',
+
+  // === GPL ===
   'gpl-2.0': 'GPL-2.0-only',
   'gpl-3.0': 'GPL-3.0-only',
   gpl2: 'GPL-2.0-only',
   gpl3: 'GPL-3.0-only',
+  gplv2: 'GPL-2.0-only',
+  gplv3: 'GPL-3.0-only',
   'gnu gpl v2': 'GPL-2.0-only',
   'gnu gpl v3': 'GPL-3.0-only',
+  'gnu general public license v2': 'GPL-2.0-only',
+  'gnu general public license v3': 'GPL-3.0-only',
   'gnu general public license v2.0': 'GPL-2.0-only',
   'gnu general public license v3.0': 'GPL-3.0-only',
+  'gpl 2.0': 'GPL-2.0-only',
+  'gpl 3.0': 'GPL-3.0-only',
+  'gpl-2.0-only': 'GPL-2.0-only',
+  'gpl-3.0-only': 'GPL-3.0-only',
+  'gpl-2.0-or-later': 'GPL-2.0-or-later',
+  'gpl-3.0-or-later': 'GPL-3.0-or-later',
+
+  // === LGPL ===
   'lgpl-2.0': 'LGPL-2.0-only',
   'lgpl-2.1': 'LGPL-2.1-only',
   'lgpl-3.0': 'LGPL-3.0-only',
+  lgplv2: 'LGPL-2.0-only',
+  'lgplv2.1': 'LGPL-2.1-only',
+  lgplv3: 'LGPL-3.0-only',
   'gnu lesser general public license v2.1': 'LGPL-2.1-only',
+  'gnu lesser general public license v3': 'LGPL-3.0-only',
+  'lgpl 2.1': 'LGPL-2.1-only',
+  'lgpl 3.0': 'LGPL-3.0-only',
+
+  // === AGPL ===
   'agpl-3.0': 'AGPL-3.0-only',
+  agplv3: 'AGPL-3.0-only',
   'affero gpl v3': 'AGPL-3.0-only',
-  cc0: 'CC0-1.0',
-  'public domain': 'Unlicense',
+  'gnu affero general public license v3': 'AGPL-3.0-only',
+
+  // === MPL ===
+  'mpl-2.0': 'MPL-2.0',
+  'mpl 2.0': 'MPL-2.0',
+  'mozilla public license 2.0': 'MPL-2.0',
+  'mozilla public license, version 2.0': 'MPL-2.0',
+  'mpl-1.1': 'MPL-1.1',
+
+  // === Unlicense / Public Domain ===
+  unlicense: 'Unlicense',
+  'the unlicense': 'Unlicense',
   unlicensed: 'Unlicense',
+  'public domain': 'Unlicense',
+
+  // === CC0 ===
+  cc0: 'CC0-1.0',
+  'cc0-1.0': 'CC0-1.0',
+  'cc0 1.0': 'CC0-1.0',
+  'cc0 1.0 universal': 'CC0-1.0',
+
+  // === WTFPL ===
+  wtfpl: 'WTFPL',
+
+  // === Artistic ===
+  'artistic-2.0': 'Artistic-2.0',
+  'artistic license 2.0': 'Artistic-2.0',
+
+  // === Zlib ===
+  zlib: 'Zlib',
+  'zlib/libpng': 'Zlib',
 };
 
 // ============================================
@@ -203,7 +278,9 @@ async function scanLicenses(projectPath) {
     const raw = await fs.promises.readFile(lockfilePath, 'utf8');
     lockfile = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`Cannot read package-lock.json at ${lockfilePath}: ${err.message}`);
+    throw new Error(`Cannot read package-lock.json at ${lockfilePath}: ${err.message}`, {
+      cause: err,
+    });
   }
 
   const packages = lockfile.packages || {};
@@ -276,4 +353,4 @@ async function scanLicenses(projectPath) {
   };
 }
 
-module.exports = { scanLicenses };
+module.exports = { scanLicenses, normaliseSpdx };

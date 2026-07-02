@@ -74,7 +74,8 @@ function SettingsTab({
     saveSettings({ enabledSources: next });
   };
 
-  // Read the 4 scan options directly from settings (auto-hydrated from storage)
+  // Read the 5 scan options directly from settings (auto-hydrated from storage)
+  const recursive = settings.recursive ?? false;
   const allowReset = settings.allowReset ?? false;
   const bumpVersion = settings.bumpVersion ?? true;
   const removePackageLock = settings.removePackageLock ?? false;
@@ -83,6 +84,7 @@ function SettingsTab({
   // Auto-save a single scan option change immediately and notify parent for in-memory sync
   const handleScanOptionChange = (key, value) => {
     saveSettings({ [key]: value });
+    // 'recursive' has no parent callback — read directly from store by the IPC handler at scan time
     if (key === 'allowReset' && onAllowResetChange) onAllowResetChange(value);
     if (key === 'bumpVersion' && onBumpVersionChange) onBumpVersionChange(value);
     if (key === 'removePackageLock' && onRemovePackageLockChange) onRemovePackageLockChange(value);
@@ -235,6 +237,20 @@ function SettingsTab({
           Options applied when running a scan or applying fixes. Changes are saved automatically.
         </p>
         <div className="space-y-2 pt-1">
+          <label className="flex items-center gap-2 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={recursive}
+              onChange={(e) => handleScanOptionChange('recursive', e.target.checked)}
+              className="w-3.5 h-3.5 text-blue-600 bg-surface-overlay border-gray-600 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+            />
+            <span className="text-sm text-gray-300 group-hover:text-gray-100 transition-colors">
+              Recursive scanning
+              <span className="text-xs text-gray-500 ml-1">
+                (scan subdirectories for nested projects)
+              </span>
+            </span>
+          </label>
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-2 cursor-pointer group">
               <input

@@ -31,6 +31,7 @@ const { DEP_UPDATES_CONFIG, GIT_CONFIG } = require('../../config/constants');
 const RegistryCache = require('../../utils/registry-cache');
 const { createSuccess, createError } = require('../../utils/result');
 const { discoverProjects } = require('../discovery');
+const { parseOverridesMap } = require('../scanner/package-universe-builder');
 const {
   filterNewerVersions,
   selectRecommendedVersion,
@@ -52,7 +53,10 @@ const registryCache = new RegistryCache();
 
 /**
  * @typedef {Object} UpdateCandidate
- * @property {string}   name               - Package name e.g. "lodash"
+ * @property {string}   name               - Package name e.g. "lodash". For overridden packages, this is the
+ *                                           resolved (real) package name (e.g. "@cypress/request").
+ * @property {string|undefined} originalName - Original package name before override resolution. Only set when
+ *                                           the package is overridden via npm: protocol (e.g. "request").
  * @property {string}   currentVersion     - Installed version from node_modules/<name>/package.json#version.
  *                                           Fallback: raw specifier from package.json if node_modules absent.
  * @property {string[]} availableVersions  - Sorted ascending semver strings strictly > currentVersion.
@@ -72,7 +76,8 @@ const registryCache = new RegistryCache();
 
 /**
  * @typedef {Object} ApplyUpdate
- * @property {string} name        - Package name
+ * @property {string} name        - Package name (resolved name for overridden packages)
+ * @property {string|undefined} originalName - Original alias name when using npm: override protocol
  * @property {string} fromVersion - Installed version at scan time
  * @property {string} toVersion   - Target version chosen by user
  * @property {string} repoPath    - Absolute path to the repo where the update must be applied
@@ -142,6 +147,9 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
   } catch {
     return [];
   }
+
+  const overridesMap = parseOverridesMap(pkg.overrides);
+
   const directDeps = [
     ...Object.keys(pkg.dependencies || {}).map((name) => ({ name, depType: 'dependencies' })),
     ...Object.keys(pkg.devDependencies || {}).map((name) => ({ name, depType: 'devDependencies' })),
@@ -150,6 +158,11 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
   const candidates = [];
   for (let i = 0; i < directDeps.length; i++) {
     const { name, depType } = directDeps[i];
+
+    // Resolve override: query the real package name from the registry
+    const override = overridesMap[name];
+    const registryName = override ? override.resolvedName : name;
+
     if (typeof progressCallback === 'function') {
       progressCallback({
         current: baseOffset + i + 1,
@@ -171,8 +184,8 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
     }
     let cacheResult;
     try {
-      cacheResult = await registryCache.getAllVersions(name, () =>
-        fetchAllVersionsFromRegistry(name)
+      cacheResult = await registryCache.getAllVersions(registryName, () =>
+        fetchAllVersionsFromRegistry(registryName)
       );
     } catch {
       continue;
@@ -184,7 +197,8 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
     const recommendedVersion = selectRecommendedVersion(installedVersion, newerVersions);
     if (!recommendedVersion) continue;
     candidates.push({
-      name,
+      name: registryName,
+      originalName: override ? name : undefined,
       currentVersion: installedVersion,
       availableVersions: newerVersions,
       recommendedVersion,
@@ -210,10 +224,11 @@ async function scanSingleRepo(repoPath, progressCallback, repoName, baseOffset, 
  *
  * @param {string}   projectPath - Absolute path to root folder selected by user.
  * @param {Function} [progressCallback] - Optional ({ current, total, repoName, packageName }) => void.
+ * @param {Object}   [discoveryOptions={}] - Options forwarded to discoverProjects (e.g. { recursive }).
  * @returns {Promise<{success: boolean, content?: RepoUpdateResult[], error?: string}>}
  */
-async function scanDependencyUpdates(projectPath, progressCallback) {
-  const discoveryResult = await discoverProjects(projectPath);
+async function scanDependencyUpdates(projectPath, progressCallback, discoveryOptions = {}) {
+  const discoveryResult = await discoverProjects(projectPath, discoveryOptions);
 
   if (!discoveryResult.success || discoveryResult.content.length === 0) {
     return createSuccess([]);
@@ -295,7 +310,15 @@ async function applyUpdates(projectPath, updates) {
     // Build "npm install --save pkg@version ..." as a shell command string.
     // exec() uses the shell by default, which is required on Windows where npm
     // is a .cmd script. Package names and semver versions are shell-safe characters.
-    const pkgList = repoUpdates.map((u) => `${u.name}@${u.toVersion}`).join(' ');
+    // For overridden packages: npm install request@npm:@cypress/request@3.1.0
+    // For normal packages: npm install express@4.19.0
+    const pkgList = repoUpdates
+      .map((u) =>
+        u.originalName
+          ? `${u.originalName}@npm:${u.name}@${u.toVersion}`
+          : `${u.name}@${u.toVersion}`
+      )
+      .join(' ');
     const npmCmd = `npm install --save ${pkgList}`;
 
     try {

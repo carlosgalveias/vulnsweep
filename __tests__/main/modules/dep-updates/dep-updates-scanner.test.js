@@ -10,6 +10,11 @@ const mockDiscoverProjects = jest.fn();
 jest.mock('../../../../src/main/modules/discovery', () => ({
   discoverProjects: mockDiscoverProjects,
 }));
+jest.mock('../../../../src/main/modules/scanner/package-universe-builder', () => ({
+  parseOverridesMap: jest.requireActual(
+    '../../../../src/main/modules/scanner/package-universe-builder'
+  ).parseOverridesMap,
+}));
 // npm now uses exec (shell-based), git still uses execFile
 jest.mock('child_process', () => {
   return { exec: jest.fn(), execFile: jest.fn() };
@@ -23,10 +28,11 @@ const cp = require('child_process');
 const fs = require('fs');
 const S = require('../../../../src/main/modules/dep-updates/dep-updates-scanner');
 
-function pkg(deps, dev) {
+function pkg(deps, dev, overrides) {
   const o = { name: 't', version: '1.0.0' };
   if (deps) o.dependencies = deps;
   if (dev) o.devDependencies = dev;
+  if (overrides) o.overrides = overrides;
   return JSON.stringify(o);
 }
 function nmv(v) {
@@ -308,5 +314,135 @@ describe('applyUpdates', () => {
     const r = await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/npm install failed/);
+  });
+});
+
+describe('override handling in scanDependencyUpdates', () => {
+  it('queries registry for resolved package name when override uses npm: protocol', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    expect(r.success).toBe(true);
+    // The registry cache should have been called with the resolved name
+    const gavCalls = mockGAV.mock.calls;
+    const calledNames = gavCalls.map((c) => c[0]);
+    expect(calledNames).toContain('@cypress/request');
+    expect(calledNames).not.toContain('request');
+  });
+
+  it('candidate includes originalName when package is overridden', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    expect(candidate.name).toBe('@cypress/request');
+    expect(candidate.originalName).toBe('request');
+  });
+
+  it('works normally when package.json has no overrides field', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ express: '4.0.0' }));
+    });
+    MC(true, ['4.18.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    expect(candidate.name).toBe('express');
+    expect(candidate.originalName).toBeUndefined();
+    // Registry should be queried with original name
+    const calledNames = mockGAV.mock.calls.map((c) => c[0]);
+    expect(calledNames).toContain('express');
+  });
+
+  it('ignores simple version pin overrides (no npm: protocol)', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ cookiejar: '2.1.0' }, null, { cookiejar: '2.1.4' }));
+    });
+    MC(true, ['2.1.4', '2.2.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    // No name remapping — cookiejar is still cookiejar
+    expect(candidate.name).toBe('cookiejar');
+    expect(candidate.originalName).toBeUndefined();
+    // Registry queried with original name
+    const calledNames = mockGAV.mock.calls.map((c) => c[0]);
+    expect(calledNames).toContain('cookiejar');
+  });
+
+  it('handles scoped packages in override resolvedName correctly', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0', '3.2.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    // Scoped package name preserved correctly
+    expect(candidate.name).toBe('@cypress/request');
+    expect(candidate.originalName).toBe('request');
+    expect(candidate.availableVersions).toContain('3.1.0');
+  });
+
+  it('applyUpdates uses npm: protocol syntax for overridden packages', async () => {
+    ME(false);
+    const r = await S.applyUpdates('/root', [
+      {
+        name: '@cypress/request',
+        originalName: 'request',
+        toVersion: '3.1.0',
+        repoPath: '/root/r1',
+      },
+    ]);
+    expect(r.success).toBe(true);
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall[0]).toContain('request@npm:@cypress/request@3.1.0');
+  });
+
+  it('applyUpdates uses plain syntax for non-overridden packages', async () => {
+    ME(false);
+    const r = await S.applyUpdates('/root', [
+      { name: 'express', toVersion: '4.19.0', repoPath: '/root/r1' },
+    ]);
+    expect(r.success).toBe(true);
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall[0]).toContain('express@4.19.0');
+    expect(execCall[0]).not.toContain('npm:');
   });
 });

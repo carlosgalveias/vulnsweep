@@ -105,7 +105,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(2);
@@ -142,7 +142,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'nested-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects(baseDir);
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(2);
@@ -183,7 +183,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects(baseDir);
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
 
       expect(result.success).toBe(true);
       // Should find both the parent and the nested child
@@ -226,7 +226,7 @@ describe('discovery module', () => {
         return Promise.resolve([]);
       });
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       // Base dir also checked - no package.json there either, so 0 projects
@@ -256,7 +256,7 @@ describe('discovery module', () => {
         JSON.stringify({ name: 'no-lockfile-project', version: '1.0.0' })
       );
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(1);
@@ -276,7 +276,7 @@ describe('discovery module', () => {
       });
       fs.readFile.mockResolvedValue('{ invalid json }');
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       // Both base dir and bad-project have invalid JSON, so 0 projects
@@ -326,7 +326,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'some-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects(baseDir);
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(2);
@@ -362,7 +362,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'child-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects(baseDir);
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(2);
@@ -389,7 +389,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(1);
@@ -420,7 +420,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(1);
@@ -451,7 +451,7 @@ describe('discovery module', () => {
 
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
-      const result = await discovery.discoverProjects('/base/dir');
+      const result = await discovery.discoverProjects('/base/dir', { recursive: true });
 
       expect(result.success).toBe(true);
       expect(result.content).toHaveLength(1);
@@ -483,7 +483,9 @@ describe('discovery module', () => {
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+      for await (const project of discovery.discoverProjectsStream('/base/dir', {
+        recursive: true,
+      })) {
         projects.push(project);
       }
 
@@ -510,17 +512,20 @@ describe('discovery module', () => {
         return Promise.resolve([]);
       });
 
-      let callCount = 0;
-      fs.readFile.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join('/base/dir', '.vsignore')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        if (filePath === path.join('/base/dir', 'good-project', 'package.json')) {
           return Promise.resolve(JSON.stringify({ name: 'good', version: '1.0.0' }));
         }
         return Promise.resolve('{ invalid json }');
       });
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+      for await (const project of discovery.discoverProjectsStream('/base/dir', {
+        recursive: true,
+      })) {
         projects.push(project);
       }
 
@@ -531,7 +536,7 @@ describe('discovery module', () => {
     it('should throw error for invalid base directory', async () => {
       fs.access.mockRejectedValue(new Error('ENOENT'));
 
-      const generator = discovery.discoverProjectsStream('/invalid/path');
+      const generator = discovery.discoverProjectsStream('/invalid/path', { recursive: true });
 
       await expect(generator.next()).rejects.toThrow('Invalid base directory');
     });
@@ -561,7 +566,7 @@ describe('discovery module', () => {
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'child-project', version: '2.0.0' }));
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream(baseDir)) {
+      for await (const project of discovery.discoverProjectsStream(baseDir, { recursive: true })) {
         projects.push(project);
       }
 
@@ -592,7 +597,9 @@ describe('discovery module', () => {
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+      for await (const project of discovery.discoverProjectsStream('/base/dir', {
+        recursive: true,
+      })) {
         projects.push(project);
       }
 
@@ -625,7 +632,9 @@ describe('discovery module', () => {
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+      for await (const project of discovery.discoverProjectsStream('/base/dir', {
+        recursive: true,
+      })) {
         projects.push(project);
       }
 
@@ -658,12 +667,374 @@ describe('discovery module', () => {
       fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
 
       const projects = [];
-      for await (const project of discovery.discoverProjectsStream('/base/dir')) {
+      for await (const project of discovery.discoverProjectsStream('/base/dir', {
+        recursive: true,
+      })) {
         projects.push(project);
       }
 
       expect(projects).toHaveLength(1);
       expect(projects[0].name).toBe('valid-project');
+    });
+  });
+
+  describe('recursive option', () => {
+    describe('discoverProjects', () => {
+      it('should only discover base directory project when recursive is false (default)', async () => {
+        const baseDir = '/base/dir';
+
+        // Base dir has package.json
+        fs.access.mockResolvedValue();
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+        fs.readFile.mockResolvedValue(JSON.stringify({ name: 'base-project', version: '1.0.0' }));
+
+        const result = await discovery.discoverProjects(baseDir);
+
+        expect(result.success).toBe(true);
+        expect(result.content).toHaveLength(1);
+        expect(result.content[0].name).toBe('dir');
+        expect(result.content[0].path).toBe(baseDir);
+        // fs.readdir should NOT be called when recursive is false
+        expect(fs.readdir).not.toHaveBeenCalled();
+      });
+
+      it('should discover base + nested projects when recursive is true', async () => {
+        const baseDir = '/base/dir';
+
+        // Base dir has package.json; child dirs also have package.json
+        fs.access.mockResolvedValue();
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+        fs.readdir.mockImplementation((dirPath) => {
+          if (dirPath === baseDir) {
+            return Promise.resolve([{ name: 'child-project', isDirectory: () => true }]);
+          }
+          return Promise.resolve([]);
+        });
+        fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+        const result = await discovery.discoverProjects(baseDir, { recursive: true });
+
+        expect(result.success).toBe(true);
+        expect(result.content.length).toBeGreaterThanOrEqual(2);
+      });
+
+      it('should return empty array when recursive is false and base dir has no package.json', async () => {
+        const baseDir = '/base/dir';
+
+        fs.access.mockImplementation((filePath) => {
+          if (filePath === path.join(baseDir, 'package.json')) {
+            return Promise.reject(new Error('ENOENT'));
+          }
+          return Promise.resolve();
+        });
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+        const result = await discovery.discoverProjects(baseDir);
+
+        expect(result.success).toBe(true);
+        expect(result.content).toHaveLength(0);
+        expect(fs.readdir).not.toHaveBeenCalled();
+      });
+
+      it('should default to recursive false when options object is omitted', async () => {
+        const baseDir = '/base/dir';
+
+        // Base dir has package.json
+        fs.access.mockResolvedValue();
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+        fs.readFile.mockResolvedValue(JSON.stringify({ name: 'base-project', version: '1.0.0' }));
+
+        const result = await discovery.discoverProjects(baseDir);
+
+        expect(result.success).toBe(true);
+        expect(result.content).toHaveLength(1);
+        expect(fs.readdir).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('discoverProjectsStream', () => {
+      it('should only yield base directory project when recursive is false (default)', async () => {
+        const baseDir = '/base/dir';
+
+        fs.access.mockResolvedValue();
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+        fs.readFile.mockResolvedValue(JSON.stringify({ name: 'base-project', version: '1.0.0' }));
+
+        const projects = [];
+        for await (const project of discovery.discoverProjectsStream(baseDir)) {
+          projects.push(project);
+        }
+
+        expect(projects).toHaveLength(1);
+        expect(projects[0].name).toBe('dir');
+        expect(fs.readdir).not.toHaveBeenCalled();
+      });
+
+      it('should yield base + nested projects when recursive is true', async () => {
+        const baseDir = '/base/dir';
+
+        fs.access.mockResolvedValue();
+        fs.stat.mockResolvedValue({ isDirectory: () => true });
+        fs.readdir.mockImplementation((dirPath) => {
+          if (dirPath === baseDir) {
+            return Promise.resolve([{ name: 'child-project', isDirectory: () => true }]);
+          }
+          return Promise.resolve([]);
+        });
+        fs.readFile.mockResolvedValue(JSON.stringify({ name: 'test-project', version: '1.0.0' }));
+
+        const projects = [];
+        for await (const project of discovery.discoverProjectsStream(baseDir, {
+          recursive: true,
+        })) {
+          projects.push(project);
+        }
+
+        expect(projects.length).toBeGreaterThanOrEqual(2);
+      });
+    });
+  });
+
+  describe('.vsignore and ignore options', () => {
+    it('should exclude folders listed in .vsignore at scan root', async () => {
+      const baseDir = '/base/dir';
+
+      // Base dir does NOT have package.json; children do
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'project-a', isDirectory: () => true },
+            { name: 'excluded-folder', isDirectory: () => true },
+            { name: 'project-b', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.resolve('excluded-folder\n');
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(2);
+      const names = result.content.map((p) => p.name);
+      expect(names).toContain('project-a');
+      expect(names).toContain('project-b');
+      expect(names).not.toContain('excluded-folder');
+    });
+
+    it('should ignore comments and empty lines in .vsignore', async () => {
+      const baseDir = '/base/dir';
+
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'project-a', isDirectory: () => true },
+            { name: 'real-exclude', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.resolve('# This is a comment\n\n   \nreal-exclude\n# another comment\n');
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('project-a');
+    });
+
+    it('should handle missing .vsignore gracefully', async () => {
+      const baseDir = '/base/dir';
+
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([{ name: 'project-a', isDirectory: () => true }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.reject(new Error('ENOENT: no such file'));
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('project-a');
+    });
+
+    it('should exclude folders passed via options.ignore', async () => {
+      const baseDir = '/base/dir';
+
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'project-a', isDirectory: () => true },
+            { name: 'custom-dir', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, {
+        recursive: true,
+        ignore: ['custom-dir'],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('project-a');
+    });
+
+    it('should combine hardcoded + .vsignore + options.ignore exclusions', async () => {
+      const baseDir = '/base/dir';
+
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'node_modules', isDirectory: () => true }, // hardcoded
+            { name: 'vsignore-excluded', isDirectory: () => true }, // .vsignore
+            { name: 'cli-excluded', isDirectory: () => true }, // options.ignore
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.resolve('vsignore-excluded\n');
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, {
+        recursive: true,
+        ignore: ['cli-excluded'],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('valid-project');
+    });
+
+    it('should handle .vsignore with Windows line endings', async () => {
+      const baseDir = '/base/dir';
+
+      fs.access.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, 'package.json')) {
+          return Promise.reject(new Error('ENOENT'));
+        }
+        return Promise.resolve();
+      });
+      fs.stat.mockResolvedValue({ isDirectory: () => true });
+
+      fs.readdir.mockImplementation((dirPath) => {
+        if (dirPath === baseDir) {
+          return Promise.resolve([
+            { name: 'excluded-a', isDirectory: () => true },
+            { name: 'excluded-b', isDirectory: () => true },
+            { name: 'valid-project', isDirectory: () => true },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      fs.readFile.mockImplementation((filePath) => {
+        if (filePath === path.join(baseDir, '.vsignore')) {
+          return Promise.resolve('excluded-a\r\nexcluded-b\r\n');
+        }
+        return Promise.resolve(JSON.stringify({ name: 'test', version: '1.0.0' }));
+      });
+
+      const result = await discovery.discoverProjects(baseDir, { recursive: true });
+
+      expect(result.success).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].name).toBe('valid-project');
+    });
+  });
+
+  describe('parseVsIgnoreFile', () => {
+    it('should return empty array when file does not exist', async () => {
+      fs.readFile.mockRejectedValue(new Error('ENOENT: no such file'));
+
+      const result = await discovery.parseVsIgnoreFile('/nonexistent/.vsignore');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should parse valid .vsignore content', async () => {
+      fs.readFile.mockResolvedValue(
+        '# comment\nfolder-a\n\n  folder-b  \n# another comment\nfolder-c\n'
+      );
+
+      const result = await discovery.parseVsIgnoreFile('/some/path/.vsignore');
+
+      expect(result).toEqual(['folder-a', 'folder-b', 'folder-c']);
     });
   });
 });

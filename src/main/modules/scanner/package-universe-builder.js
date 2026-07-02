@@ -55,14 +55,45 @@ function depthFromKey(key) {
 }
 
 /**
+ * Parse the npm `overrides` field from package.json into a lookup map.
+ * Only handles string-value overrides with npm: protocol (name remapping).
+ * Simple version pins (e.g., "2.1.4") don't remap names, so are skipped.
+ *
+ * @param {object} overrides - The `overrides` field from package.json
+ * @returns {Object<string, {resolvedName: string, resolvedVersion: string|null}>}
+ */
+function parseOverridesMap(overrides) {
+  if (!overrides || typeof overrides !== 'object') return {};
+
+  const map = {};
+  const NPM_PROTOCOL_RE = /^npm:(@?[^@]+)(?:@(.+))?$/;
+
+  for (const [originalName, spec] of Object.entries(overrides)) {
+    if (typeof spec !== 'string') continue; // Skip nested override objects
+
+    const match = spec.match(NPM_PROTOCOL_RE);
+    if (match) {
+      map[originalName] = {
+        resolvedName: match[1],
+        resolvedVersion: match[2] || null,
+      };
+    }
+    // Simple version pin (no npm: prefix): no name change needed, skip
+  }
+
+  return map;
+}
+
+/**
  * Builds a Set of all direct dependency names from package.json.
  * Includes peerDependencies because npm v7+ installs them automatically,
  * meaning they will appear in node_modules for applications (as opposed to libraries).
  *
  * @param {object} pkgJson - Parsed package.json object
+ * @param {Object} overridesMap - Parsed overrides map from parseOverridesMap()
  * @returns {Set<string>}
  */
-function buildDirectDepSet(pkgJson) {
+function buildDirectDepSet(pkgJson, overridesMap = {}) {
   const directNames = new Set();
   const depFields = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
   for (const field of depFields) {
@@ -70,6 +101,10 @@ function buildDirectDepSet(pkgJson) {
     if (deps && typeof deps === 'object') {
       for (const name of Object.keys(deps)) {
         directNames.add(name);
+        // If this dep has an override, also mark the resolved name as direct
+        if (overridesMap[name]) {
+          directNames.add(overridesMap[name].resolvedName);
+        }
       }
     }
   }
@@ -85,9 +120,10 @@ function buildDirectDepSet(pkgJson) {
  *
  * @param {Object} packagesMap - lockfileData.packages
  * @param {Set<string>} directDepNames - Names of direct dependencies from root package.json
+ * @param {Object} overridesMap - Parsed overrides map from parseOverridesMap()
  * @returns {Object[]} Array of PackageDescriptor objects
  */
-function buildUniverseFromPackagesMap(packagesMap, directDepNames) {
+function buildUniverseFromPackagesMap(packagesMap, directDepNames, overridesMap = {}) {
   const universe = [];
 
   for (const [key, entry] of Object.entries(packagesMap)) {
@@ -101,7 +137,20 @@ function buildUniverseFromPackagesMap(packagesMap, directDepNames) {
     // lockfileDepth 0 means no node_modules/ segment — malformed entry, skip
     if (lockfileDepth === 0) continue;
 
-    const name = extractNameFromKey(key);
+    const keyName = extractNameFromKey(key);
+
+    // If the lockfile entry has an explicit `name` field that differs from the
+    // key-derived name, the package was installed via npm override (npm: protocol).
+    // Priority 1: entry.name (npm writes this for npm: overrides)
+    // Priority 2: overridesMap lookup (defense-in-depth)
+    // Priority 3: key-derived name (default, no override)
+    let name = keyName;
+    if (entry.name && entry.name !== keyName) {
+      name = entry.name;
+    } else if (overridesMap[keyName]) {
+      name = overridesMap[keyName].resolvedName;
+    }
+
     const version = entry.version || '';
     // Only depth-1 packages can be direct dependencies; nested instances of the
     // same package name must NOT inherit the isDirect flag.
@@ -111,6 +160,7 @@ function buildUniverseFromPackagesMap(packagesMap, directDepNames) {
 
     universe.push({
       name,
+      originalName: name !== keyName ? keyName : undefined,
       version,
       isDirect,
       lockfileDepth,
@@ -145,9 +195,17 @@ function buildUniverseFromPackagesMap(packagesMap, directDepNames) {
  * @param {number} depth - Current depth (1 for root-level packages)
  * @param {string} pathPrefix - Accumulated path prefix for constructing lockfilePath
  * @param {number} [maxDepth=10] - Maximum recursion depth (defense-in-depth guard)
+ * @param {Object} [overridesMap={}] - Parsed overrides map from parseOverridesMap()
  * @returns {Object[]} Array of PackageDescriptor objects
  */
-function walkV1Dependencies(depsMap, directDepNames, depth, pathPrefix, maxDepth = 10) {
+function walkV1Dependencies(
+  depsMap,
+  directDepNames,
+  depth,
+  pathPrefix,
+  maxDepth = 10,
+  overridesMap = {}
+) {
   const universe = [];
 
   if (!depsMap || typeof depsMap !== 'object') {
@@ -159,10 +217,13 @@ function walkV1Dependencies(depsMap, directDepNames, depth, pathPrefix, maxDepth
     return universe;
   }
 
-  for (const [name, entry] of Object.entries(depsMap)) {
+  for (const [keyName, entry] of Object.entries(depsMap)) {
+    const name = overridesMap[keyName] ? overridesMap[keyName].resolvedName : keyName;
+    const originalName = name !== keyName ? keyName : undefined;
+
     // Construct the lockfilePath mirroring node_modules nesting
     const lockfilePath =
-      pathPrefix === '' ? `node_modules/${name}` : `${pathPrefix}/node_modules/${name}`;
+      pathPrefix === '' ? `node_modules/${keyName}` : `${pathPrefix}/node_modules/${keyName}`;
 
     const version = entry.version || '';
     // isDirect only applies to depth-1 packages; nested packages are never direct
@@ -172,6 +233,7 @@ function walkV1Dependencies(depsMap, directDepNames, depth, pathPrefix, maxDepth
 
     universe.push({
       name,
+      originalName,
       version,
       isDirect,
       lockfileDepth: depth,
@@ -187,7 +249,8 @@ function walkV1Dependencies(depsMap, directDepNames, depth, pathPrefix, maxDepth
         directDepNames,
         depth + 1,
         lockfilePath,
-        maxDepth
+        maxDepth,
+        overridesMap
       );
       for (const pkg of nested) {
         universe.push(pkg);
@@ -229,7 +292,7 @@ async function buildPackageUniverse(projectPath) {
     lockfileContent = await fs.readFile(lockfilePath, 'utf8');
   } catch (err) {
     if (err.code === 'ENOENT') {
-      throw new Error(`package-lock.json not found at ${lockfilePath}`);
+      throw new Error(`package-lock.json not found at ${lockfilePath}`, { cause: err });
     }
     throw err;
   }
@@ -238,10 +301,32 @@ async function buildPackageUniverse(projectPath) {
   try {
     lockfileData = JSON.parse(lockfileContent);
   } catch (err) {
-    throw new Error(`package-lock.json at ${lockfilePath} contains invalid JSON: ${err.message}`);
+    throw new Error(`package-lock.json at ${lockfilePath} contains invalid JSON: ${err.message}`, {
+      cause: err,
+    });
   }
 
   const lockfileVersion = lockfileData.lockfileVersion || 1;
+
+  // ---------------------------------------------------------------------------
+  // Parse overrides for npm: protocol remapping
+  // ---------------------------------------------------------------------------
+
+  let overridesMap = {};
+
+  if (lockfileVersion >= 2 && lockfileData.packages && lockfileData.packages['']) {
+    overridesMap = parseOverridesMap(lockfileData.packages[''].overrides);
+  } else {
+    // Try to read package.json for overrides — if missing, overridesMap stays empty
+    const pkgJsonPathForOverrides = path.join(projectPath, 'package.json');
+    try {
+      const pkgJsonContentForOverrides = await fs.readFile(pkgJsonPathForOverrides, 'utf8');
+      const pkgJsonForOverrides = JSON.parse(pkgJsonContentForOverrides);
+      overridesMap = parseOverridesMap(pkgJsonForOverrides.overrides);
+    } catch {
+      // package.json missing or malformed — overridesMap stays empty
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Build the directDepNames set
@@ -252,7 +337,7 @@ async function buildPackageUniverse(projectPath) {
   let directDepNames = new Set();
 
   if (lockfileVersion >= 2 && lockfileData.packages && lockfileData.packages['']) {
-    directDepNames = buildDirectDepSet(lockfileData.packages['']);
+    directDepNames = buildDirectDepSet(lockfileData.packages[''], overridesMap);
   } else {
     // Try to read package.json — if missing, directDepNames stays empty (isDirect = false)
     const pkgJsonPath = path.join(projectPath, 'package.json');
@@ -265,10 +350,11 @@ async function buildPackageUniverse(projectPath) {
         // package.json exists but contains malformed JSON — user-actionable error.
         // Re-throw as a descriptive Error so callers can surface the problem.
         throw new Error(
-          `package.json at ${pkgJsonPath} contains invalid JSON: ${parseErr.message}`
+          `package.json at ${pkgJsonPath} contains invalid JSON: ${parseErr.message}`,
+          { cause: parseErr }
         );
       }
-      directDepNames = buildDirectDepSet(pkgJson);
+      directDepNames = buildDirectDepSet(pkgJson, overridesMap);
     } catch (err) {
       if (err.code === 'ENOENT') {
         // package.json missing — gracefully continue with empty direct dep set.
@@ -290,7 +376,7 @@ async function buildPackageUniverse(projectPath) {
     if (!packagesMap || typeof packagesMap !== 'object') {
       return [];
     }
-    return buildUniverseFromPackagesMap(packagesMap, directDepNames);
+    return buildUniverseFromPackagesMap(packagesMap, directDepNames, overridesMap);
   }
 
   // lockfileVersion === 1: use dependencies recursive tree
@@ -299,7 +385,7 @@ async function buildPackageUniverse(projectPath) {
     return [];
   }
 
-  return walkV1Dependencies(depsMap, directDepNames, 1, '');
+  return walkV1Dependencies(depsMap, directDepNames, 1, '', 10, overridesMap);
 }
 
 // ---------------------------------------------------------------------------
@@ -482,4 +568,9 @@ function buildPathsFromV1Tree(depsTree, packageName, rootLabel, maxPaths) {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { buildPackageUniverse, getUniqueQueryTargets, buildDependencyPaths };
+module.exports = {
+  buildPackageUniverse,
+  getUniqueQueryTargets,
+  buildDependencyPaths,
+  parseOverridesMap,
+};

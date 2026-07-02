@@ -4,7 +4,7 @@ const path = require('path');
 const { createSuccess, createError } = require('../utils/result');
 const excluded_folders = [
   'node_modules',
-  'bower_compnents',
+  'bower_components',
   'vendor',
   'public',
   'coverage',
@@ -36,14 +36,69 @@ async function validateProject(projectPath) {
 }
 
 /**
+ * Parses a .vsignore file and returns an array of exclusion patterns.
+ * Format: one entry per line, # comments, empty lines ignored.
+ * Each entry is a folder/file name to exclude (exact match).
+ *
+ * @param {string} filePath - Absolute path to the .vsignore file
+ * @returns {Promise<string[]>} Array of exclusion patterns (folder/file names)
+ */
+async function parseVsIgnoreFile(filePath) {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    return content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+  } catch {
+    // File doesn't exist or isn't readable — not an error, just no extra exclusions
+    return [];
+  }
+}
+
+/**
+ * Builds the final exclusion list by merging:
+ *   1. Hardcoded excluded_folders
+ *   2. Patterns from .vsignore file at scan root (if exists)
+ *   3. Patterns from options.ignore (CLI --ignore or programmatic)
+ *
+ * @param {string} baseDirectory - The scan root directory
+ * @param {Object} options - Discovery options
+ * @param {string[]} [options.ignore] - Additional patterns to exclude
+ * @returns {Promise<Set<string>>} Deduplicated set of exclusion patterns
+ */
+async function buildExclusionList(baseDirectory, options = {}) {
+  const patterns = [...excluded_folders];
+
+  // Read .vsignore from scan root
+  const vsIgnorePath = path.join(baseDirectory, '.vsignore');
+  const vsIgnorePatterns = await parseVsIgnoreFile(vsIgnorePath);
+  patterns.push(...vsIgnorePatterns);
+
+  // Merge CLI/programmatic ignore patterns
+  if (Array.isArray(options.ignore) && options.ignore.length > 0) {
+    patterns.push(...options.ignore);
+  }
+
+  return new Set(patterns);
+}
+
+/**
  * Recursively discovers valid Node.js projects starting from a directory
  * @param {string} dirPath - Directory path to scan
  * @param {string} baseDirectory - Original base directory for relative path calculation
  * @param {string[]} discoveredPaths - Array of already-discovered project paths to avoid duplicates
+ * @param {Set<string>} exclusionSet - Set of folder names to exclude
  * @param {number} depth - Current recursion depth (capped at MAX_RECURSION_DEPTH)
  * @returns {Promise<Array>} - Array of discovered projects
  */
-async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths, depth = 0) {
+async function discoverProjectsRecursive(
+  dirPath,
+  baseDirectory,
+  discoveredPaths,
+  exclusionSet,
+  depth = 0
+) {
   const projects = [];
 
   if (depth >= MAX_RECURSION_DEPTH) {
@@ -58,7 +113,7 @@ async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths
       const projectPath = path.join(dirPath, dir.name);
 
       // Skip common directories that should never be scanned
-      if (excluded_folders.includes(dir.name) || dir.name.startsWith('.')) {
+      if (exclusionSet.has(dir.name) || dir.name.startsWith('.')) {
         continue;
       }
 
@@ -90,6 +145,7 @@ async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths
         projectPath,
         baseDirectory,
         discoveredPaths,
+        exclusionSet,
         depth + 1
       );
       projects.push(...nestedProjects);
@@ -102,15 +158,19 @@ async function discoverProjectsRecursive(dirPath, baseDirectory, discoveredPaths
 }
 
 /**
- * Discovers all valid Node.js projects in the base directory (recursive)
- * Checks base directory itself and all subdirectories for package.json
+ * Discovers all valid Node.js projects in the base directory
+ * Checks base directory itself and (optionally) all subdirectories for package.json
  * @param {string} baseDirectory - Base directory path to scan
+ * @param {Object} [options={}] - Discovery options
+ * @param {boolean} [options.recursive=false] - When true, recurse into subdirectories up to MAX_RECURSION_DEPTH
+ * @param {string[]} [options.ignore] - Additional folder names to exclude
  * @returns {Promise<Object>} - Result object with projects array and optional errors
  */
-async function discoverProjects(baseDirectory) {
+async function discoverProjects(baseDirectory, options = {}) {
   const projects = [];
   const errors = [];
   const discoveredPaths = [];
+  const recursive = options.recursive === true;
 
   try {
     // Validate base directory exists and is accessible
@@ -148,12 +208,18 @@ async function discoverProjects(baseDirectory) {
   }
 
   // Recursively discover projects in subdirectories
-  const recursiveProjects = await discoverProjectsRecursive(
-    baseDirectory,
-    baseDirectory,
-    discoveredPaths
-  );
-  projects.push(...recursiveProjects);
+  if (recursive) {
+    // Build exclusion list (hardcoded + .vsignore + options.ignore)
+    const exclusionSet = await buildExclusionList(baseDirectory, options);
+
+    const recursiveProjects = await discoverProjectsRecursive(
+      baseDirectory,
+      baseDirectory,
+      discoveredPaths,
+      exclusionSet
+    );
+    projects.push(...recursiveProjects);
+  }
 
   // Log errors if any occurred (for debugging)
   if (errors.length > 0) {
@@ -170,15 +236,34 @@ async function discoverProjects(baseDirectory) {
 
 /**
  * Async generator version of discoverProjects for memory efficiency
- * Yields projects as they are discovered (recursive)
+ * Yields projects as they are discovered
  * @param {string} baseDirectory - Base directory path to scan
+ * @param {Object} [options={}] - Discovery options
+ * @param {boolean} [options.recursive=false] - When true, recurse into subdirectories up to MAX_RECURSION_DEPTH
  * @param {string[]} discoveredPaths - Internal use: tracks discovered paths to avoid duplicates
  * @param {number} depth - Current recursion depth (capped at MAX_RECURSION_DEPTH)
  * @yields {Object} - Project object
  */
-async function* discoverProjectsStream(baseDirectory, discoveredPaths = [], depth = 0) {
+async function* discoverProjectsStream(
+  baseDirectory,
+  options = {},
+  discoveredPaths = [],
+  depth = 0
+) {
   if (depth >= MAX_RECURSION_DEPTH) {
     return;
+  }
+
+  const recursive = options.recursive === true;
+
+  // Build or reuse exclusion set
+  let exclusionSet;
+  if (depth === 0) {
+    exclusionSet = await buildExclusionList(baseDirectory, options);
+    // Cache for recursive calls
+    options = { ...options, _exclusionSet: exclusionSet };
+  } else {
+    exclusionSet = options._exclusionSet || new Set(excluded_folders);
   }
 
   // Validate base directory exists on the initial call (depth 0)
@@ -191,7 +276,7 @@ async function* discoverProjectsStream(baseDirectory, discoveredPaths = [], dept
       }
     } catch (error) {
       if (error.message.startsWith('Invalid base directory')) throw error;
-      throw new Error(`Invalid base directory: ${error.message}`);
+      throw new Error(`Invalid base directory: ${error.message}`, { cause: error });
     }
   }
 
@@ -216,23 +301,25 @@ async function* discoverProjectsStream(baseDirectory, discoveredPaths = [], dept
   }
 
   // Recursively scan subdirectories
-  try {
-    const entries = await fs.readdir(baseDirectory, { withFileTypes: true });
-    const directories = entries.filter((entry) => entry.isDirectory());
+  if (recursive) {
+    try {
+      const entries = await fs.readdir(baseDirectory, { withFileTypes: true });
+      const directories = entries.filter((entry) => entry.isDirectory());
 
-    for (const dir of directories) {
-      const projectPath = path.join(baseDirectory, dir.name);
+      for (const dir of directories) {
+        const projectPath = path.join(baseDirectory, dir.name);
 
-      // Skip common directories that should never be scanned
-      if (excluded_folders.includes(dir.name) || dir.name.startsWith('.')) {
-        continue;
+        // Skip common directories that should never be scanned
+        if (exclusionSet.has(dir.name) || dir.name.startsWith('.')) {
+          continue;
+        }
+
+        // Recursively yield projects from subdirectories
+        yield* discoverProjectsStream(projectPath, options, discoveredPaths, depth + 1);
       }
-
-      // Recursively yield projects from subdirectories
-      yield* discoverProjectsStream(projectPath, discoveredPaths, depth + 1);
+    } catch {
+      // Skip directories with access issues
     }
-  } catch {
-    // Skip directories with access issues
   }
 }
 
@@ -254,7 +341,7 @@ async function testDiscovery() {
   console.log(`Test 2: Discovering projects in parent directory: ${parentDir}`);
 
   try {
-    const projects = await discoverProjects(parentDir);
+    const projects = await discoverProjects(parentDir, { recursive: true });
     console.log(`Found ${projects.length} valid Node.js projects:`);
 
     projects.forEach((project, index) => {
@@ -284,5 +371,6 @@ module.exports = {
   discoverProjects,
   discoverProjectsStream,
   validateProject,
+  parseVsIgnoreFile,
   testDiscovery,
 };

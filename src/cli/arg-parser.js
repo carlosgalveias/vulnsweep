@@ -22,7 +22,7 @@ const ENUM_VALUES = {
  * @see https://nodejs.org/api/util.html#utilparseargsconfig
  */
 const OPTIONS_CONFIG = {
-  dir: { type: 'string', short: 'd', default: process.cwd() },
+  dir: { type: 'string', short: 'd' },
   type: { type: 'string', short: 't', default: 'audit' },
   sources: { type: 'string', short: 'S', default: 'optimal' },
   output: { type: 'boolean', short: 'o', default: false },
@@ -42,6 +42,8 @@ const OPTIONS_CONFIG = {
   'no-color': { type: 'boolean', default: false },
   'github-token': { type: 'string' },
   'nvd-key': { type: 'string' },
+  recursive: { type: 'boolean', short: 'R', default: false },
+  ignore: { type: 'string', short: 'I' },
   help: { type: 'boolean', short: 'h', default: false },
   version: { type: 'boolean', short: 'V', default: false },
 };
@@ -67,10 +69,11 @@ function validateEnum(name, value) {
  * @throws {Error} On validation failure with a descriptive message
  */
 function parseCliArgs(argv) {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     args: argv,
     options: OPTIONS_CONFIG,
     strict: true,
+    allowPositionals: true,
   });
 
   // Early exit for help/version
@@ -80,6 +83,19 @@ function parseCliArgs(argv) {
 
   if (values.version) {
     return { version: true };
+  }
+
+  // Resolve --dir: explicit flag > first positional argument > MISSING (error)
+  if (!values.dir && positionals.length > 0) {
+    values.dir = positionals[0];
+  }
+
+  if (!values.dir) {
+    throw new Error(
+      'Missing required argument: --dir <path> (or provide path as positional argument)\n' +
+        'Usage: vulnsweep --dir /path/to/project\n' +
+        '       vulnsweep /path/to/project'
+    );
   }
 
   // Validate enum values
@@ -104,6 +120,16 @@ function parseCliArgs(argv) {
     }
   }
   values.dir = dirPath;
+
+  // Parse --ignore into an array of folder names
+  if (values.ignore) {
+    values.ignore = values.ignore
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else {
+    values.ignore = [];
+  }
 
   return values;
 }
