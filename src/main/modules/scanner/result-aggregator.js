@@ -415,6 +415,14 @@ function mergeVulnInto(primary, secondary) {
     primary.patchedVersion = secondary.patchedVersion;
   if (primary.vulnerableRange == null && secondary.vulnerableRange != null)
     primary.vulnerableRange = secondary.vulnerableRange;
+  // Merge strategy: prefer any actionable (non-null, non-NO_FIX) strategy
+  if (
+    secondary.strategy != null &&
+    secondary.strategy.type !== 'NO_FIX' &&
+    (primary.strategy == null || primary.strategy.type === 'NO_FIX')
+  ) {
+    primary.strategy = secondary.strategy;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import PropTypes from 'prop-types';
 import { useState } from 'react';
-import { SOURCE_PRESETS, ALL_SOURCES } from '../../main/config/source-presets';
+import { SOURCE_PRESETS, ALL_SOURCES } from '../constants';
 import useCredentials from '../hooks/useCredentials';
 import useSettings from '../hooks/useSettings';
 import CredentialsPanel from './CredentialsPanel';

@@ -34,3 +34,18 @@ export const SBOM_FORMAT_EXT = {
  * @type {number}
  */
 export const MAX_FREE_FIXES = 100;
+
+/**
+ * Source presets — mirrors src/main/config/source-presets.js for renderer use.
+ * Cannot import CJS directly in Vite-served renderer (module is not defined).
+ */
+export const SOURCE_PRESETS = {
+  fast: ['npm-audit', 'osv'],
+  optimal: ['npm-audit', 'osv', 'github-advisory', 'cisa-kev', 'epss'],
+  full: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
+};
+
+/**
+ * All available source identifiers.
+ */
+export const ALL_SOURCES = ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'];
