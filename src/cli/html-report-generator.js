@@ -327,8 +327,20 @@ function buildVulnTable(vulnerabilities) {
       const idCell = vuln.url
         ? `<a href="${esc(vuln.url)}" target="_blank" rel="noopener">${esc(primaryId)}</a>`
         : esc(primaryId);
-      const idDetail =
-        ids.length > 1 ? `<div class="id-detail">${esc(ids.slice(1).join(', '))}</div>` : '';
+      // Secondary IDs: prefer working per-alias links (home-repo path) when
+      // available; otherwise fall back to the raw id list.
+      let idDetail = '';
+      const aliasLinks = Array.isArray(vuln.aliasUrls) ? vuln.aliasUrls : [];
+      if (aliasLinks.length > 0) {
+        idDetail = `<div class="id-detail">${aliasLinks
+          .map((u) => {
+            const label = u.split('/').pop() || u;
+            return `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+          })
+          .join(', ')}</div>`;
+      } else if (ids.length > 1) {
+        idDetail = `<div class="id-detail">${esc(ids.slice(1).join(', '))}</div>`;
+      }
       const pkg = esc(vuln.package || 'unknown');
       const ver = esc(vuln.installedVersion || '?');
       const title = esc(vuln.title || '');

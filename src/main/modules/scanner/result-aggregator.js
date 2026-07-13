@@ -15,6 +15,82 @@ const SOURCE_PRIORITY = Object.freeze([
 ]);
 const CVE_PATTERN = /^CVE-\d{4}-\d{4,}$/i;
 const GHSA_PATTERN = /^GHSA-/i;
+// A global GHSA URL: https://github.com/advisories/GHSA-xxxx-xxxx-xxxx
+const GLOBAL_ADVISORY_RE =
+  /^https:\/\/github\.com\/advisories\/(GHSA-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+)(?:[/?#].*)?$/i;
+
+/**
+ * Returns a GitHub owner/repo for a package when resolvable, else null.
+ * Loaded lazily to avoid a hard import cycle / keep this module pure for tests.
+ * @param {string} packageName
+ * @returns {Promise<{owner:string,repo:string}|null>}
+ */
+async function _resolveRepo(packageName) {
+  if (!packageName) return null;
+  try {
+    const { resolveGitHubRepo } = require('../../utils/repo-url-resolver');
+    return (await resolveGitHubRepo(packageName)) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a home-repo advisory URL. GitHub serves BOTH the global
+ * `/advisories/<GHSA>` path AND the repository path; the global path 404s for
+ * advisories published only at the repo level (many npm packages — e.g. axios,
+ * faker), while the repository path resolves for every advisory (global or
+ * repo-level). Prefer the repository path whenever the owning repo is known so
+ * the link never 404s.
+ *
+ * @param {string} ghsaId - e.g. GHSA-pmv8-rq9r-6j72
+ * @param {{owner:string,repo:string}} repoInfo
+ * @returns {string}
+ */
+function _repoAdvisoryUrl(ghsaId, repoInfo) {
+  return `https://github.com/${repoInfo.owner}/${repoInfo.repo}/security/advisories/${ghsaId}`;
+}
+
+/**
+ * Normalize a single advisory URL to a working link.
+ * - Global GHSA URLs (github.com/advisories/<GHSA>) are rewritten to the
+ *   home-repo path when the owning repo is known.
+ * - Non-GHSA URLs (NVD, OSV, CVE, already-repo GHSA) are returned unchanged.
+ *
+ * @param {string|null} url
+ * @param {{owner:string,repo:string}|null} repoInfo
+ * @returns {string|null}
+ */
+function normalizeAdvisoryUrl(url, repoInfo) {
+  if (typeof url !== 'string' || url.length === 0) return url || null;
+  const m = url.match(GLOBAL_ADVISORY_RE);
+  if (!m || !repoInfo) return url;
+  return _repoAdvisoryUrl(m[1], repoInfo);
+}
+
+/**
+ * Build a list of working URLs, one per alias GHSA ID, using the home-repo
+ * path when available. Falls back to the global path (still emitted, but only
+ * as a secondary reference) when the repo is unknown.
+ *
+ * @param {string[]} aliases
+ * @param {{owner:string,repo:string}|null} repoInfo
+ * @returns {string[]}
+ */
+function buildAliasUrls(aliases, repoInfo) {
+  if (!Array.isArray(aliases) || aliases.length === 0) return [];
+  const out = [];
+  const seen = new Set();
+  for (const id of aliases) {
+    if (typeof id !== 'string' || !GHSA_PATTERN.test(id)) continue;
+    const u = repoInfo ? _repoAdvisoryUrl(id, repoInfo) : `https://github.com/advisories/${id}`;
+    if (!seen.has(u)) {
+      seen.add(u);
+      out.push(u);
+    }
+  }
+  return out;
+}
 
 function isCveId(id) {
   return typeof id === 'string' && CVE_PATTERN.test(id);
@@ -272,8 +348,15 @@ async function mergeGroup(g, pkg) {
   );
   const vulnerableRange = firstByPriority(g, 'vulnerableRange') || null;
   const title = firstByPriority(g, 'title') || null;
-  const url = firstByPriority(g, 'url') || null;
   const urls = mergeUrls(g);
+
+  // Resolve the owning repo so advisory links can use the home-repo path
+  // instead of the global /advisories/<GHSA> path (which 404s for
+  // repo-level-only advisories — e.g. many axios / faker GHSAs).
+  const repoInfo = pkg && pkg.name ? await _resolveRepo(pkg.name) : null;
+
+  // Prefer a working link: rewrite global GHSA URLs to the home-repo path.
+  const url = normalizeAdvisoryUrl(firstByPriority(g, 'url'), repoInfo) || null;
   const cvssScore = nv ? nv.cvssScore || null : null;
   const cvssVector = nv ? nv.cvssVector || null : null;
   const cisaKnownExploited = g.some((r) => r.cisaKnownExploited === true);
@@ -308,6 +391,7 @@ async function mergeGroup(g, pkg) {
     title,
     url,
     urls,
+    aliasUrls: buildAliasUrls(aliases, repoInfo),
     description,
     patchedVersion,
     vulnerableRange,
@@ -500,6 +584,19 @@ async function aggregate(pkg, allSourceResults) {
   // Pass 3: Collapse to one row per package+version (UI requirement)
   const vulnerabilities = deduplicateVulnerabilities(perAdvisoryVulns);
 
+  // Recompute aliasUrls from the FINAL (fully unioned) alias set. dedupe merges
+  // groups and unions their `aliases`, but `aliasUrls` was computed per-group in
+  // mergeGroup and would only reflect the surviving group's partial alias set.
+  await Promise.all(
+    vulnerabilities.map(async (v) => {
+      const repoInfo = v.package ? await _resolveRepo(v.package) : null;
+      v.aliasUrls = buildAliasUrls(v.aliases || [], repoInfo);
+      // Also re-normalize the primary URL in case the surviving group was the
+      // one without a repo rewrite.
+      v.url = normalizeAdvisoryUrl(v.url, repoInfo) || v.url;
+    })
+  );
+
   const strategies = vulnerabilities.map((v) => v.strategy ?? null);
   return {
     package: pkg,
@@ -510,4 +607,9 @@ async function aggregate(pkg, allSourceResults) {
     fixableCount: vulnerabilities.filter((v) => v.patchedVersion != null).length,
   };
 }
-module.exports = { aggregate };
+module.exports = {
+  aggregate,
+  // Exported for testing / reuse:
+  normalizeAdvisoryUrl,
+  buildAliasUrls,
+};
