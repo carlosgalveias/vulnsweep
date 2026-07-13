@@ -206,6 +206,92 @@ describe('github-advisory-source repo-level fallback', () => {
       expect(results[0].fixedIn).toBe('1.11.0');
     });
 
+    it('drops a WITHDRAWN repo-level advisory (state field)', async () => {
+      resolveGitHubRepo.mockResolvedValue({ owner: 'expressjs', repo: 'morgan' });
+      const withdrawn = [
+        {
+          ghsa_id: 'GHSA-reje-cted-xxxx',
+          cve_id: null,
+          severity: 'low',
+          summary: 'REJECTED (not a vulnerability)',
+          state: 'WITHDRAWN',
+          html_url: 'https://github.com/expressjs/morgan/security/advisories/GHSA-reje-cted-xxxx',
+          vulnerabilities: [
+            {
+              package: { name: 'morgan', ecosystem: 'npm' },
+              vulnerable_version_range: '>= 1.0.0',
+              patched_versions: '>= 2.0.0',
+              first_patched_version: { identifier: '2.0.0' },
+            },
+          ],
+        },
+      ];
+      queryRepoLevelAdvisories.mockResolvedValue(withdrawn);
+
+      const results = await query({ name: 'morgan', version: '1.10.0' });
+
+      expect(results).toEqual([]);
+    });
+
+    it('drops a withdrawn repo-level advisory (withdrawn_at timestamp)', async () => {
+      resolveGitHubRepo.mockResolvedValue({ owner: 'expressjs', repo: 'morgan' });
+      const withdrawn = [
+        {
+          ghsa_id: 'GHSA-with-drawn-yyyy',
+          cve_id: null,
+          severity: 'low',
+          summary: 'Retracted finding',
+          state: 'published',
+          withdrawn_at: '2026-01-01T00:00:00Z',
+          html_url: 'https://github.com/expressjs/morgan/security/advisories/GHSA-with-drawn-yyyy',
+          vulnerabilities: [
+            {
+              package: { name: 'morgan', ecosystem: 'npm' },
+              vulnerable_version_range: '>= 1.0.0',
+              patched_versions: '>= 2.0.0',
+              first_patched_version: { identifier: '2.0.0' },
+            },
+          ],
+        },
+      ];
+      queryRepoLevelAdvisories.mockResolvedValue(withdrawn);
+
+      const results = await query({ name: 'morgan', version: '1.10.0' });
+
+      expect(results).toEqual([]);
+    });
+
+    it('drops a GitHub-retracted advisory whose only signal is the summary text (express GHSA-pj86)', async () => {
+      resolveGitHubRepo.mockResolvedValue({ owner: 'expressjs', repo: 'express' });
+      const retracted = [
+        {
+          ghsa_id: 'GHSA-pj86-cfqh-vqx6',
+          cve_id: 'CVE-2024-51999',
+          severity: 'low',
+          // GitHub keeps this at state:"published" / withdrawn_at:null in the
+          // package-affected feed; the retraction only appears in the summary.
+          summary:
+            'REJECTED (not a vulnerability): improperly controlled modification of query properties in express',
+          state: 'published',
+          withdrawn_at: null,
+          html_url: 'https://github.com/expressjs/express/security/advisories/GHSA-pj86-cfqh-vqx6',
+          vulnerabilities: [
+            {
+              package: { name: 'express', ecosystem: 'npm' },
+              vulnerable_version_range: '>= 4.0.0, < 5.0.0',
+              patched_versions: '>= 5.0.0',
+              first_patched_version: { identifier: '5.0.0' },
+            },
+          ],
+        },
+      ];
+      queryRepoLevelAdvisories.mockResolvedValue(retracted);
+
+      const results = await query({ name: 'express', version: '4.22.1' });
+
+      expect(results).toEqual([]);
+    });
+
     it('returns [] if repo-level query returns no matching advisories', async () => {
       resolveGitHubRepo.mockResolvedValue({ owner: 'expressjs', repo: 'morgan' });
       queryRepoLevelAdvisories.mockResolvedValue([]);

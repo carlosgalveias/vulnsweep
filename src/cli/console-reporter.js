@@ -216,9 +216,23 @@ function printAuditReport(result, opts) {
 
       for (const vuln of sorted) {
         const sev = formatSeverityLabel(vuln.severity, noColor);
-        const id = vuln.id || 'N/A';
+        // Evidence: prefer CVE/GHSA identifiers. Seed with the legacy `id`
+        // field (still populated by some call paths / fixtures) when it holds a
+        // real advisory ID, then layer on the structured CVE/GHSA arrays.
+        const legacyId = vuln.id || '';
+        const ids = [
+          ...(/^(CVE-|GHSA-)/i.test(legacyId) ? [legacyId] : []),
+          ...(Array.isArray(vuln.cveIds) ? vuln.cveIds : []),
+          ...(Array.isArray(vuln.aliases) ? vuln.aliases : []),
+        ];
+        const primaryId = ids[0] || 'N/A';
+        const idLine = ids.length > 1 ? ` (${ids.slice(1).join(', ')})` : '';
         const pkg = vuln.package ? `${vuln.package}@${vuln.installedVersion || '?'}` : 'unknown';
-        writeln(`│  ${sev}  ${id}  ${pkg}`);
+        const srcs =
+          Array.isArray(vuln.sources) && vuln.sources.length
+            ? `  [sources: ${vuln.sources.join(', ')}]`
+            : '';
+        writeln(`│  ${sev}  ${primaryId}${idLine}  ${pkg}${srcs}`);
 
         const title = truncate(vuln.title || '', maxTitleLen);
         if (title) {
@@ -227,11 +241,12 @@ function printAuditReport(result, opts) {
 
         const hasfix = vuln.strategy && vuln.strategy.type !== 'NO_FIX';
         const fixVer = vuln.strategy?.targetVersion || vuln.patchedVersion;
+        const ev = vuln.url ? `  ${vuln.url}` : '';
 
         if (hasfix && fixVer) {
-          writeln(`│    Fix: upgrade to ${fixVer}`);
+          writeln(`│    Fix: upgrade to ${fixVer}${ev}`);
         } else {
-          writeln(`│    ${color('No fix available', 'dim', noColor)}`);
+          writeln(`│    ${color('No fix available', 'dim', noColor)}${ev}`);
         }
 
         writeln('│');

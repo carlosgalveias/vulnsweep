@@ -166,6 +166,12 @@ function buildStyles() {
     .fix-yes{color:${COLORS.success};font-weight:600}
     .fix-no{color:#9ca3af}
 
+    /* Advisory evidence tags */
+    .id-detail{margin-top:0.15rem;font-size:0.7rem;color:#6b7280}
+    .src-tags{margin-top:0.25rem;display:flex;flex-wrap:wrap;gap:0.25rem}
+    .src-tag{display:inline-block;padding:0.05rem 0.4rem;border-radius:9999px;
+      font-size:0.65rem;font-weight:600;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe}
+
     /* Footer */
     .report-footer{
       text-align:center;padding:2rem 0;color:#9ca3af;font-size:0.8rem;
@@ -308,10 +314,28 @@ function buildVulnTable(vulnerabilities) {
   const rows = vulnerabilities
     .map((vuln) => {
       const sev = buildSeverityBadge(vuln.severity);
-      const id = esc(vuln.id || 'N/A');
+      // Evidence: prefer CVE/GHSA identifiers. Seed with the legacy `id`
+      // field (still populated by some call paths / fixtures) so real IDs in
+      // that field are not lost, then layer on the structured CVE/GHSA arrays.
+      const legacyId = vuln.id || '';
+      const ids = [
+        ...(legacyId && /^(CVE-|GHSA-)/i.test(legacyId) ? [legacyId] : []),
+        ...(Array.isArray(vuln.cveIds) ? vuln.cveIds : []),
+        ...(Array.isArray(vuln.aliases) ? vuln.aliases : []),
+      ];
+      const primaryId = ids[0] || 'N/A';
+      const idCell = vuln.url
+        ? `<a href="${esc(vuln.url)}" target="_blank" rel="noopener">${esc(primaryId)}</a>`
+        : esc(primaryId);
+      const idDetail =
+        ids.length > 1 ? `<div class="id-detail">${esc(ids.slice(1).join(', '))}</div>` : '';
       const pkg = esc(vuln.package || 'unknown');
       const ver = esc(vuln.installedVersion || '?');
       const title = esc(vuln.title || '');
+      const sources =
+        Array.isArray(vuln.sources) && vuln.sources.length
+          ? `<div class="src-tags">${vuln.sources.map((s) => `<span class="src-tag">${esc(s)}</span>`).join(' ')}</div>`
+          : '';
       const hasFix = vuln.strategy && vuln.strategy.type !== 'NO_FIX';
       const fixAvail = hasFix
         ? '<span class="fix-yes">✓ Yes</span>'
@@ -320,10 +344,10 @@ function buildVulnTable(vulnerabilities) {
 
       return `<tr>
       <td>${sev}</td>
-      <td>${id}</td>
+      <td>${idCell}${idDetail}</td>
       <td>${pkg}</td>
       <td>${ver}</td>
-      <td>${title}</td>
+      <td>${title}${sources}</td>
       <td>${fixAvail}</td>
       <td>${fixVer}</td>
     </tr>`;

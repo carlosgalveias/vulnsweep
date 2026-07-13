@@ -38,6 +38,28 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Drop any result whose underlying advisory has been withdrawn/rejected.
+// Applied at the cache-write boundary so a retracted advisory can NEVER be
+// persisted (GitHub's package-affected feed keeps withdrawn advisories at
+// state:"published" / withdrawn_at:null and only signals retraction in the
+// summary text — see github-advisory-source.isAdvisoryWithdrawn). Defensive
+// and source-agnostic: also catches OSV/CISA if they ever deliver one.
+function stripWithdrawn(results) {
+  if (!Array.isArray(results)) return results;
+  return results.filter((r) => {
+    if (!r || typeof r !== 'object') return true;
+    const title = typeof r.title === 'string' ? r.title.toLowerCase() : '';
+    if (/rejected \(not a vulnerability\)/.test(title)) return false;
+    if (/^withdrawn advisory/.test(title)) return false;
+    const raw = r.rawData && (r.rawData.github || r.rawData.osv);
+    if (raw) {
+      if (raw.withdrawn_at) return false;
+      if (typeof raw.state === 'string' && raw.state.toUpperCase() === 'WITHDRAWN') return false;
+    }
+    return true;
+  });
+}
+
 // Fire progress callback, swallowing errors so a bad callback cannot abort the scan
 function emit(cb, payload) {
   if (typeof cb !== 'function') return;
@@ -266,7 +288,7 @@ async function scanProject(projectPath, options, progressCb) {
                 .then((results) => {
                   scanTelemetry.end(tlToken, tlabel);
                   if (Array.isArray(results) && results.length > 0) {
-                    scanCache.set(sourceId, cacheKey, results);
+                    scanCache.set(sourceId, cacheKey, stripWithdrawn(results));
                     scanTelemetry.count('cache:soft-refreshed', 1);
                     return results;
                   }
@@ -289,7 +311,7 @@ async function scanProject(projectPath, options, progressCb) {
                 // cacheable fact: "this package has no vulnerabilities from this source".
                 // Only skip caching when results is null/undefined (fetch genuinely failed).
                 if (Array.isArray(results) && !isCveRecent(sourceId, cacheKey)) {
-                  scanCache.set(sourceId, cacheKey, results);
+                  scanCache.set(sourceId, cacheKey, stripWithdrawn(results));
                 }
                 return results ?? [];
               })

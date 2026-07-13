@@ -249,6 +249,34 @@ function extractFixedInFromAdvisory(advisory, packageName, installedVersion) {
  * @property {null}     epssPercentile       - Populated by cisa-kev plugin
  * @property {object}   rawData              - { github: raw advisory object }
  */
+
+/**
+ * Returns true when a raw GitHub advisory has been withdrawn or rejected by its
+ * author. GitHub signals retraction two ways, and BOTH must be handled:
+ *
+ *  1. Structured (spec-compliant): `withdrawn_at` timestamp and/or
+ *     `state: "WITHDRAWN"`.
+ *  2. Textual (feed quirk): in the package-affected feed GitHub sometimes keeps
+ *     a retracted advisory at `state: "published"` with `withdrawn_at: null`,
+ *     surfacing the retraction only in the summary text (e.g. express
+ *     GHSA-pj86: "REJECTED (not a vulnerability): ...", or "Withdrawn
+ *     Advisory: ..."). The structured fields are blank there, so we must also
+ *     match the known GitHub phrasing to avoid reporting a retracted finding.
+ *
+ * @param {object} advisory - Raw GitHub advisory object
+ * @returns {boolean}
+ */
+function isAdvisoryWithdrawn(advisory) {
+  if (!advisory || typeof advisory !== 'object') return false;
+  if (advisory.withdrawn_at) return true;
+  if (typeof advisory.state === 'string' && advisory.state.toUpperCase() === 'WITHDRAWN')
+    return true;
+  const summary = typeof advisory.summary === 'string' ? advisory.summary.toLowerCase() : '';
+  if (/rejected \(not a vulnerability\)/.test(summary)) return true;
+  if (/^withdrawn advisory/.test(summary)) return true;
+  return false;
+}
+
 async function query(pkg, signal) {
   if (!pkg || !pkg.name || !pkg.version) return [];
 
@@ -260,6 +288,7 @@ async function query(pkg, signal) {
     const results = [];
     if (advisories && advisories.length > 0) {
       for (const advisory of advisories) {
+        if (isAdvisoryWithdrawn(advisory)) continue;
         if (!isVersionAffectedByAdvisory(pkg.version, advisory, pkg.name)) continue;
 
         const ghsaId = advisory.ghsa_id || null;
@@ -309,6 +338,7 @@ async function query(pkg, signal) {
           });
 
           for (const advisory of filtered) {
+            if (isAdvisoryWithdrawn(advisory)) continue;
             if (!isVersionAffectedByAdvisory(pkg.version, advisory, pkg.name)) continue;
 
             const ghsaId = advisory.ghsa_id || null;

@@ -70,7 +70,10 @@ async function query(pkg, signal) {
     const vulns = await fetchOsvRaw(pkg.name, pkg.version, 'npm', signal);
     if (!vulns || vulns.length === 0) return [];
 
-    const safe = vulns.filter((v) => !isVersionSafe(pkg.version, v));
+    // Drop withdrawn OSV entries — they carry a `withdrawn` timestamp when the
+    // maintainers retract the finding. Reporting a retracted vuln is a false positive.
+    const live = vulns.filter((v) => !v.withdrawn);
+    const safe = live.filter((v) => !isVersionSafe(pkg.version, v));
     if (safe.length === 0) return [];
     return safe.map((v) => {
       const allAliases = extractAliases(v);
