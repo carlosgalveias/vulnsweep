@@ -179,4 +179,17 @@ describe('scanner-orchestrator scanProject()', () => {
     await scanProject(PROJECT, (p) => calls.push(p));
     expect(calls.length).toBeGreaterThanOrEqual(0);
   });
+
+  it('ScanResult.metadata records coverage flags (reproducibility)', async () => {
+    buildPackageUniverse.mockResolvedValue([]);
+    getUniqueQueryTargets.mockReturnValue([]);
+    const result = await scanProject(PROJECT);
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata).toHaveProperty('hasGithubToken');
+    expect(result.metadata).toHaveProperty('hasNvdApiKey');
+    expect(result.metadata).toHaveProperty('repoLevelAdvisoryCoverage');
+    // repoLevelAdvisoryCoverage must mirror token presence (token gating was
+    // removed so coverage is deterministic per-config, not silently dropped).
+    expect(result.metadata.repoLevelAdvisoryCoverage).toBe(result.metadata.hasGithubToken);
+  });
 });

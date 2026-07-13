@@ -1,6 +1,6 @@
 'use strict';
 
-const { SCANNER_CONFIG } = require('../../config/constants');
+const { SCANNER_CONFIG, ENRICHMENT_CONFIG } = require('../../config/constants');
 const { SOURCE_PRESETS } = require('../../config/source-presets');
 const scanTelemetry = require('../../utils/scan-telemetry');
 const { clearNvdSessionCache } = require('../enrichment/sources/nvd-source');
@@ -135,6 +135,11 @@ function buildEmptyScanResult(projectPath, sourceIds, allPackages = 0) {
     },
     scannedAt: new Date().toISOString(),
     sources: sourceIds,
+    metadata: {
+      hasGithubToken: Boolean(ENRICHMENT_CONFIG.GITHUB_TOKEN),
+      hasNvdApiKey: Boolean(ENRICHMENT_CONFIG.NVD_API_KEY),
+      repoLevelAdvisoryCoverage: Boolean(ENRICHMENT_CONFIG.GITHUB_TOKEN),
+    },
   };
 }
 
@@ -383,6 +388,17 @@ async function scanProject(projectPath, options, progressCb) {
     summary: buildSummary(vulnerabilities, sourceIds),
     scannedAt: new Date().toISOString(),
     sources: sourceIds,
+    // Coverage flags that affect result completeness. A security tool's output
+    // must be reproducible *given the same config*; recording these lets the
+    // reporter surface (and the user reason about) why two scans of the same
+    // project may differ — token/key presence changes which advisory feeds fire.
+    metadata: {
+      hasGithubToken: Boolean(ENRICHMENT_CONFIG.GITHUB_TOKEN),
+      hasNvdApiKey: Boolean(ENRICHMENT_CONFIG.NVD_API_KEY),
+      // Repo-level GitHub advisory fallback only yields data when authenticated;
+      // when false, findings may be a strict subset of an authenticated scan.
+      repoLevelAdvisoryCoverage: Boolean(ENRICHMENT_CONFIG.GITHUB_TOKEN),
+    },
   };
 }
 

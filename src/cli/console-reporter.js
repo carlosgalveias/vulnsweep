@@ -189,6 +189,28 @@ function printAuditReport(result, opts) {
     writeln(`  ${color('Sources:', 'dim', noColor)} ${sources}`);
   }
 
+  // Coverage note — surfaces config-dependent result completeness so the same
+  // project producing different counts across runs is explainable, not silent.
+  const meta = result.metadata;
+  if (meta && meta.repoLevelAdvisoryCoverage === false) {
+    writeln(
+      `  ${color(
+        '⚠ Coverage reduced: no GITHUB_TOKEN — repo-level advisory fallback skipped; findings may be a subset of an authenticated scan.',
+        'yellow',
+        noColor
+      )}`
+    );
+  }
+  if (meta && meta.hasNvdApiKey === false) {
+    writeln(
+      `  ${color(
+        '⚠ NVD enrichment limited: no NVD_API_KEY — CVSS scores/enrichment use free-tier rate limits.',
+        'yellow',
+        noColor
+      )}`
+    );
+  }
+
   if (quiet) return;
 
   writeln('');

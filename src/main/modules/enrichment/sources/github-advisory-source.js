@@ -360,9 +360,14 @@ async function queryGitHubAdvisoryByPackage(packageName, signal) {
  * @returns {Promise<object[]>} Array of raw repo-level advisory objects (published only)
  */
 async function queryRepoLevelAdvisories(owner, repo, signal) {
-  // Hard gate: this endpoint REQUIRES authentication
-  if (!ENRICHMENT_CONFIG.GITHUB_TOKEN) return [];
-
+  // Soft gate (was a HARD gate): this endpoint requires authentication and
+  // returns 401 without a token. Previously we silently returned [] when no
+  // token was configured, which made scan results TOKEN-DEPENDENT — the same
+  // project could show different vulnerability counts depending on config.
+  // That is a reproducibility problem for a security tool. Now we always
+  // attempt the call; without a token it 401s and we degrade gracefully to
+  // [] (already handled below), so coverage is deterministic per config and
+  // the orchestrator records the reduced coverage in result.metadata.
   if (!owner || !repo || typeof owner !== 'string' || typeof repo !== 'string') return [];
 
   // GUARD: If rate-limited and queue is deep, skip

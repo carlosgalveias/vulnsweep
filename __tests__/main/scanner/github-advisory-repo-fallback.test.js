@@ -83,14 +83,19 @@ describe('github-advisory-source repo-level fallback', () => {
   });
 
   describe('when global query returns [] and no GITHUB_TOKEN', () => {
-    it('does NOT query repo-level endpoint', async () => {
+    it('attempts repo-level endpoint (no silent skip) but yields [] unauthenticated', async () => {
       mockConfig.GITHUB_TOKEN = undefined;
       queryGitHubAdvisoryByPackage.mockResolvedValue([]);
+      resolveGitHubRepo.mockResolvedValue({ owner: 'expressjs', repo: 'morgan' });
+      queryRepoLevelAdvisories.mockResolvedValue([]); // 401 without token → empty
 
-      await query({ name: 'morgan', version: '1.10.0' });
+      const results = await query({ name: 'morgan', version: '1.10.0' });
 
-      expect(resolveGitHubRepo).not.toHaveBeenCalled();
-      expect(queryRepoLevelAdvisories).not.toHaveBeenCalled();
+      // Coverage must NOT be silently dropped: repo-level is attempted so the
+      // result is deterministic-per-config, not token-dependent.
+      expect(resolveGitHubRepo).toHaveBeenCalled();
+      expect(queryRepoLevelAdvisories).toHaveBeenCalled();
+      expect(results).toEqual([]);
     });
 
     it('returns []', async () => {
@@ -388,13 +393,14 @@ describe('github-advisory-source repo-level fallback', () => {
       expect(results[0].aliases).toContain('GHSA-gwg9-rgvj-4h5j');
     });
 
-    it('does NOT trigger fallback without GITHUB_TOKEN even when no matches', async () => {
+    it('still attempts repo-level fallback without GITHUB_TOKEN (no silent skip)', async () => {
       mockConfig.GITHUB_TOKEN = undefined;
       queryGitHubAdvisoryByPackage.mockResolvedValue([nonMatchingGlobalAdvisory]);
+      queryRepoLevelAdvisories.mockResolvedValue([]); // 401 without token → empty
 
       const results = await query({ name: 'morgan', version: '1.10.1' });
 
-      expect(resolveGitHubRepo).not.toHaveBeenCalled();
+      expect(resolveGitHubRepo).toHaveBeenCalled();
       expect(results).toEqual([]);
     });
   });

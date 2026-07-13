@@ -1,7 +1,6 @@
 'use strict';
 
 const semver = require('semver');
-const { ENRICHMENT_CONFIG } = require('../../../config/constants');
 const { resolveGitHubRepo } = require('../../../utils/repo-url-resolver');
 const {
   queryGitHubAdvisoryByPackage,
@@ -11,12 +10,108 @@ const {
 const SOURCE_ID = 'github-advisory';
 
 /**
+ * Splits a GitHub `vulnerable_version_range` into discrete OR branches.
+ *
+ * GitHub advisory `vulnerabilities[].vulnerable_version_range` is **NOT** a
+ * single semver range — it is one-or-more version *branches* separated by
+ * commas, and the branches are OR'd (any branch matching => vulnerable).
+ * A comma inside a range means the constraints within that ONE branch are
+ * AND'd (e.g. ">= 4.0.0, < 4.22.0" = 4.0.0 ≤ v < 4.22.0).
+ *
+ * The naive previous implementation did
+ *   `range.split(',').join(' ')` → ">= 4.0.0 < 4.22.0, >= 5.0.0 < 5.1.0"
+ * which semver.intersects() treats as a single AND range, so it could NEVER
+ * match a 4.x version (false negative) AND an unconstrained upper bound like
+ * "< 5.1.0" would match every version below 5.1.0 across ALL majors
+ * (false positive for 4.x). Splitting into OR branches fixes both.
+ *
+ * @param {string} range - e.g. ">= 4.0.0, < 4.22.0, >= 5.0.0, < 5.1.0"
+ * @returns {string[]} Discrete semver range strings, one per branch.
+ */
+function splitAdvisoryBranches(range) {
+  if (!range || typeof range !== 'string') return [];
+  // GitHub uses ", " between branches AND between AND'd constraints. There is
+  // no reliable syntactic separator, so we split into constraint tokens and
+  // rebuild branches greedily: a branch ends when an UPPER bound (a "<"/"<="
+  // constraint) is followed by a LOWER bound (a ">="/">" constraint).
+  const tokens = range
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const branches = [];
+  let current = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    const isLower = /^>=?\s/.test(tok);
+    const isUpper = /^<=?\s/.test(tok);
+    // Start a new branch when this token is a lower bound and we already have
+    // an upper-bound-closed branch pending.
+    if (isLower && current.length > 0) {
+      branches.push(current.join(' '));
+      current = [];
+    }
+    current.push(tok);
+    // Defensive: if an upper-bound token is immediately followed by another
+    // upper bound, the prior branch is complete.
+    const next = tokens[i + 1];
+    if (isUpper && next && /^<=?\s/.test(next)) {
+      branches.push(current.join(' '));
+      current = [];
+    }
+  }
+  if (current.length > 0) branches.push(current.join(' '));
+  return branches;
+}
+
+/**
+ * Coerces a GitHub patched_versions / first_patched_version string to a single
+ * semver version, preferring the fix whose MAJOR matches `branchMajor` so an
+ * unrelated branch's fix (e.g. a 4.x fix for a 5.x install) does not wrongly
+ * suppress a real vulnerable-branch match.
+ *
+ * Accepts "4.22.0", ">= 4.22.0", "4.22.0 || 5.1.0", etc.
+ *
+ * @param {string} raw - cleaned patched-version string
+ * @param {number|null} branchMajor - major line of the vulnerable branch
+ * @returns {object|null} semver coerced version, or null if none parseable
+ */
+function coercePatchedForMajor(raw, branchMajor) {
+  if (!raw || typeof raw !== 'string') return null;
+  const tokens = raw
+    .split('||')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  let fallback = null;
+  for (const tok of tokens) {
+    const c = semver.coerce(tok.replace(/^>=?\s*/, ''));
+    if (!c) continue;
+    if (fallback === null) fallback = c;
+    if (branchMajor != null && majorOf(c.version) === branchMajor) return c;
+  }
+  return fallback;
+}
+
+/**
+ * Returns the major version number of a semver-ish string, or null if none.
+ * @param {string} v
+ * @returns {number|null}
+ */
+function majorOf(v) {
+  const m = /^(\d+)\./.exec(v);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
  * Checks if an installed version is affected by a GitHub advisory.
  * Parses the advisory's vulnerabilities[].vulnerable_version_range field
- * and checks if the installed version satisfies it.
+ * (which may contain MULTIPLE OR'd branches) and checks whether the
+ * installed version satisfies ANY branch.
  *
- * GitHub advisory vulnerable_version_range uses comma-separated constraints
- * like ">= 1.0.0, < 2.0.0" which must be converted to semver range format.
+ * Cross-major protection: a branch with an explicit LOWER bound
+ * (e.g. ">= 5.0.0 < 5.1.0") is scoped to that major line only — it cannot flag a
+ * 4.x install. An OPEN upper bound ("< 5.1.0" with no lower) stays global/cross-major
+ * (GitHub's real semantics; required so "uuid < 14.0.0" still flags 11.x).
  *
  * Also filters by package name to handle advisories that affect multiple packages.
  *
@@ -31,6 +126,7 @@ function isVersionAffectedByAdvisory(installedVersion, advisory, packageName) {
   const coerced = semver.coerce(installedVersion);
   const cleanVersion = semver.clean(installedVersion) || (coerced && coerced.version);
   if (!cleanVersion) return false;
+  const installedMajor = majorOf(cleanVersion);
 
   for (const vuln of advisory.vulnerabilities) {
     // Filter to npm ecosystem and matching package name
@@ -40,44 +136,67 @@ function isVersionAffectedByAdvisory(installedVersion, advisory, packageName) {
     const range = vuln.vulnerable_version_range;
     if (!range || typeof range !== 'string') continue;
 
-    // Convert GitHub's comma-separated range format to semver range
-    // e.g. ">= 1.0.0, < 2.0.0" → ">=1.0.0 <2.0.0"
-    const semverRange = range
-      .split(',')
-      .map((part) => part.trim())
-      .join(' ');
+    const branches = splitAdvisoryBranches(range);
 
-    try {
-      if (semver.satisfies(cleanVersion, semverRange)) {
-        // Version is within the vulnerable range — but check if it's already patched.
-        // GitHub advisories may report open-ended ranges like ">=8.0.0" with a separate
-        // patched_versions field (e.g. ">=8.4.0" or "8.4.0"). If the installed version
-        // is at or above the patched version, it is NOT affected.
-        const patchedRaw = vuln.patched_versions;
-        if (patchedRaw && typeof patchedRaw === 'string') {
-          const patchedCleaned = patchedRaw.replace(/^>=\s*/, '').trim();
-          const patchedCoerced = semver.coerce(patchedCleaned);
-          if (patchedCoerced) {
-            // If installed version >= patched version, this vuln entry is resolved
-            if (semver.gte(cleanVersion, patchedCoerced.version)) {
-              continue; // Skip this entry — already patched
+    for (const branch of branches) {
+      let branchRange;
+
+      try {
+        // semver.satisfies needs a parseable range; a lone upper bound like
+        // "< 5.1.0" parses fine. A malformed branch is skipped.
+        branchRange = new semver.Range(branch);
+      } catch {
+        continue;
+      }
+
+      // Determine the branch's major line. Major scoping applies ONLY when the
+      // branch has an explicit LOWER bound (e.g. ">= 5.0.0 < 5.1.0" → 5.x only).
+      // An OPEN upper bound ("< 5.1.0" with no lower) stays global/cross-major —
+      // that is GitHub's real semantics and is required for legitimate advisories
+      // like "uuid < 14.0.0" (covers 11.x/12.x/13.x). Scoping open bounds to a
+      // single major would silently DROP real findings.
+      // (No backslash escapes in the regex to avoid tool double-escaping.)
+      const lowerTok = branch.match(/>=? *([0-9]+\.[0-9]+\.[0-9]+)/);
+      const branchMajor = lowerTok && majorOf(lowerTok[1]) != null ? majorOf(lowerTok[1]) : null;
+
+      // Cross-major guard: only when this branch is explicitly lower-bounded to a
+      // major line. An installed version on a different major cannot match it.
+      if (installedMajor != null && branchMajor != null && installedMajor !== branchMajor) {
+        continue;
+      }
+
+      try {
+        if (semver.satisfies(cleanVersion, branchRange)) {
+          // Version is within a vulnerable branch — but check if it's already patched.
+          // GitHub patched_versions may be a single version OR an OR-list of
+          // per-branch fixes (e.g. "4.22.0 || 5.1.0"). Pick the fix whose major
+          // matches THIS branch's major line; an unrelated branch's fix (e.g. a
+          // 4.x fix for a 5.x install) must not suppress a real match.
+          const patchedRaw = vuln.patched_versions;
+          if (patchedRaw && typeof patchedRaw === 'string') {
+            const patchedCleaned = patchedRaw.replace(/^>=\s*/, '').trim();
+            const patchedCoerced = coercePatchedForMajor(patchedCleaned, branchMajor);
+            if (patchedCoerced && semver.gte(cleanVersion, patchedCoerced.version)) {
+              continue; // already patched
             }
           }
-        }
-        // Also check first_patched_version (object or string form)
-        const fpv = vuln.first_patched_version;
-        const fpvStr = fpv && typeof fpv === 'object' ? fpv.identifier : fpv;
-        if (fpvStr && typeof fpvStr === 'string') {
-          const fpvCoerced = semver.coerce(fpvStr);
-          if (fpvCoerced && semver.gte(cleanVersion, fpvCoerced.version)) {
-            continue; // Skip this entry — already patched
+          const fpv = vuln.first_patched_version;
+          const fpvStr = fpv && typeof fpv === 'object' ? fpv.identifier : fpv;
+          if (fpvStr && typeof fpvStr === 'string') {
+            const fpvCoerced = coercePatchedForMajor(
+              fpvStr.replace(/^>=\s*/, '').trim(),
+              branchMajor
+            );
+            if (fpvCoerced && semver.gte(cleanVersion, fpvCoerced.version)) {
+              continue; // already patched
+            }
           }
+          return true;
         }
-        return true;
+      } catch {
+        // If range parsing fails, skip this branch
+        continue;
       }
-    } catch {
-      // If range parsing fails, skip this vulnerability entry
-      continue;
     }
   }
 
@@ -319,7 +438,11 @@ async function query(pkg, signal) {
     }
 
     // ─── PHASE 3: Repo-level fallback — fires when NO matching advisories found ───
-    if (results.length === 0 && ENRICHMENT_CONFIG.GITHUB_TOKEN) {
+    // Always attempt (token only affects rate limit / 401 handling, not whether
+    // we try). Without a token the endpoint 401s and we degrade to [] — but the
+    // coverage reduction is recorded in result.metadata by the orchestrator so
+    // results stay reproducible-per-config instead of silently differing.
+    if (results.length === 0) {
       const repoInfo = await resolveGitHubRepo(pkg.name);
       if (repoInfo) {
         const repoAdvisories = await queryRepoLevelAdvisories(
@@ -385,4 +508,7 @@ module.exports = {
   isVersionAffectedByAdvisory,
   extractFixedInFromAdvisory,
   inferFixedInFromRange,
+  splitAdvisoryBranches,
+  majorOf,
+  coercePatchedForMajor,
 };
