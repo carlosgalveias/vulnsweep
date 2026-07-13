@@ -224,8 +224,21 @@ function mergeGroupSeverity(g) {
   return mergeSeverity(npmSeverity, osvSeverity, nvdCvssScore, ghaSeverity);
 }
 
-function mergePatchedVersion(g) {
-  return minSemver(g.map((r) => r.fixedIn).filter((v) => v != null && v !== ''));
+function mergePatchedVersion(g, installedVersion) {
+  const clean = installedVersion
+    ? semver.clean(installedVersion) || (semver.coerce(installedVersion) || {}).version
+    : null;
+  const fixes = g
+    .map((r) => r.fixedIn)
+    .filter((v) => v != null && v !== '')
+    // A fix must move forward — never surface a version <= what's installed,
+    // otherwise multi-branch advisories drag the suggestion into a downgrade.
+    .filter((v) => {
+      if (!clean) return true;
+      const cv = semver.coerce(v);
+      return cv ? semver.gt(cv.version, clean) : true;
+    });
+  return minSemver(fixes);
 }
 
 function buildSourceDetails(g) {
@@ -253,7 +266,10 @@ async function mergeGroup(g, pkg) {
     mergeGroupSeverity(g);
   const cveIds = mergeCveIds(g),
     aliases = mergeAliases(g);
-  const patchedVersion = mergePatchedVersion(g);
+  const patchedVersion = mergePatchedVersion(
+    g,
+    (pkg && pkg.version) || (g[0] && g[0].packageVersion)
+  );
   const vulnerableRange = firstByPriority(g, 'vulnerableRange') || null;
   const title = firstByPriority(g, 'title') || null;
   const url = firstByPriority(g, 'url') || null;

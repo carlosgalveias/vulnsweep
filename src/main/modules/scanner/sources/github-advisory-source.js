@@ -196,6 +196,12 @@ function extractFixedInFromAdvisory(advisory, packageName, installedVersion) {
     // Skip entry if no fix version could be determined
     if (!version) continue;
 
+    // A fix must move forward. Multi-branch advisories carry open-ended ranges
+    // (e.g. ">=0.31.1" patched "0.33.0" AND ">=1.15.1" patched "1.18.0"); an
+    // installed 1.x version satisfies BOTH, so without this guard we'd pick the
+    // lower 0.x fix and recommend a major-version downgrade.
+    if (cleanVersion && semver.lte(version, cleanVersion)) continue;
+
     if (!bestFixed || semver.lt(version, bestFixed)) {
       bestFixed = version;
     }
@@ -321,7 +327,7 @@ async function query(pkg, signal) {
               title: advisory.summary || '',
               description: null,
               fixedIn,
-              url: ghsaId ? `https://github.com/advisories/${ghsaId}` : advisory.html_url || null,
+              url: advisory.html_url || (ghsaId ? `https://github.com/advisories/${ghsaId}` : null),
               cvssScore: null,
               cvssVector: null,
               cisaKnownExploited: false,

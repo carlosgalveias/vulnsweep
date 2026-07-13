@@ -187,7 +187,7 @@ describe('github-advisory-source repo-level fallback', () => {
         aliases: ['GHSA-4vj7-5mj6-jm8m'],
         title: 'Morgan allows log injection via crafted request headers',
         description: null,
-        url: 'https://github.com/advisories/GHSA-4vj7-5mj6-jm8m',
+        url: 'https://github.com/expressjs/morgan/security/advisories/GHSA-4vj7-5mj6-jm8m',
         cvssScore: null,
         cvssVector: null,
         cisaKnownExploited: false,
