@@ -5,6 +5,21 @@
  * All external dependencies are mocked.
  */
 
+// Mock fs.accessSync so ensureLockfile() can operate on fake project paths.
+// Default: accessSync does NOT throw → lockfile appears to exist.
+const mockAccessSync = jest.fn();
+jest.mock('fs', () => {
+  const actual = jest.requireActual('fs');
+  return {
+    ...actual,
+    accessSync: (...args) => mockAccessSync(...args),
+  };
+});
+
+jest.mock('child_process', () => ({
+  execSync: jest.fn(),
+}));
+
 jest.mock('../../../../src/main/modules/scanner/package-universe-builder', () => ({
   buildPackageUniverse: jest.fn(),
   getUniqueQueryTargets: jest.fn(),

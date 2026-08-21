@@ -1,6 +1,9 @@
 'use strict';
 
-const { SCANNER_CONFIG, ENRICHMENT_CONFIG } = require('../../config/constants');
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+const { SCANNER_CONFIG, ENRICHMENT_CONFIG, API_CONFIG } = require('../../config/constants');
 const { SOURCE_PRESETS } = require('../../config/source-presets');
 const scanTelemetry = require('../../utils/scan-telemetry');
 const { clearNvdSessionCache } = require('../enrichment/sources/nvd-source');
@@ -144,6 +147,59 @@ function buildEmptyScanResult(projectPath, sourceIds, allPackages = 0) {
 }
 
 /**
+ * Ensures a package-lock.json exists in the project directory.
+ * If package.json exists but package-lock.json does not, runs `npm install`
+ * to generate the lockfile before the scan proceeds.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @returns {boolean} true if lockfile exists (or was successfully generated), false if generation failed
+ */
+function ensureLockfile(projectPath) {
+  const lockfilePath = path.join(projectPath, 'package-lock.json');
+
+  // Fast path: lockfile already exists
+  try {
+    fs.accessSync(lockfilePath, fs.constants.R_OK);
+    return true;
+  } catch {
+    // lockfile missing — fall through to generate it
+  }
+
+  // Verify package.json exists before attempting npm install
+  const packageJsonPath = path.join(projectPath, 'package.json');
+  try {
+    fs.accessSync(packageJsonPath, fs.constants.R_OK);
+  } catch {
+    // No package.json either — nothing we can do
+    return false;
+  }
+
+  // Run npm install to generate the lockfile
+  console.log(
+    `[scanner-orchestrator] package-lock.json missing in ${projectPath} — running npm install to generate it...`
+  );
+
+  try {
+    execSync('npm install --package-lock-only --ignore-scripts', {
+      cwd: projectPath,
+      encoding: 'utf8',
+      maxBuffer: API_CONFIG.MAX_BUFFER_BYTES,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120_000, // 2 minute timeout for npm install
+    });
+    console.log(
+      `[scanner-orchestrator] package-lock.json generated successfully in ${projectPath}`
+    );
+    return true;
+  } catch (err) {
+    console.warn(
+      `[scanner-orchestrator] Failed to generate package-lock.json in ${projectPath}: ${err.message}`
+    );
+    return false;
+  }
+}
+
+/**
  * Scans a project for vulnerabilities using all enabled source plugins.
  *
  * @param {string} projectPath - Absolute path to the project directory
@@ -191,6 +247,13 @@ async function scanProject(projectPath, options, progressCb) {
   // depth; the Electron UI uses the stored API key so 600 ms/call is fast enough).
   const timeoutMs = options.perPackageTimeoutMs ?? SCANNER_CONFIG.PER_PACKAGE_TIMEOUT_MS;
   const batchPauseMs = SCANNER_CONFIG.BATCH_PAUSE_MS;
+
+  // Phase 0: Ensure package-lock.json exists — generate via npm install if missing
+  if (!ensureLockfile(projectPath)) {
+    // Lockfile could not be generated — return empty result rather than crash
+    scanTelemetry.end(tlTotal, 'scan:total');
+    return buildEmptyScanResult(projectPath, sourceIds, 0);
+  }
 
   // Phase 1: Build package universe (called exactly once per scanProject invocation)
   let universe;

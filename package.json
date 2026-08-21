@@ -238,5 +238,10 @@
     "tmp": "0.2.7",
     "undici": "6.27.0",
     "ws": "8.21.0"
+  },
+  "allowScripts": {
+    "core-js@3.49.0": true,
+    "esbuild@0.28.1": true,
+    "unrs-resolver@1.12.2": true
   }
 }
