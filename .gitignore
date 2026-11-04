@@ -3,4 +3,5 @@ dist
 dist-main
 dist-renderer
 package.json.backup
+.eli
 
