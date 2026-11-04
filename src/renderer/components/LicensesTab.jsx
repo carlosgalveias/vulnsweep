@@ -1,4 +1,5 @@
-﻿/* eslint-disable react/prop-types */
+/* eslint-disable react/prop-types */
+import { OP_SBOM_GET_SAVE_PATH, OP_SBOM_EXPORT } from '@shared/renderer-api-opcodes.js';
 import { Download } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
@@ -119,9 +120,11 @@ function LicensesTab({ licenseResult, isScanning, scanError }) {
     setExportError(null);
     setExportSuccess(false);
     try {
-      const saveRes = await window.electronAPI.sbomGetSavePath({ format: exportFormat });
+      const saveRes = await window.electronAPI.invoke(OP_SBOM_GET_SAVE_PATH, {
+        format: exportFormat,
+      });
       if (saveRes.canceled || !saveRes.filePath) return;
-      const exportRes = await window.electronAPI.sbomExport({
+      const exportRes = await window.electronAPI.invoke(OP_SBOM_EXPORT, {
         licenseResult,
         format: exportFormat,
         outputPath: saveRes.filePath,

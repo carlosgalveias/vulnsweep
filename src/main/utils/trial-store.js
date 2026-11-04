@@ -16,7 +16,7 @@
  *
  * File content is base64-encoded JSON:
  *   { "fc": <number>, "fd": <number|null> }
- *   fc = fixes consumed (starts at 0, max 10)
+ *   fc = fixes consumed (starts at 0, max governed by TRIAL_CONFIG.MAX_FREE_FIXES)
  *   fd = first-use timestamp in ms (set on first fix application)
  *
  * @module utils/trial-store
@@ -26,8 +26,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-
-const MAX_FREE_FIXES = 10;
+const { TRIAL_CONFIG } = require('../config/constants');
 
 /**
  * Computes a short, deterministic, machine-specific hash.
@@ -169,7 +168,7 @@ function incrementFixCount() {
  */
 function getTrialStatus() {
   const data = getTrialData();
-  const fixesRemaining = Math.max(0, MAX_FREE_FIXES - data.fixesConsumed);
+  const fixesRemaining = Math.max(0, TRIAL_CONFIG.MAX_FREE_FIXES - data.fixesConsumed);
   const trialExhausted = fixesRemaining === 0;
 
   // Pull daysRemaining from the install-info logic in license.js.

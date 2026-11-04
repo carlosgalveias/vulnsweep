@@ -1,3 +1,4 @@
+import { OP_SELECT_FOLDER, OP_DISCOVER_PROJECTS } from '@shared/renderer-api-opcodes.js';
 import { useState, useCallback } from 'react';
 
 /**
@@ -18,7 +19,7 @@ export default function useProjectDiscovery(addLog, onProjectsDiscovered) {
    */
   const browseFolder = useCallback(async () => {
     try {
-      const folder = await window.electronAPI.selectFolder();
+      const folder = await window.electronAPI.invoke(OP_SELECT_FOLDER);
 
       if (folder && folder.content) {
         setSelectedFolder(folder.content);
@@ -26,7 +27,7 @@ export default function useProjectDiscovery(addLog, onProjectsDiscovered) {
 
         // Automatically discover projects
         addLog('info', 'Discovering Node.js projects...');
-        const result = await window.electronAPI.discoverProjects(folder.content);
+        const result = await window.electronAPI.invoke(OP_DISCOVER_PROJECTS, folder.content);
 
         if (result.success) {
           setProjects(result.content);

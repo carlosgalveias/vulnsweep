@@ -93,6 +93,21 @@ module.exports = {
       displayName: 'backend',
       testEnvironment: 'node',
       testMatch: ['**/__tests__/main/**/*.test.js', '**/__tests__/main/**/*.spec.js'],
+      roots: ['<rootDir>'],
+      modulePaths: ['<rootDir>'],
+      moduleNameMapper: {
+        // Intercept the rate-limiter regardless of which relative path resolves to it.
+        // This works even after jest.resetModules() because moduleNameMapper runs at
+        // resolver time, before the mock registry lookup.
+        'github-rate-limiter$': '<rootDir>/src/main/utils/__mocks__/github-rate-limiter.js',
+      },
+    },
+    {
+      displayName: 'cli',
+      testEnvironment: 'node',
+      testMatch: ['**/__tests__/cli/**/*.test.js', '**/__tests__/cli/**/*.spec.js'],
+      roots: ['<rootDir>'],
+      modulePaths: ['<rootDir>'],
     },
     {
       displayName: 'frontend',
@@ -107,6 +122,7 @@ module.exports = {
               ['@babel/preset-env', { targets: { node: 'current' } }],
               ['@babel/preset-react', { runtime: 'automatic' }],
             ],
+            plugins: ['./__tests__/utils/babel-import-meta-plugin.js'],
           },
         ],
       },
@@ -114,6 +130,7 @@ module.exports = {
         '\\.(css|less|scss|sass)$': '<rootDir>/__tests__/utils/style-mock.js',
         '\\.(jpg|jpeg|png|gif|svg)$': '<rootDir>/__tests__/utils/file-mock.js',
         '^lucide-react$': '<rootDir>/__tests__/utils/lucide-mock.js',
+        '^@shared/(.*)$': '<rootDir>/src/shared/$1',
       },
     },
   ],

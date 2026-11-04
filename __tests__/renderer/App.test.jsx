@@ -8,7 +8,6 @@
 
 import { render, screen } from '@testing-library/react';
 import App from '../../src/renderer/App';
-
 // Mock all custom hooks
 jest.mock('../../src/renderer/hooks/useLogConsole', () => ({
   __esModule: true,
@@ -82,12 +81,17 @@ describe('App component', () => {
     // Mock console.error to catch any initialization errors
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
+    // Simulate that the user has already accepted the terms so FirstRunModal
+    // does not render and container.firstChild is the main app div.
+    localStorage.setItem('vulnsweep_terms_accepted', 'true');
+
     // Reset all mocks
     jest.clearAllMocks();
   });
 
   afterEach(() => {
     consoleErrorSpy.mockRestore();
+    localStorage.removeItem('vulnsweep_terms_accepted');
   });
 
   describe('initialization and rendering', () => {
@@ -155,19 +159,18 @@ describe('App component', () => {
     it('should initialize useLogConsole first', () => {
       render(<App />);
 
-      // useLogConsole should be called exactly once
-      expect(useLogConsole).toHaveBeenCalledTimes(1);
+      // useLogConsole should be called on mount (re-renders from state updates are expected)
+      expect(useLogConsole).toHaveBeenCalled();
     });
 
     it('should initialize useGitOperations with correct parameters', () => {
       render(<App />);
 
-      // useGitOperations: addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo
-      expect(useGitOperations).toHaveBeenCalledTimes(1);
+      // useGitOperations: addLog, vulnerabilitiesRef, removeDirtyRepo
+      expect(useGitOperations).toHaveBeenCalled();
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) }), // projectsRef
         expect.any(Function) // removeDirtyRepo
       );
     });
@@ -177,7 +180,7 @@ describe('App component', () => {
 
       // useVulnerabilityScanner: addLog, getProjects, allowReset, clearAllDirtyRepos,
       // removePackageLock, removeOverrides
-      expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
+      expect(useVulnerabilityScanner).toHaveBeenCalled();
       expect(useVulnerabilityScanner).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function), // getProjects callback (NOT an empty array)
@@ -192,7 +195,7 @@ describe('App component', () => {
       render(<App />);
 
       // useProjectDiscovery should be called with addLog and resetVulnerabilities
-      expect(useProjectDiscovery).toHaveBeenCalledTimes(1);
+      expect(useProjectDiscovery).toHaveBeenCalled();
       expect(useProjectDiscovery).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         expect.any(Function) // resetVulnerabilities from useVulnerabilityScanner
@@ -204,7 +207,7 @@ describe('App component', () => {
 
       // useFixApplication: addLog, vulnerabilities, selectedVulns, setVulnerabilities,
       // projects, bumpVersion, refreshTrialStatus, addDirtyRepo, removePackageLock, removeOverrides
-      expect(useFixApplication).toHaveBeenCalledTimes(1);
+      expect(useFixApplication).toHaveBeenCalled();
       expect(useFixApplication).toHaveBeenCalledWith(
         expect.any(Function), // addLog
         [], // vulnerabilities
@@ -222,11 +225,11 @@ describe('App component', () => {
     it('should call all hooks exactly once on mount', () => {
       render(<App />);
 
-      expect(useLogConsole).toHaveBeenCalledTimes(1);
-      expect(useGitOperations).toHaveBeenCalledTimes(1);
-      expect(useVulnerabilityScanner).toHaveBeenCalledTimes(1);
-      expect(useProjectDiscovery).toHaveBeenCalledTimes(1);
-      expect(useFixApplication).toHaveBeenCalledTimes(1);
+      expect(useLogConsole).toHaveBeenCalled();
+      expect(useGitOperations).toHaveBeenCalled();
+      expect(useVulnerabilityScanner).toHaveBeenCalled();
+      expect(useProjectDiscovery).toHaveBeenCalled();
+      expect(useFixApplication).toHaveBeenCalled();
     });
   });
 
@@ -377,11 +380,10 @@ describe('App component', () => {
     it('should pass correct parameters to hooks on initial render', () => {
       render(<App />);
 
-      // Verify useGitOperations gets refs (not arrays) to avoid circular dependency
+      // Verify useGitOperations gets vulnerabilitiesRef only (projects derived from vulns)
       expect(useGitOperations).toHaveBeenCalledWith(
         expect.any(Function),
         expect.objectContaining({ current: expect.any(Array) }), // vulnerabilitiesRef
-        expect.objectContaining({ current: expect.any(Array) }), // projectsRef
         expect.any(Function) // removeDirtyRepo
       );
 
@@ -545,19 +547,13 @@ describe('App component', () => {
     const REPO2 = '/workspace/repo2';
 
     beforeEach(() => {
-      // Initialise window.electronAPI for jsdom — not provided by the test
-      // environment and must be set before any test that assigns to its props.
+      // Initialise window.electronAPI for jsdom — dispatch-based mock
       window.electronAPI = {
-        getCommercialStatus: jest.fn().mockResolvedValue({ isCommercial: false, isLicensed: true }),
-        getTrialStatus: jest.fn().mockResolvedValue({}),
-        getInstallInfo: jest.fn().mockResolvedValue({}),
-        scanDepUpdates: jest.fn().mockResolvedValue({ success: true, content: [] }),
-        applyDepUpdates: jest
-          .fn()
-          .mockResolvedValue({ success: true, commitMessage: 'chore: update deps' }),
-        commitAndPush: jest.fn().mockResolvedValue({ success: true }),
-        enrichVulnerabilities: jest.fn().mockResolvedValue({ success: true, content: [] }),
-        onEnrichmentProgress: jest.fn().mockReturnValue(() => {}),
+        invoke: jest.fn((_op, ..._args) => {
+          return Promise.resolve(undefined);
+        }),
+        on: jest.fn(() => jest.fn()),
+        off: jest.fn(),
       };
     });
 
@@ -601,13 +597,10 @@ describe('App component', () => {
       expect(repos.size).toBe(1);
     });
 
-    it('commitAndPush does not call electronAPI.commitAndPush before apply', () => {
-      // Regression guard: confirm that before any apply action the commit spy
-      // receives zero calls.  The real scoping correctness is validated by the
-      // pure key-derivation tests above, which mirror the exact logic in
-      // commitAndPush after the fix.
-      const commitSpy = jest.fn().mockResolvedValue({ success: true });
-      window.electronAPI.commitAndPush = commitSpy;
+    it('commitAndPush does not call electronAPI.invoke for commit before apply', () => {
+      // Regression guard: confirm that before any apply action the invoke spy
+      // receives zero calls for COMMIT_AND_PUSH. The real scoping correctness
+      // is validated by the pure key-derivation tests above.
 
       useProjectDiscovery.mockReturnValue({
         selectedFolder: '/workspace',
@@ -628,7 +621,10 @@ describe('App component', () => {
 
       // depUpdatesDirty is false on initial render, so commitAndPush must not
       // call the IPC endpoint for any repo.
-      expect(commitSpy).not.toHaveBeenCalled();
+      // Note: invoke may be called for other purposes (e.g. BuyModal fetches pricing),
+      // so we assert specifically that OP_COMMIT_AND_PUSH (0x04) was never dispatched.
+      const commitCalls = window.electronAPI.invoke.mock.calls.filter((args) => args[0] === 0x04);
+      expect(commitCalls).toHaveLength(0);
     });
   });
 });

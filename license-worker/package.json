@@ -1,0 +1,15 @@
+{
+  "name": "vulnsweep-license-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VulnSweep payment verification worker",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:production": "wrangler deploy --env production",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.97.0"
+  }
+}

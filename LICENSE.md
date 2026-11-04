@@ -3,7 +3,7 @@
 **Application:** VulnSweep
 **Copyright Holder / Licensor:** Carlos Galveias
 **Effective Date:** May 2025
-**Last Reviewed:** May 2026
+**Last Reviewed:** June 2026
 **Governing Law:** Portugal / European Union
 **Support Channel:** https://github.com/carlosgalveias/vulnsweep-releases/issues
 
@@ -43,17 +43,76 @@ This license is personal to you. It may not be assigned, transferred, sublicense
 
 ---
 
-## 3. Trial License
+## 3. Trial / Free Tier License
 
-If you are using VulnSweep under a **free trial license**, the following terms apply:
+If you are using VulnSweep under the **free tier** (without a paid license key), the following terms apply:
 
-- **Duration:** The trial is limited in the number of scans available. The trial period begins on the date of first installation. The exact trial limits are specified within the application at time of installation.
-- **Functionality:** Trial use may have restricted functionality compared to a paid license. Restrictions are disclosed within the application.
-- **Purpose:** The trial license is granted solely for the purpose of evaluating VulnSweep before purchase.
-- **No Warranty:** Trial use is provided entirely without warranty. See [DISCLAIMER.md](DISCLAIMER.md) for the full warranty disclaimer, which applies with equal force to trial users.
-- **No Support:** Trial users are not entitled to any form of support. See Section 11 of this Agreement.
-- **Liability Cap:** As stated in [DISCLAIMER.md](DISCLAIMER.md), the maximum liability of Carlos Galveias to trial users is EUR 0.00.
-- **Conversion:** At the end of the trial period, continued full access to VulnSweep requires purchase of a paid license key.
+### 3.1 Scanning & Compliance — Free and Unlimited
+
+The following capabilities are granted to all users — including free-tier users — **at no cost, without limitation, and in all environments** (local desktop, CLI, and CI/CD pipelines):
+
+- **Vulnerability Scanning:** Unlimited scanning of any number of repositories, at any frequency, using all available vulnerability intelligence sources (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS).
+- **CVE Enrichment:** Full cross-source CVE correlation, CVSS score unification, and discrepancy alerts.
+- **SBOM Generation:** Export of Software Bills of Materials in CycloneDX JSON v1.6, SPDX JSON v2.3, or CSV format.
+- **License Compliance:** Transitive dependency license classification into Safe / Warning / Dangerous / Unknown risk tiers.
+- **Reporting:** HTML reports with charts, JSON output, PDF security reports, and threshold-based exit codes for CI/CD pipeline integration.
+- **Security Gate:** Use of VulnSweep as a CI/CD security gate (exit code 0 = pass, exit code 1 = fail) is explicitly permitted and free in all environments, including headless and ephemeral environments.
+
+These scanning and compliance features are not time-limited. They do not expire. They require no license key.
+
+### 3.2 Automated Fix Limitation (Fix-and-Commit)
+
+Automated Git fixing, committing, and pushing ("Fix-and-Commit") is subject to the following restrictions:
+
+- **Quota:** Fix-and-Commit is strictly limited to the number of free sessions stipulated in the version you are installing. See the project [README.md](README.md) for the current limit applicable to your version (currently 100 automated fixes per unique, persistent device installation at time of writing).
+- **Device Binding:** The free fix quota is bound to the unique, persistent device on which VulnSweep is first installed and activated. The device is identified by a hardware fingerprint. The quota is not transferable between devices.
+- **Quota Exhaustion:** Once the free fix quota is exhausted, continued Fix-and-Commit functionality requires purchase of a paid license key.
+- **Scope:** Each individual automated fix operation (application of a vulnerability patch or dependency update followed by a Git commit) constitutes one (1) session against the quota.
+
+### 3.3 Headless / CI/CD Environment Restriction — Technical Enforcement
+
+**CRITICAL: Automated remediation features are completely disabled in headless, ephemeral, or CI/CD environments. This is a technical enforcement mechanism, not merely a policy statement.**
+
+The following operations are **unconditionally disabled** when VulnSweep detects execution in a headless, non-interactive, ephemeral, or CI/CD environment:
+
+- Automated fix application (autofix)
+- Git staging, committing, and pushing of code changes
+- Version bumping operations
+- Any operation that modifies source code or repository state in an unattended context
+
+**Environment detection** is performed automatically via, including but not limited to:
+
+- Standard CI/CD environment variables (e.g., `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `JENKINS_URL`, `CIRCLECI`, `TRAVIS`, `TF_BUILD`)
+- Container indicators (e.g., cgroup-based Docker detection)
+- Non-interactive terminal detection (non-TTY sessions)
+
+**This restriction exists for the following reasons:**
+
+1. **Safety:** Automated code modification in unattended environments bypasses human review and creates supply-chain risk.
+2. **Compliance:** Audit trails in regulated environments require human-in-the-loop approval for code changes.
+3. **Determinism:** CI/CD pipelines should observe code state, not mutate it.
+
+In headless environments, VulnSweep functions exclusively as a **security scanner and reporting tool** — scanning, CVE enrichment, SBOM generation, HTML/JSON reporting, and exit-code-based security gating remain fully operational.
+
+### 3.4 Anti-Circumvention — License Violation
+
+**Any attempt to circumvent, disable, spoof, or bypass the headless environment detection mechanism constitutes a material breach of this Agreement and an immediate, automatic termination of your license.**
+
+Without limitation, the following are prohibited:
+
+- Spoofing, unsetting, or manipulating environment variables to disguise a CI/CD or headless environment as a local desktop session
+- Injecting false TTY indicators or container detection bypass mechanisms
+- Using proxy tools, virtual displays, or terminal emulators solely for the purpose of defeating headless detection
+- Modifying, patching, or instrumenting VulnSweep's runtime to bypass environment checks
+
+Violation of this subsection also constitutes a violation of Section 6.3 (Reverse Engineering) of this Agreement.
+
+### 3.5 General Free Tier Terms
+
+- **No Warranty:** Free tier use is provided entirely without warranty. See [DISCLAIMER.md](DISCLAIMER.md) for the full warranty disclaimer, which applies with equal force to free-tier users.
+- **No Support:** Free-tier users are not entitled to any form of support. See Section 11 of this Agreement.
+- **Liability Cap:** As stated in [DISCLAIMER.md](DISCLAIMER.md), the maximum liability of Carlos Galveias to free-tier users is EUR 0.00.
+- **Conversion:** Continued Fix-and-Commit functionality beyond the free quota requires purchase of a paid license key.
 
 ---
 
@@ -118,8 +177,9 @@ You are expressly **prohibited** from the following actions. Any of these action
 ### 6.3 Reverse Engineering
 
 - Reverse engineer, decompile, disassemble, or otherwise attempt to derive the source code, algorithms, or trade secrets of VulnSweep
-- Attempt to circumvent, disable, or bypass any copy protection, license enforcement, or activation mechanism in VulnSweep
+- Attempt to circumvent, disable, or bypass any copy protection, license enforcement, activation mechanism, or **environment detection mechanism** in VulnSweep — including but not limited to the headless/CI/CD detection system described in Section 3.4
 - Use any automated tool, script, or method to extract, analyse, or replicate the logic of VulnSweep
+- Spoof, unset, or manipulate environment variables, TTY indicators, or container detection signals for the purpose of defeating VulnSweep's operational environment restrictions
 
 ### 6.4 Modification and Derivative Works
 
@@ -173,6 +233,7 @@ Carlos Galveias may terminate this Agreement and your license immediately and wi
 - You breach any term of this Agreement
 - You share, publish, or transfer your license key in violation of Section 4.2
 - You attempt to reverse engineer, copy, or redistribute VulnSweep in violation of Section 6
+- You attempt to circumvent, disable, or bypass the headless/CI/CD environment detection mechanism in violation of Section 3.4
 - You use VulnSweep in any way that infringes the intellectual property rights of Carlos Galveias
 - You use VulnSweep to build a competing product in violation of Section 6.2
 
@@ -182,7 +243,7 @@ Upon termination:
 
 - All license rights granted under this Agreement immediately cease
 - You must uninstall VulnSweep from all devices and destroy all copies in your possession
-- Sections 1, 6, 7, 8, 12, and 13 shall survive termination
+- Sections 1, 3.4, 6, 7, 8, 12, and 13 shall survive termination
 - Carlos Galveias is not liable to you for any damages resulting from termination for cause
 
 ---
@@ -250,22 +311,26 @@ Use the label `[License Enquiry]` in your issue title. There is no email address
 
 ## Summary of Key Terms
 
-| Topic                         | Summary                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| What you get                  | A personal, non-transferable right to use VulnSweep on ONE single licensed device        |
-| Device scope                  | Single device only — the license will not function on any other device                   |
-| Hardware changes              | Significant hardware changes may invalidate your license; a new purchase may be required |
-| Multi-seat / company licenses | Not available in this version — open a ticket to enquire about future options            |
-| What you cannot do            | Copy, redistribute, reverse engineer, resell, share keys, or build competing products    |
-| Support                       | Not guaranteed — provided case-by-case at sole discretion; no SLA                        |
-| Warranty                      | None. Software is provided AS IS. See DISCLAIMER.md.                                     |
-| Liability                     | Capped at license fee paid (EUR 0 for trial users). See DISCLAIMER.md.                   |
-| Ownership                     | Carlos Galveias retains all IP rights. You own only the right to use on one device.      |
-| Termination                   | Immediate upon breach. Uninstall all copies upon termination.                            |
-| Governing Law                 | Portugal / European Union                                                                |
+| Topic                         | Summary                                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| What you get                  | A personal, non-transferable right to use VulnSweep on ONE single licensed device                                       |
+| Scanning (free tier)          | Unlimited scanning, CVE enrichment, SBOM, license compliance, and reporting — always free, all environments             |
+| Autofix (free tier)           | Limited to the free quota per device (see README.md for current limits) — local machines only                           |
+| Headless / CI/CD              | Autofix, commit, and push are **technically disabled** in headless/CI/CD environments; scanning is unrestricted         |
+| Anti-circumvention            | Bypassing headless detection = immediate license termination (Section 3.4)                                              |
+| Device scope                  | Single device only — the license will not function on any other device                                                  |
+| Hardware changes              | Significant hardware changes may invalidate your license; a new purchase may be required                                |
+| Multi-seat / company licenses | Not available in this version — open a ticket to enquire about future options                                           |
+| What you cannot do            | Copy, redistribute, reverse engineer, resell, share keys, circumvent environment detection, or build competing products |
+| Support                       | Not guaranteed — provided case-by-case at sole discretion; no SLA                                                       |
+| Warranty                      | None. Software is provided AS IS. See DISCLAIMER.md.                                                                    |
+| Liability                     | Capped at license fee paid (EUR 0 for free-tier users). See DISCLAIMER.md.                                              |
+| Ownership                     | Carlos Galveias retains all IP rights. You own only the right to use on one device.                                     |
+| Termination                   | Immediate upon breach. Uninstall all copies upon termination.                                                           |
+| Governing Law                 | Portugal / European Union                                                                                               |
 
 ---
 
 _Copyright (c) 2025 Carlos Galveias. All Rights Reserved._
 _VulnSweep is proprietary software. This is not an open-source license._
-_Last reviewed: May 2026_
+_Last reviewed: June 2026_

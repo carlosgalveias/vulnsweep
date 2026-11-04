@@ -1,3 +1,4 @@
+import { OP_ON_LOG_MESSAGE } from '@shared/renderer-api-opcodes.js';
 import { useState, useEffect, useCallback } from 'react';
 
 /**
@@ -39,7 +40,7 @@ export default function useLogConsole() {
     addLog('info', 'VulnSweep initialized successfully');
 
     // Subscribe to backend log messages
-    const unsubscribe = window.electronAPI.onLogMessage((log) => {
+    const unsubscribe = window.electronAPI.on(OP_ON_LOG_MESSAGE, (log) => {
       setLogs((prev) => [...prev, log]);
     });
 

@@ -1,12 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const { OP_ON_SPLASH_DATA } = require('../shared/renderer-api-opcodes.js');
 
-/**
- * Splash Screen Preload Script
- *
- * Exposes a splashAPI to the renderer via contextBridge.
- * The main process sends version/appName data via IPC ('splash:data' channel)
- * after the page loads.
- */
+const SPLASH_EVENTS = {
+  [OP_ON_SPLASH_DATA]: 'splash:data',
+};
+
 contextBridge.exposeInMainWorld('splashAPI', {
-  onData: (cb) => ipcRenderer.on('splash:data', (_event, data) => cb(data)),
+  on: (op, cb) => {
+    const channel = SPLASH_EVENTS[op];
+    if (!channel) throw new Error(`Invalid splash op: ${op}`);
+    ipcRenderer.on(channel, (_event, data) => cb(data));
+  },
 });

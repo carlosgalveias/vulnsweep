@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>VulnSweep Audit Report</title>
+<style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+      background:#f9fafb;color:#111827;line-height:1.6;
+      padding:0;margin:0;
+    }
+    .container{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
+    h1,h2,h3{font-weight:700}
+    h1{font-size:1.75rem;margin-bottom:0.25rem}
+    h2{font-size:1.25rem;margin-bottom:1rem;color:#374151}
+    h3{font-size:1rem;margin-bottom:0.5rem}
+
+    /* Header */
+    .report-header{
+      background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
+      color:#fff;padding:2rem 0;margin-bottom:2rem;
+    }
+    .report-header .container{display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap}
+    .report-header h1{color:#fff;font-size:2rem}
+    .report-header .meta{color:#94a3b8;font-size:0.875rem}
+    .logo-svg{width:48px;height:48px;flex-shrink:0}
+
+    /* Summary Cards */
+    .summary-grid{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      gap:1rem;margin-bottom:2rem;
+    }
+    .card{
+      background:#ffffff;border:1px solid #e5e7eb;
+      border-radius:0.75rem;padding:1.25rem;text-align:center;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    }
+    .card .value{font-size:2rem;font-weight:800;line-height:1.2}
+    .card .label{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin-top:0.25rem}
+    .card--critical .value{color:#dc2626}
+    .card--high .value{color:#ea580c}
+    .card--medium .value{color:#ca8a04}
+    .card--low .value{color:#2563eb}
+    .card--info .value{color:#6b7280}
+    .card--total .value{color:#111827}
+    .card--success .value{color:#16a34a}
+
+    /* Charts */
+    .charts-grid{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));
+      gap:1.5rem;margin-bottom:2rem;
+    }
+    .chart-container{
+      background:#ffffff;border:1px solid #e5e7eb;
+      border-radius:0.75rem;padding:1.5rem;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    }
+    .chart-container canvas{max-height:300px}
+
+    /* Tables */
+    .table-wrapper{
+      background:#ffffff;border:1px solid #e5e7eb;
+      border-radius:0.75rem;overflow:hidden;margin-bottom:2rem;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    }
+    .table-wrapper h2{padding:1rem 1.5rem;border-bottom:1px solid #e5e7eb;margin-bottom:0}
+    table{width:100%;border-collapse:collapse;font-size:0.875rem}
+    thead{background:#f3f4f6}
+    th{padding:0.75rem 1rem;text-align:left;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
+    th:hover{background:#e5e7eb}
+    td{padding:0.625rem 1rem;border-top:1px solid #e5e7eb;vertical-align:top}
+    tr:hover td{background:#f9fafb}
+
+    /* Severity badges */
+    .sev-badge{
+      display:inline-block;padding:0.125rem 0.5rem;border-radius:9999px;
+      font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;
+    }
+    .sev-critical{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+    .sev-high{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
+    .sev-medium{background:#fefce8;color:#ca8a04;border:1px solid #fef08a}
+    .sev-low{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+    .sev-info{background:#f9fafb;color:#6b7280;border:1px solid #d1d5db}
+
+    /* Collapsible sections */
+    .collapsible{margin-bottom:1rem}
+    .collapsible summary{
+      cursor:pointer;padding:0.75rem 1rem;background:#f3f4f6;
+      border-radius:0.5rem;font-weight:600;font-size:0.9rem;
+      list-style:none;display:flex;align-items:center;gap:0.5rem;
+    }
+    .collapsible summary::before{content:'▶';font-size:0.7rem;transition:transform 0.2s}
+    .collapsible[open] summary::before{transform:rotate(90deg)}
+    .collapsible .content{padding:1rem 0}
+
+    /* Fix badge */
+    .fix-yes{color:#16a34a;font-weight:600}
+    .fix-no{color:#9ca3af}
+
+    /* Footer */
+    .report-footer{
+      text-align:center;padding:2rem 0;color:#9ca3af;font-size:0.8rem;
+      border-top:1px solid #e5e7eb;margin-top:2rem;
+    }
+
+    /* Responsive */
+    @media(max-width:768px){
+      .charts-grid{grid-template-columns:1fr}
+      .summary-grid{grid-template-columns:repeat(2,1fr)}
+      .container{padding:1rem}
+      table{font-size:0.75rem}
+      th,td{padding:0.5rem}
+    }
+
+    /* Noscript */
+    .noscript-msg{
+      background:#fef3c7;border:1px solid #f59e0b;border-radius:0.5rem;
+      padding:1rem;text-align:center;color:#92400e;margin-bottom:1.5rem;
+    }
+  </style>
+</head>
+<body>
+<header class="report-header">
+  <div class="container">
+    <svg class="logo-svg" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="48" height="48" rx="10" fill="#3b82f6"/>
+  <path d="M24 8L36 14v10c0 8-5 14-12 16C17 38 12 32 12 24V14L24 8z" fill="#fff" fill-opacity="0.9"/>
+  <path d="M21 24l3 3 5-5" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+    <div>
+      <h1>VulnSweep Vulnerability Audit Report</h1>
+      <div class="meta">
+        Scanned: <strong>C:\Work\IBM\code</strong> &bull;
+        Generated: <strong>June 26, 2026 at 11:48 AM</strong> &bull;
+        Version: <strong>v1.3.6</strong>
+      </div>
+    </div>
+  </div>
+</header>
+<main class="container">
+  <noscript><div class="noscript-msg">Charts require JavaScript to render. Data tables below are still accessible.</div></noscript>
+
+  <div class="summary-grid">
+  <div class="card card--total"><div class="value">45</div><div class="label">Total Vulnerabilities</div></div>
+  <div class="card card--critical"><div class="value">5</div><div class="label">Critical</div></div>
+  <div class="card card--high"><div class="value">7</div><div class="label">High</div></div>
+  <div class="card card--medium"><div class="value">11</div><div class="label">Medium</div></div>
+  <div class="card card--low"><div class="value">16</div><div class="label">Low</div></div>
+  <div class="card card--info"><div class="value">6</div><div class="label">Info</div></div>
+</div>
+
+  <div class="charts-grid">
+    <div class="chart-container">
+      <canvas id="severityChart"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="packagesChart"></canvas>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <h2>Per-Project Breakdown</h2>
+    <div style="padding:1rem;">
+      <details class="collapsible" open>
+  <summary>bluedarwin_agi <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-agi) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-api <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-api) — 7 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.1</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.2.1</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>fs</td>
+      <td>0.0.1-security</td>
+      <td>Malicious code in fs (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>linkify-it</td>
+      <td>5.0.0</td>
+      <td>Quadratic algorithmic complexity in LinkifyIt#match scan loop</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.0.1</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>systeminformation</td>
+      <td>5.31.6</td>
+      <td>systeminformation: OS command injection in networkInterfaces() via interfaces(5) source-directive path on Linux</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.31.11</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>tar</td>
+      <td>7.5.16</td>
+      <td>Uncaught Exception DoS via NUL byte in PAX path/linkpath records</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>7.5.17</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-critical">critical</span></td>
+      <td>N/A</td>
+      <td>xml-crypto</td>
+      <td>3.2.1</td>
+      <td>XML Signature Verification Bypass via Multiple SignedInfo References</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>6.1.2</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-api <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-api\functions-config) — 1 vulnerability</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-cli <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-cli) — 3 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>tar</td>
+      <td>7.5.16</td>
+      <td>Uncaught Exception DoS via NUL byte in PAX path/linkpath records</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>7.5.17</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>uuid</td>
+      <td>11.1.1</td>
+      <td>Duplicate Advisory: uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>14.0.0</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-concept <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-concept) — 7 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>@hono/node-server</td>
+      <td>1.19.14</td>
+      <td>Path traversal in `serve-static` on Windows via encoded backslash (`%5C`)</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>2.0.5</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>babel-node</td>
+      <td>0.0.1-security</td>
+      <td>Malicious code in babel-node (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-critical">critical</span></td>
+      <td>N/A</td>
+      <td>babel-traverse</td>
+      <td>7.29.7</td>
+      <td>Arbitrary code execution when compiling specifically crafted malicious code</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>base-encryption</td>
+      <td>3.1.1</td>
+      <td>Malicious code in base-encryption (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.2</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.1.0</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>hono</td>
+      <td>4.12.25</td>
+      <td>API Gateway v1 adapter can drop a distinct repeated request header value during de-duplication</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>4.12.27</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>shell-quote</td>
+      <td>1.8.4</td>
+      <td>Quadratic-complexity Denial of Service in `parse()` (CWE-407)</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>1.9.0</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-rdp-server <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-rdp-server) — 2 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>fs</td>
+      <td>0.0.1-security</td>
+      <td>Malicious code in fs (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-rdp-server <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-rdp-server\electron-app) — 1 vulnerability</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>cross-zip</td>
+      <td>4.0.1</td>
+      <td>Withdrawn Advisory: cross-zip is vulnerable to Directory Traversal through selective use of zip/unzip operations</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-studio <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-robotic-studio) — 8 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>@hono/node-server</td>
+      <td>1.19.14</td>
+      <td>Path traversal in `serve-static` on Windows via encoded backslash (`%5C`)</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>2.0.5</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>bootstrap-sass</td>
+      <td>3.4.1</td>
+      <td>Withdrawn Advisory: Bootstrap Cross-Site Scripting (XSS) vulnerability</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>engine.io</td>
+      <td>6.6.5</td>
+      <td>Engine.IO Polling Transport Connection Exhaustion</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>6.6.7</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.0</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.1.0</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>hono</td>
+      <td>4.12.25</td>
+      <td>API Gateway v1 adapter can drop a distinct repeated request header value during de-duplication</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>4.12.27</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>shell-quote</td>
+      <td>1.8.4</td>
+      <td>Quadratic-complexity Denial of Service in `parse()` (CWE-407)</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>1.9.0</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-critical">critical</span></td>
+      <td>N/A</td>
+      <td>websocket-driver</td>
+      <td>0.7.4</td>
+      <td>Resource limit bypass via message compression</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>0.7.5</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-updater <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-updater) — 2 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1367.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>tar</td>
+      <td>7.5.16</td>
+      <td>Uncaught Exception DoS via NUL byte in PAX path/linkpath records</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>7.5.17</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>worker <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-worker) — 3 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.1</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.2.1</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>tar</td>
+      <td>7.5.16</td>
+      <td>Uncaught Exception DoS via NUL byte in PAX path/linkpath records</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>7.5.17</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>bluedarwin-robotic-bootstrap <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\bluedarwin-worker-bootstrap) — 2 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>aws-sdk</td>
+      <td>2.1693.0</td>
+      <td>JavaScript SDK v2 users should add validation to the region parameter value in or migrate to v3</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>tar</td>
+      <td>7.5.16</td>
+      <td>Uncaught Exception DoS via NUL byte in PAX path/linkpath records</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>7.5.17</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>chatbot-ui <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\chat_interface) — 5 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-critical">critical</span></td>
+      <td>N/A</td>
+      <td>babel-traverse</td>
+      <td>7.29.0</td>
+      <td>Arbitrary code execution when compiling specifically crafted malicious code</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>cacheable-request</td>
+      <td>7.0.4</td>
+      <td>Withdrawn: cacheable-request depends on http-cache-semantics, which is vulnerable to Regular Expression Denial of Service</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>10.2.7</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-high">high</span></td>
+      <td>N/A</td>
+      <td>engine.io</td>
+      <td>6.6.6</td>
+      <td>Engine.IO Polling Transport Connection Exhaustion</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>6.6.7</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.1</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.1.0</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-critical">critical</span></td>
+      <td>N/A</td>
+      <td>websocket-driver</td>
+      <td>0.7.4</td>
+      <td>Resource limit bypass via message compression</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>0.7.5</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-framework <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-framework) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-voice/01_utils/lj_dataset_from_google_tts_generator <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-voice\01_utils\lj_dataset_from_google_tts_generator) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-voice/01_utils/lj_dataset_from_piper_server <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-voice\01_utils\lj_dataset_from_piper_server) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>sample_recorder <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-voice\01_utils\lj_dataset_recorder_studio) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>cognus-voice/01_utils/piper_service_performance_measure <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-voice\01_utils\piper_service_performance_measure) — 1 vulnerability</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>fs</td>
+      <td>0.0.1-security</td>
+      <td>Malicious code in fs (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>demo <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\cognus-voice\05_softlayer\demo) — 0 vulnerabilities</span></summary>
+  <div class="content"><p style="padding:1rem;color:#6b7280;">No vulnerabilities found in this project.</p></div>
+</details>
+<details class="collapsible">
+  <summary>app-ce <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\elastic-ai\app) — 2 vulnerabilities</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-low">low</span></td>
+      <td>N/A</td>
+      <td>express</td>
+      <td>4.22.1</td>
+      <td>REJECTED (not a vulnerability): improperly controlled modification of query properties in express</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>5.2.1</td>
+    </tr>
+<tr>
+      <td><span class="sev-badge sev-unknown">unknown</span></td>
+      <td>N/A</td>
+      <td>fs</td>
+      <td>0.0.1-security</td>
+      <td>Malicious code in fs (npm)</td>
+      <td><span class="fix-no">✗ No</span></td>
+      <td>—</td>
+    </tr></tbody>
+</table></div>
+</details>
+<details class="collapsible">
+  <summary>service-bluedarwin <span style="color:#6b7280;font-weight:400;">(C:\Work\IBM\code\service-bluedarwin) — 1 vulnerability</span></summary>
+  <div class="content"><table>
+  <thead><tr>
+    <th>Severity</th><th>ID</th><th>Package</th><th>Version</th><th>Title</th><th>Fix Available</th><th>Fix Version</th>
+  </tr></thead>
+  <tbody><tr>
+      <td><span class="sev-badge sev-medium">medium</span></td>
+      <td>N/A</td>
+      <td>js-yaml</td>
+      <td>4.1.1</td>
+      <td>JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases</td>
+      <td><span class="fix-yes">✓ Yes</span></td>
+      <td>4.2.0</td>
+    </tr></tbody>
+</table></div>
+</details>
+    </div>
+  </div>
+</main>
+<footer class="report-footer">
+  Generated by VulnSweep CLI v1.3.6 &bull; June 26, 2026 at 11:48 AM
+</footer>
+<script>window.__VS_PKG_DATA={"labels":["aws-sdk","express","tar","fs","@hono/node-server","babel-traverse","hono","shell-quote","engine.io","websocket-driver"],"counts":[8,6,5,4,2,2,2,2,2,2]};</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+
+<script>
+(function() {
+  if (typeof Chart === 'undefined') return;
+
+  // Severity Doughnut
+  var sevCtx = document.getElementById('severityChart');
+  if (sevCtx) {
+    new Chart(sevCtx.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+        datasets: [{
+          data: [5, 7, 11, 16, 6],
+          backgroundColor: ['#dc2626', '#ea580c', '#ca8a04', '#2563eb', '#6b7280'],
+          borderWidth: 2,
+          borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { position: 'bottom', labels: { padding: 16, usePointStyle: true } },
+          title: { display: true, text: 'Severity Distribution', font: { size: 14 } }
+        }
+      }
+    });
+  }
+
+  // Top Affected Packages Bar Chart
+  var pkgCtx = document.getElementById('packagesChart');
+  if (pkgCtx && window.__VS_PKG_DATA) {
+    new Chart(pkgCtx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: window.__VS_PKG_DATA.labels,
+        datasets: [{
+          label: 'Vulnerabilities',
+          data: window.__VS_PKG_DATA.counts,
+          backgroundColor: '#ea580c',
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+          title: { display: true, text: 'Top Affected Packages', font: { size: 14 } }
+        },
+        scales: {
+          x: { beginAtZero: true, ticks: { stepSize: 1 } }
+        }
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

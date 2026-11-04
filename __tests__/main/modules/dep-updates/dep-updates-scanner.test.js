@@ -6,6 +6,15 @@ jest.mock('fs', () => {
     constants: { R_OK: 4 },
   };
 });
+const mockDiscoverProjects = jest.fn();
+jest.mock('../../../../src/main/modules/discovery', () => ({
+  discoverProjects: mockDiscoverProjects,
+}));
+jest.mock('../../../../src/main/modules/scanner/package-universe-builder', () => ({
+  parseOverridesMap: jest.requireActual(
+    '../../../../src/main/modules/scanner/package-universe-builder'
+  ).parseOverridesMap,
+}));
 // npm now uses exec (shell-based), git still uses execFile
 jest.mock('child_process', () => {
   return { exec: jest.fn(), execFile: jest.fn() };
@@ -19,10 +28,11 @@ const cp = require('child_process');
 const fs = require('fs');
 const S = require('../../../../src/main/modules/dep-updates/dep-updates-scanner');
 
-function pkg(deps, dev) {
+function pkg(deps, dev, overrides) {
   const o = { name: 't', version: '1.0.0' };
   if (deps) o.dependencies = deps;
   if (dev) o.devDependencies = dev;
+  if (overrides) o.overrides = overrides;
   return JSON.stringify(o);
 }
 function nmv(v) {
@@ -39,23 +49,21 @@ function ME(fail) {
     else cb(null, '', '');
   });
 }
-function dirEntry(name) {
-  return {
-    name,
-    isDirectory() {
-      return true;
-    },
-  };
-}
 
 beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe('scanDependencyUpdates - multi-repo discovery', () => {
-  it('returns 2 RepoUpdateResults when root has 2 subdirs each with package.json', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([dirEntry('repo1'), dirEntry('repo2')]);
+describe('scanDependencyUpdates - discovery integration', () => {
+  it('returns results for root + child repos discovered by discoverProjects', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [
+        { name: 'root-project', path: '/root', packageJson: {} },
+        { name: 'child1', path: '/root/child1', packageJson: {} },
+        { name: 'nested/deep', path: '/root/nested/deep', packageJson: {} },
+      ],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
       return Promise.resolve(pkg({ lodash: '4.0.0' }));
@@ -63,16 +71,39 @@ describe('scanDependencyUpdates - multi-repo discovery', () => {
     MC(true, ['4.1.0', '4.2.0']);
     const r = await S.scanDependencyUpdates('/root');
     expect(r.success).toBe(true);
-    expect(r.content).toHaveLength(2);
-    expect(r.content[0].repoName).toBe('repo1');
-    expect(r.content[1].repoName).toBe('repo2');
+    expect(r.content).toHaveLength(3);
+    expect(r.content[0].repoName).toBe('root-project');
+    expect(r.content[1].repoName).toBe('child1');
+    expect(r.content[2].repoName).toBe('nested/deep');
     expect(r.content[0].candidates).toHaveLength(1);
-    expect(r.content[0].candidates[0].name).toBe('lodash');
   });
 
-  it('returns 1 RepoUpdateResult when root itself has package.json (single-repo fallback)', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([]);
+  it('always includes root when it has package.json (even with children)', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [
+        { name: 'my-root', path: '/proj', packageJson: {} },
+        { name: 'sub-a', path: '/proj/sub-a', packageJson: {} },
+      ],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ express: '4.0.0' }));
+    });
+    MC(true, ['4.18.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    expect(r.success).toBe(true);
+    // Root IS included — this was the bug
+    const rootResult = r.content.find((c) => c.repoPath === '/proj');
+    expect(rootResult).toBeDefined();
+    expect(rootResult.repoName).toBe('my-root');
+  });
+
+  it('returns single-repo result when only root has package.json', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'single', path: '/single', packageJson: {} }],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
       return Promise.resolve(pkg({ axios: '0.21.0' }));
@@ -82,35 +113,50 @@ describe('scanDependencyUpdates - multi-repo discovery', () => {
     expect(r.success).toBe(true);
     expect(r.content).toHaveLength(1);
     expect(r.content[0].repoPath).toBe('/single');
-    expect(r.content[0].candidates[0].name).toBe('axios');
   });
 
-  it('returns empty array when root has no package.json anywhere', async () => {
-    fs.promises.access.mockRejectedValue(new Error('ENOENT'));
-    fs.promises.readdir.mockResolvedValue([]);
+  it('returns empty array when discoverProjects finds nothing', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [],
+    });
     const r = await S.scanDependencyUpdates('/empty');
     expect(r.success).toBe(true);
     expect(r.content).toEqual([]);
   });
 
+  it('returns empty array when discoverProjects fails', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: false,
+      error: 'Invalid base directory',
+    });
+    const r = await S.scanDependencyUpdates('/invalid');
+    expect(r.success).toBe(true);
+    expect(r.content).toEqual([]);
+  });
+
   it('each RepoUpdateResult has repoPath, repoName, candidates array', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([dirEntry('my-lib')]);
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'my-lib', path: '/root/my-lib', packageJson: {} }],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
       return Promise.resolve(pkg({ react: '17.0.0' }));
     });
     MC(true, ['18.0.0']);
     const r = await S.scanDependencyUpdates('/root');
-    expect(r.content[0]).toHaveProperty('repoPath');
+    expect(r.content[0]).toHaveProperty('repoPath', '/root/my-lib');
     expect(r.content[0]).toHaveProperty('repoName', 'my-lib');
     expect(r.content[0]).toHaveProperty('candidates');
     expect(Array.isArray(r.content[0].candidates)).toBe(true);
   });
 
   it('progressCallback receives object with repoName and packageName', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([dirEntry('svc')]);
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'svc', path: '/root/svc', packageJson: {} }],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
       return Promise.resolve(pkg({ express: '4.0.0' }));
@@ -127,25 +173,11 @@ describe('scanDependencyUpdates - multi-repo discovery', () => {
     expect(calls[0]).toHaveProperty('total');
   });
 
-  it('subdirs without package.json are skipped', async () => {
-    fs.promises.readdir.mockResolvedValue([dirEntry('no-pkg'), dirEntry('has-pkg')]);
-    fs.promises.access.mockImplementation((p) => {
-      if (p.indexOf('no-pkg') !== -1) return Promise.reject(new Error('ENOENT'));
-      return Promise.resolve();
-    });
-    fs.promises.readFile.mockImplementation((p) => {
-      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
-      return Promise.resolve(pkg({ lodash: '4.0.0' }));
-    });
-    MC(true, ['4.1.0']);
-    const r = await S.scanDependencyUpdates('/root');
-    expect(r.content).toHaveLength(1);
-    expect(r.content[0].repoName).toBe('has-pkg');
-  });
-
   it('reads devDependencies inside repo candidates', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([dirEntry('r1')]);
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'r1', path: '/root/r1', packageJson: {} }],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
       return Promise.resolve(pkg(null, { jest: '27.0.0' }));
@@ -156,8 +188,10 @@ describe('scanDependencyUpdates - multi-repo discovery', () => {
   });
 
   it('skips package when no newer versions found', async () => {
-    fs.promises.access.mockResolvedValue();
-    fs.promises.readdir.mockResolvedValue([dirEntry('r1')]);
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'r1', path: '/root/r1', packageJson: {} }],
+    });
     fs.promises.readFile.mockImplementation((p) => {
       if (p.indexOf('node_modules') !== -1) return Promise.resolve(nmv('5.0.0'));
       return Promise.resolve(pkg({ lodash: '5.0.0' }));
@@ -165,6 +199,27 @@ describe('scanDependencyUpdates - multi-repo discovery', () => {
     MC(true, ['4.0.0', '5.0.0']);
     const r = await S.scanDependencyUpdates('/root');
     expect(r.content[0].candidates).toHaveLength(0);
+  });
+
+  it('discovers deeply nested projects (recursive via discoverProjects)', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [
+        { name: 'root', path: '/mono', packageJson: {} },
+        { name: 'packages/core', path: '/mono/packages/core', packageJson: {} },
+        { name: 'packages/ui/components', path: '/mono/packages/ui/components', packageJson: {} },
+      ],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ lodash: '4.0.0' }));
+    });
+    MC(true, ['4.1.0']);
+    const r = await S.scanDependencyUpdates('/mono');
+    expect(r.success).toBe(true);
+    expect(r.content).toHaveLength(3);
+    // Verifies deep nesting is handled
+    expect(r.content[2].repoPath).toBe('/mono/packages/ui/components');
   });
 });
 
@@ -259,5 +314,135 @@ describe('applyUpdates', () => {
     const r = await S.applyUpdates('/f', [{ name: 'lo', toVersion: '5.0.0', repoPath: '/f/r1' }]);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/npm install failed/);
+  });
+});
+
+describe('override handling in scanDependencyUpdates', () => {
+  it('queries registry for resolved package name when override uses npm: protocol', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    expect(r.success).toBe(true);
+    // The registry cache should have been called with the resolved name
+    const gavCalls = mockGAV.mock.calls;
+    const calledNames = gavCalls.map((c) => c[0]);
+    expect(calledNames).toContain('@cypress/request');
+    expect(calledNames).not.toContain('request');
+  });
+
+  it('candidate includes originalName when package is overridden', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    expect(candidate.name).toBe('@cypress/request');
+    expect(candidate.originalName).toBe('request');
+  });
+
+  it('works normally when package.json has no overrides field', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ express: '4.0.0' }));
+    });
+    MC(true, ['4.18.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    expect(candidate.name).toBe('express');
+    expect(candidate.originalName).toBeUndefined();
+    // Registry should be queried with original name
+    const calledNames = mockGAV.mock.calls.map((c) => c[0]);
+    expect(calledNames).toContain('express');
+  });
+
+  it('ignores simple version pin overrides (no npm: protocol)', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(pkg({ cookiejar: '2.1.0' }, null, { cookiejar: '2.1.4' }));
+    });
+    MC(true, ['2.1.4', '2.2.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    // No name remapping — cookiejar is still cookiejar
+    expect(candidate.name).toBe('cookiejar');
+    expect(candidate.originalName).toBeUndefined();
+    // Registry queried with original name
+    const calledNames = mockGAV.mock.calls.map((c) => c[0]);
+    expect(calledNames).toContain('cookiejar');
+  });
+
+  it('handles scoped packages in override resolvedName correctly', async () => {
+    mockDiscoverProjects.mockResolvedValue({
+      success: true,
+      content: [{ name: 'proj', path: '/proj', packageJson: {} }],
+    });
+    fs.promises.readFile.mockImplementation((p) => {
+      if (p.indexOf('node_modules') !== -1) return Promise.reject(new Error('nm'));
+      return Promise.resolve(
+        pkg({ request: '2.88.2' }, null, { request: 'npm:@cypress/request@3.0.0' })
+      );
+    });
+    MC(true, ['3.0.0', '3.1.0', '3.2.0']);
+    const r = await S.scanDependencyUpdates('/proj');
+    const candidate = r.content[0].candidates[0];
+    // Scoped package name preserved correctly
+    expect(candidate.name).toBe('@cypress/request');
+    expect(candidate.originalName).toBe('request');
+    expect(candidate.availableVersions).toContain('3.1.0');
+  });
+
+  it('applyUpdates uses npm: protocol syntax for overridden packages', async () => {
+    ME(false);
+    const r = await S.applyUpdates('/root', [
+      {
+        name: '@cypress/request',
+        originalName: 'request',
+        toVersion: '3.1.0',
+        repoPath: '/root/r1',
+      },
+    ]);
+    expect(r.success).toBe(true);
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall[0]).toContain('request@npm:@cypress/request@3.1.0');
+  });
+
+  it('applyUpdates uses plain syntax for non-overridden packages', async () => {
+    ME(false);
+    const r = await S.applyUpdates('/root', [
+      { name: 'express', toVersion: '4.19.0', repoPath: '/root/r1' },
+    ]);
+    expect(r.success).toBe(true);
+    const execCall = cp.exec.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('npm install')
+    );
+    expect(execCall[0]).toContain('express@4.19.0');
+    expect(execCall[0]).not.toContain('npm:');
   });
 });

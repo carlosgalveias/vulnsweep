@@ -1,5 +1,17 @@
 /* eslint-disable import/order */
 import { useRef, useEffect, useState, useCallback } from 'react';
+import {
+  OP_GET_TRIAL_STATUS,
+  OP_GET_COMMERCIAL_STATUS,
+  OP_GET_INSTALL_INFO,
+  OP_GET_APP_VERSION,
+  OP_GET_ANALYTICS_OPT_OUT,
+  OP_SET_ANALYTICS_OPT_OUT,
+  OP_COMMIT_AND_PUSH,
+  OP_SCAN_LICENSES,
+  OP_SCAN_DEP_UPDATES,
+  OP_APPLY_DEP_UPDATES,
+} from '@shared/renderer-api-opcodes.js';
 import FirstRunModal from './components/FirstRunModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
@@ -11,12 +23,15 @@ import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
 import LicensesTab from './components/LicensesTab';
 import AboutTab from './components/AboutTab';
+import SettingsTab from './components/SettingsTab';
 // Custom Hooks
 import useFixApplication from './hooks/useFixApplication';
 import useGitOperations from './hooks/useGitOperations';
 import useLogConsole from './hooks/useLogConsole';
 import useProjectDiscovery from './hooks/useProjectDiscovery';
+import useSettings from './hooks/useSettings';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
+import { MAX_FREE_FIXES } from './constants';
 
 function App() {
   const [showFirstRun, setShowFirstRun] = useState(
@@ -49,14 +64,6 @@ function App() {
   // Composite keys (repoPath:name) of packages that have been successfully applied
   const [appliedDepPackages, setAppliedDepPackages] = useState(new Set());
 
-  // F1 — CVE enrichment state
-  const [isEnriching, setIsEnriching] = useState(false);
-  const [enrichmentProgress, setEnrichmentProgress] = useState({
-    current: 0,
-    total: 0,
-    packageName: '',
-  });
-
   const [dirtyRepos, setDirtyRepos] = useState(new Set());
 
   const handleFirstRunAccept = useCallback(() => {
@@ -88,7 +95,7 @@ function App() {
 
   const refreshTrialStatus = useCallback(async () => {
     try {
-      const status = await window.electronAPI.getTrialStatus();
+      const status = await window.electronAPI.invoke(OP_GET_TRIAL_STATUS);
       setTrialStatus(status);
     } catch (err) {
       console.error('Failed to get trial status', err);
@@ -98,9 +105,9 @@ function App() {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const status = await window.electronAPI.getCommercialStatus();
+        const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
         setLicStatus(status);
-        const info = await window.electronAPI.getInstallInfo();
+        const info = await window.electronAPI.invoke(OP_GET_INSTALL_INFO);
         setInstallInfo(info);
         if (status.isCommercial && (!status.isLicensed || status.isExpired)) {
           setShowBuyModal(true);
@@ -117,9 +124,9 @@ function App() {
   useEffect(() => {
     const load = async () => {
       try {
-        const vInfo = await window.electronAPI.getAppVersion();
+        const vInfo = await window.electronAPI.invoke(OP_GET_APP_VERSION);
         setAppVersion(vInfo.version || '');
-        const optInfo = await window.electronAPI.getAnalyticsOptOut();
+        const optInfo = await window.electronAPI.invoke(OP_GET_ANALYTICS_OPT_OUT);
         setAnalyticsOptOut(optInfo.optOut || false);
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -130,7 +137,7 @@ function App() {
 
   const handleAnalyticsOptOutChange = useCallback(async (newValue) => {
     try {
-      await window.electronAPI.setAnalyticsOptOut(newValue);
+      await window.electronAPI.invoke(OP_SET_ANALYTICS_OPT_OUT, newValue);
       setAnalyticsOptOut(newValue);
     } catch (err) {
       console.error('Failed to save analytics preference:', err);
@@ -139,7 +146,7 @@ function App() {
 
   const handleLicenseRestored = useCallback(async () => {
     try {
-      const status = await window.electronAPI.getCommercialStatus();
+      const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
       setLicStatus(status);
     } catch (err) {
       console.error('Failed to refresh license after restore:', err);
@@ -158,15 +165,33 @@ function App() {
     allowReset,
     handleAllowResetChange,
     commitAndPush: commitAndPushVulns,
-  } = useGitOperations(addLog, vulnerabilitiesRef, projectsRef, removeDirtyRepo);
+  } = useGitOperations(addLog, vulnerabilitiesRef, removeDirtyRepo);
+
+  // useSettings — load persisted scan option values once on mount for initial hydration.
+  // SettingsTab owns its own useSettings instance and auto-saves every change;
+  // this instance is read-only and only used for the initial state hydration.
+  const { settings: appSettings } = useSettings();
+
+  // Hydrate the four scan option state variables whenever useSettings loads/updates them.
+  useEffect(() => {
+    if (!appSettings) return;
+    if (typeof appSettings.bumpVersion === 'boolean') setBumpVersion(appSettings.bumpVersion);
+    if (typeof appSettings.removePackageLock === 'boolean')
+      setRemovePackageLock(appSettings.removePackageLock);
+    if (typeof appSettings.removeOverrides === 'boolean')
+      setRemoveOverrides(appSettings.removeOverrides);
+    if (typeof appSettings.allowReset === 'boolean') handleAllowResetChange(appSettings.allowReset);
+  }, [appSettings, handleAllowResetChange]);
 
   const {
     vulnerabilities,
     selectedVulns,
     progress,
     isScanning,
+    isCancelling,
     hasScanned,
     scanProjects,
+    cancelScan,
     toggleVulnerability,
     toggleAll,
     resetVulnerabilities,
@@ -203,7 +228,7 @@ function App() {
       for (const repoPath of repoPathsSet) {
         addLog('info', `Committing dep updates in ${repoPath}...`);
         try {
-          const result = await window.electronAPI.commitAndPush(repoPath, {
+          const result = await window.electronAPI.invoke(OP_COMMIT_AND_PUSH, repoPath, {
             message: depCommitMessage,
             vulnerabilities: [],
           });
@@ -218,7 +243,11 @@ function App() {
       }
       setDepUpdatesDirty(false);
     }
-    await commitAndPushVulns();
+    // Commit vulnerability fixes and remove committed vulnerabilities from state
+    const committedIds = await commitAndPushVulns();
+    if (committedIds && committedIds.length > 0) {
+      setVulnerabilities((prev) => prev.filter((v) => !committedIds.includes(v.id)));
+    }
   }, [
     depUpdatesDirty,
     depCommitMessage,
@@ -226,6 +255,7 @@ function App() {
     selectedFolder,
     addLog,
     commitAndPushVulns,
+    setVulnerabilities,
   ]);
 
   useEffect(() => {
@@ -234,38 +264,7 @@ function App() {
   useEffect(() => {
     vulnerabilitiesRef.current = vulnerabilities;
   }, [vulnerabilities]);
-  useEffect(() => {
-    if (!hasScanned || isScanning || vulnerabilities.length === 0 || isEnriching) return;
-    if (!vulnerabilities.some((v) => !v.enrichment)) return;
-    let unsub = null;
-    const run = async () => {
-      setIsEnriching(true);
-      setEnrichmentProgress({ current: 0, total: vulnerabilities.length, packageName: '' });
-      unsub = window.electronAPI.onEnrichmentProgress((d) => setEnrichmentProgress(d));
-      try {
-        const r = await window.electronAPI.enrichVulnerabilities(vulnerabilities);
-        if (r.success && Array.isArray(r.content)) setVulnerabilities(r.content);
-      } catch (err) {
-        console.error('CVE enrichment failed:', err);
-      } finally {
-        setIsEnriching(false);
-        setEnrichmentProgress({ current: 0, total: 0, packageName: '' });
-        if (unsub) unsub();
-      }
-    };
-    run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasScanned, isScanning, vulnerabilities.length]);
-
-  const combinedProgress = isEnriching
-    ? {
-        current: enrichmentProgress.current,
-        total: enrichmentProgress.total || vulnerabilities.length,
-        message: enrichmentProgress.packageName
-          ? `Enriching CVE data (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length}) - ${enrichmentProgress.packageName}`
-          : `Enriching with NVD/OSV data (${enrichmentProgress.current}/${enrichmentProgress.total || vulnerabilities.length})`,
-      }
-    : progress;
+  const combinedProgress = progress;
 
   const {
     isApplying,
@@ -320,7 +319,7 @@ function App() {
     setLicenseScanError(null);
     try {
       const results = await Promise.all(
-        projectPaths.map((p) => window.electronAPI.scanLicenses(p))
+        projectPaths.map((p) => window.electronAPI.invoke(OP_SCAN_LICENSES, p))
       );
       const successful = results.filter((r) => r.success).map((r) => r.content);
       if (successful.length === 0) {
@@ -404,7 +403,7 @@ function App() {
       setAppliedDepPackages(new Set());
     }
     try {
-      const r = await window.electronAPI.scanDepUpdates(selectedFolder, allowReset, {
+      const r = await window.electronAPI.invoke(OP_SCAN_DEP_UPDATES, selectedFolder, allowReset, {
         removeOverrides,
         removePackageLock,
       });
@@ -436,7 +435,7 @@ function App() {
     setDepApplyStatus('applying');
     setDepApplyError(null);
     try {
-      const r = await window.electronAPI.applyDepUpdates(selectedFolder, updates);
+      const r = await window.electronAPI.invoke(OP_APPLY_DEP_UPDATES, selectedFolder, updates);
       if (r.success) {
         const msg = r.commitMessage || updates.map((u) => `${u.name}@${u.toVersion}`).join(', ');
         setDepCommitMessage(msg);
@@ -462,6 +461,11 @@ function App() {
   };
 
   const handleScanAudit = async () => {
+    // If a vulnerability scan is in progress, this button acts as Cancel
+    if (isScanning) {
+      await cancelScan();
+      return;
+    }
     if (activeTab === 'dep-updates') {
       await handleDepScan();
       return;
@@ -484,28 +488,35 @@ function App() {
 
   const isDepUpdatesTab = activeTab === 'dep-updates';
   const isLicensesTab = activeTab === 'licenses';
-  const scanButtonLabel = isDepUpdatesTab ? 'Scan for Updates' : 'Scan & Audit';
+  // When a vulnerability scan is active, show Cancel / Cancelling... instead of the normal label
+  const scanButtonLabel = isScanning
+    ? isCancelling
+      ? 'Cancelling...'
+      : 'Cancel'
+    : isDepUpdatesTab
+      ? 'Scan for Updates'
+      : 'Scan & Audit';
   const applyButtonLabel = isDepUpdatesTab ? 'Apply Updates' : 'Apply Selected Fixes';
 
   const buttonsState = {
-    scanAudit: isDepUpdatesTab
-      ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
-      : projects.length > 0 && !isScanning && !isApplying && !isCommitting && !isEnriching,
+    // Cancel button enabled unless cancellation is already in-flight.
+    // Normal scan-start conditions apply only when no scan is running.
+    scanAudit: isScanning
+      ? !isCancelling
+      : isDepUpdatesTab
+        ? !!selectedFolder && !isDepScanning && !isApplying && !isCommitting
+        : projects.length > 0 && !isApplying && !isCommitting,
     applyFixes: isLicensesTab
       ? false
       : isDepUpdatesTab
         ? selectedDepUpdates.size > 0 && depApplyStatus !== 'applying' && !isCommitting
-        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting && !isEnriching,
+        : selectedVulns.size > 0 && !isApplying && !isScanning && !isCommitting,
     commitPush:
-      (dirtyRepos.size > 0 || depUpdatesDirty) &&
-      !isCommitting &&
-      !isApplying &&
-      !isScanning &&
-      !isEnriching,
+      (dirtyRepos.size > 0 || depUpdatesDirty) && !isCommitting && !isApplying && !isScanning,
   };
 
   const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
-  const fixesLeft = trialStatus?.fixesRemaining ?? 10;
+  const fixesLeft = trialStatus?.fixesRemaining ?? MAX_FREE_FIXES;
   const daysLeft = trialStatus?.daysUntilPriceChange ?? installInfo?.daysRemaining ?? 30;
   const trialExhausted = trialStatus?.trialExhausted === true;
 
@@ -524,17 +535,11 @@ function App() {
             buttonsState={buttonsState}
             scanButtonLabel={scanButtonLabel}
             applyButtonLabel={applyButtonLabel}
-            allowReset={allowReset}
-            onAllowResetChange={handleAllowResetChange}
-            bumpVersion={bumpVersion}
-            onBumpVersionChange={setBumpVersion}
-            removePackageLock={removePackageLock}
-            onRemovePackageLockChange={setRemovePackageLock}
-            removeOverrides={removeOverrides}
-            onRemoveOverridesChange={setRemoveOverrides}
             licStatus={licStatus}
             trialStatus={trialStatus}
             onBuyNow={() => setShowBuyModal(true)}
+            isScanning={isScanning}
+            isCancelling={isCancelling}
           />
         </ErrorBoundary>
 
@@ -554,6 +559,16 @@ function App() {
             </button>
           ))}
           <div className="flex-1" />
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 mr-1 border-b-2 ${
+              activeTab === 'settings'
+                ? 'bg-surface text-white border-blue-500'
+                : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'
+            }`}
+          >
+            Settings
+          </button>
           <button
             onClick={() => setActiveTab('about')}
             className={`px-4 py-1.5 text-xs font-medium rounded-t transition-colors duration-150 border-b-2 ${activeTab === 'about' ? 'bg-surface text-white border-blue-500' : 'bg-transparent text-gray-400 border-transparent hover:text-gray-200 hover:bg-surface'}`}
@@ -575,8 +590,6 @@ function App() {
                     isLoading={isScanning}
                     hasFolder={!!selectedFolder}
                     hasScanned={hasScanned}
-                    isEnriching={isEnriching}
-                    enrichmentProgress={enrichmentProgress}
                   />
                 </ErrorBoundary>
               </div>
@@ -645,6 +658,18 @@ function App() {
               </ErrorBoundary>
             </div>
           )}
+          {activeTab === 'settings' && (
+            <div className="flex-1 overflow-auto p-6">
+              <ErrorBoundary fallbackMessage="Failed to load Settings tab">
+                <SettingsTab
+                  onAllowResetChange={handleAllowResetChange}
+                  onBumpVersionChange={setBumpVersion}
+                  onRemovePackageLockChange={setRemovePackageLock}
+                  onRemoveOverridesChange={setRemoveOverrides}
+                />
+              </ErrorBoundary>
+            </div>
+          )}
           {isUnlicensed && (
             <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
               {trialExhausted ? (
@@ -702,7 +727,7 @@ function App() {
           isExpired={licStatus?.isExpired === true}
           onPaymentSuccess={async ({ licenseKey }) => {
             try {
-              const status = await window.electronAPI.getCommercialStatus();
+              const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
               setLicStatus(status);
               setShowBuyModal(false);
               addLog('info', `Commercial license activated! Key: ${licenseKey}`);

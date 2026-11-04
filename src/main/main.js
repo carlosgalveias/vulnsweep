@@ -1,11 +1,16 @@
-/* eslint-disable import/order */
 const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
-const { UI_CONFIG, PAYPAL_CONFIG } = require('./config/constants');
+const {
+  UI_CONFIG,
+  PAYPAL_CONFIG,
+  TRIAL_CONFIG,
+  LICENSE_API_CONFIG,
+} = require('./config/constants');
+const scanTelemetry = require('./utils/scan-telemetry');
+const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
-const { enrichVulnerabilities } = require('./modules/enrichment/cve-enricher');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
 const license = require('./modules/license');
@@ -17,17 +22,65 @@ const analytics = require('./modules/analytics');
 // are buffered by the SDK and flushed automatically once setup completes.
 analytics.init();
 const isDevelopment = process.env.NODE_ENV === 'development';
+
+// ── ASAR Integrity Self-Check ───────────────────────────────────────────────
+// Build-time injected hashes of preload scripts. The placeholder values are
+// replaced by build-main.js AFTER obfuscation with actual SHA-256 digests.
+const _PRELOAD_HASH = '{{PRELOAD_INTEGRITY_HASH}}';
+const _SPLASH_HASH = '{{SPLASH_INTEGRITY_HASH}}';
+
+/**
+ * Verifies preload script integrity against build-time embedded hashes.
+ * Returns a derived value used downstream — removal breaks license validation.
+ * @returns {string} Integrity token (first 8 chars of combined hash)
+ */
+function _verifyAsarIntegrity() {
+  if (isDevelopment) return 'dev_bypass';
+  try {
+    const crypto = require('crypto');
+    const fs = require('fs');
+    const preloadPath = path.join(__dirname, 'preload', 'preload.js');
+    const splashPath = path.join(__dirname, 'preload', 'splash-preload.js');
+    const h1 = crypto.createHash('sha256').update(fs.readFileSync(preloadPath)).digest('hex');
+    const h2 = crypto.createHash('sha256').update(fs.readFileSync(splashPath)).digest('hex');
+    if (h1 !== _PRELOAD_HASH || h2 !== _SPLASH_HASH) {
+      setTimeout(() => app.quit(), 150 + Math.random() * 500);
+      return '';
+    }
+    return (h1 + h2).substring(0, 8);
+  } catch {
+    setTimeout(() => app.quit(), 200 + Math.random() * 400);
+    return '';
+  }
+}
+const _integrityToken = _verifyAsarIntegrity();
+
 if (!isDevelopment) {
   Menu.setApplicationMenu(null);
 }
 // Imported at top level — pre-warm call happens inside app.whenReady() after
 // app.getPath('userData') is available, ensuring the correct store path is used.
-const { storeGet, storeSet } = require('./utils/secure-store');
+const { storeGet, storeSet, storeRemove } = require('./utils/secure-store');
 const trialStore = require('./utils/trial-store');
+
+// ============================================
+// CREDENTIALS (Sprint 5 Feature B)
+// Allowlist of source IDs that may have credentials stored.
+// Add new sources here as they are integrated.
+// ============================================
+const ALLOWED_CREDENTIAL_SOURCES = new Set(['github-advisory', 'nvd']);
 
 // Keep a global reference of the window objects to avoid garbage collection
 let mainWindow;
 let splashWindow;
+
+// ============================================
+// CANCEL SCAN (Sprint 5 Feature D)
+// Holds the AbortController for the currently active scan-projects invocation.
+// Set at the start of each scan, cleared in the finally block (or on cancel).
+// ============================================
+/** @type {AbortController|null} */
+let _activeScanAbortController = null;
 
 /**
  * Sends a log message to the renderer process
@@ -41,6 +94,23 @@ function sendLogMessage(level, message) {
       level,
       message,
     });
+  }
+}
+
+/**
+ * Retrieves a stored credential for internal main-process use ONLY.
+ * This function is intentionally NOT registered as an IPC handler and NOT exported.
+ * The renderer process has no path to invoke it — by design.
+ * Prefixed with _ to satisfy no-unused-vars (called from scanner modules, not this file).
+ *
+ * @param {string} sourceId - Credential source identifier (e.g. 'github-advisory')
+ * @returns {string|null} Decrypted credential value, or null if not set
+ */
+function _getCredential(sourceId) {
+  try {
+    return storeGet(`cred:${sourceId}`) || null;
+  } catch {
+    return null;
   }
 }
 
@@ -261,8 +331,18 @@ ipcMain.handle('discover-projects', async (event, basePath) => {
     // Validate and sanitize path
     const sanitized = sanitizePath(basePath);
 
+    // Read recursive setting from stored settings
+    let recursive = false;
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      recursive = saved.recursive === true;
+    } catch {
+      /* use default */
+    }
+
     // Discover projects - returns Result object { success, data, message }
-    const result = await discovery.discoverProjects(sanitized);
+    const result = await discovery.discoverProjects(sanitized, { recursive, ignore: [] });
 
     // Check if discovery failed
     if (!result.success) {
@@ -350,6 +430,10 @@ ipcMain.handle('commit-and-push', async (event, projectPath, messageOrOptions) =
 
     if (result.success) {
       sendLogMessage('success', `Changes committed and pushed: ${path.basename(sanitized)}`);
+      const fixCount = Array.isArray(commitOptions?.vulnerabilities)
+        ? commitOptions.vulnerabilities.length
+        : 0;
+      analytics.trackEvent('commit_pushed', { fixCount });
     } else {
       sendLogMessage('error', `Failed to commit/push: ${result.error}`);
     }
@@ -471,6 +555,13 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     analytics.trackEvent('repository_scanned', {
       repoCount: results.length,
       totalVulnerabilities: results.reduce((s, r) => s + (r.content?.summary?.total || 0), 0),
+      critical: results.reduce((s, r) => s + (r.content?.summary?.critical || 0), 0),
+      high: results.reduce((s, r) => s + (r.content?.summary?.high || 0), 0),
+      medium: results.reduce(
+        (s, r) => s + (r.content?.summary?.medium || r.content?.summary?.moderate || 0),
+        0
+      ),
+      low: results.reduce((s, r) => s + (r.content?.summary?.low || 0), 0),
     });
     return { success: true, content: results };
   } catch (error) {
@@ -478,6 +569,190 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     sendLogMessage('error', `Batch analysis failed: ${error.message}`);
     return { success: false, error: error.message };
   }
+});
+
+// ============================================
+// IPC HANDLERS - SCANNER (Sprint 3)
+// ============================================
+
+/**
+ * Handler: Scan a single project for vulnerabilities using the modular scanner pipeline.
+ * Streams per-package progress events via 'scan-progress' push channel.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @returns {Promise<{ success: boolean, content?: ScanResult, error?: string }>}
+ */
+ipcMain.handle('scan-project', async (_event, projectPath) => {
+  try {
+    const sanitized = sanitizePath(projectPath);
+    const { scanProject } = require('./modules/scanner/scanner-orchestrator');
+    // Read persisted settings and pass to scanner
+    const scanOptions = {};
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      if (Array.isArray(saved.enabledSources) && saved.enabledSources.length > 0) {
+        scanOptions.enabledSources = saved.enabledSources;
+      }
+    } catch {
+      /* use defaults */
+    }
+    const result = await scanProject(sanitized, scanOptions, (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('scan-progress', progress);
+      }
+    });
+    return { success: true, content: result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Scan multiple projects sequentially, emitting analysis-progress between projects.
+ * Streams per-package progress events via 'scan-progress' push channel.
+ *
+ * @param {string[]} projectPaths - Array of absolute project paths
+ * @param {boolean} [allowReset] - Unused parameter kept for API symmetry with analyze-projects
+ * @returns {Promise<{ success: boolean, content?: ScanResult[], error?: string }>}
+ */
+ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
+  if (!Array.isArray(projectPaths) || projectPaths.length === 0) {
+    return { success: false, error: 'Invalid project paths array' };
+  }
+
+  // [dev-telemetry] Log that telemetry is active for this batch scan
+  if (scanTelemetry.isEnabled()) {
+    console.log(
+      `[scan-telemetry] Dev mode active — timing data will be written to tmp/ after each repo scan (${projectPaths.length} repo(s) queued)`
+    );
+  }
+
+  // Create an AbortController for this scan session so the scan:cancel handler
+  // can stop the loop between project iterations without leaving it running.
+  // Use globalThis.AbortController so the ESLint no-undef rule (which doesn't
+  // include Node.js 15+ globals by default) does not flag this call.
+  const scanAbortController = new globalThis.AbortController();
+  _activeScanAbortController = scanAbortController;
+  const { signal } = scanAbortController;
+
+  try {
+    const { scanProject } = require('./modules/scanner/scanner-orchestrator');
+    // Read persisted settings once for the entire batch scan
+    const scanOptions = { signal };
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      if (Array.isArray(saved.enabledSources) && saved.enabledSources.length > 0) {
+        scanOptions.enabledSources = saved.enabledSources;
+      }
+    } catch {
+      /* use defaults */
+    }
+    const results = [];
+    for (let i = 0; i < projectPaths.length; i++) {
+      // Check for cancellation before processing each project
+      if (signal.aborted) {
+        console.log(`[scan-projects] Scan cancelled before project ${i + 1}`);
+        return { success: false, cancelled: true };
+      }
+      try {
+        const sanitized = sanitizePath(projectPaths[i]);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('analysis-progress', {
+            current: i + 1,
+            total: projectPaths.length,
+          });
+        }
+        const result = await scanProject(sanitized, scanOptions, (progress) => {
+          if (signal.aborted) return; // drop progress events after cancel
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('scan-progress', progress);
+          }
+        });
+        // Re-check after each project completes in case cancel arrived mid-scan
+        if (signal.aborted) {
+          return { success: false, cancelled: true };
+        }
+        results.push({ success: true, projectPath: projectPaths[i], content: result });
+      } catch (err) {
+        if (signal.aborted) return { success: false, cancelled: true };
+        results.push({ success: false, projectPath: projectPaths[i], error: err.message });
+      }
+    }
+    // Emit a single batch-level sentinel after ALL repositories have been scanned.
+    // The renderer's onScanProgress handler responds to this phase (not the per-repo
+    // 'complete' phase) to show "Finalizing results..." at the correct moment —
+    // once all repos are truly done, not after each individual repo completes.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('scan-progress', {
+        phase: 'batch-complete',
+        total: projectPaths.length,
+      });
+    }
+    const _sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const r of results) {
+      for (const v of r.content?.vulnerabilities || []) {
+        let sev = (v.severity || '').toLowerCase();
+        if (sev === 'moderate') sev = 'medium';
+        if (_sevCounts[sev] !== undefined) _sevCounts[sev]++;
+      }
+    }
+    analytics.trackEvent('scan_completed', {
+      repoCount: results.length,
+      totalVulnerabilities: results.reduce(
+        (s, r) => s + (r.content?.vulnerabilities?.length || 0),
+        0
+      ),
+      ..._sevCounts,
+    });
+    return { success: true, content: results };
+  } catch (err) {
+    return { success: false, error: err.message };
+  } finally {
+    // Always clear the controller reference when the scan ends (normal or cancelled).
+    // This ensures scan:cancel cannot call .abort() on a stale controller.
+    _activeScanAbortController = null;
+  }
+});
+
+// ============================================
+// IPC HANDLERS - CANCEL SCAN (Sprint 5 Feature D)
+// ============================================
+
+/**
+ * Handler: Abort the currently running scan-projects operation.
+ * Signals the active AbortController so the project iteration loop exits cleanly.
+ * Also resets the GitHub rate-limiter queue to prevent a cancelled scan's
+ * rate-limit backoff from blocking the next scan session.
+ *
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('scan:cancel', () => {
+  try {
+    if (_activeScanAbortController) {
+      _activeScanAbortController.abort();
+      _activeScanAbortController = null;
+      console.log('[IPC] scan:cancel — abort signal sent');
+    }
+    // Reset the rate-limiter queue so queued GitHub requests from the cancelled
+    // scan do not continue executing or block the next scan session.
+    const rateLimiter = require('./utils/github-rate-limiter');
+    rateLimiter.resetQueue();
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] scan:cancel error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Return current scanner configuration.
+ * @returns {Promise<{ success: boolean, content?: object }>}
+ */
+ipcMain.handle('get-scan-settings', async () => {
+  const { SCANNER_CONFIG } = require('./config/constants');
+  return { success: true, content: SCANNER_CONFIG };
 });
 
 /**
@@ -563,71 +838,6 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
 });
 
 // ============================================
-// IPC HANDLERS - ENRICHMENT (F1)
-// ============================================
-
-/**
- * Handler: Enrich an array of vulnerability objects with cross-source CVE data.
- * Streams per-vulnerability progress events back to the renderer via
- * 'enrichment-progress' push channel.
- *
- * Input:  { vulnerabilities: VulnObject[] }
- * Output: { success: boolean, content?: VulnObject[], error?: string }
- */
-ipcMain.handle('enrich-vulnerabilities', async (event, vulnerabilities) => {
-  try {
-    if (!Array.isArray(vulnerabilities) || vulnerabilities.length === 0) {
-      return { success: true, content: [] };
-    }
-
-    console.log(
-      `[IPC] enrich-vulnerabilities: enriching ${vulnerabilities.length} vulnerabilities`
-    );
-    sendLogMessage('info', `Enriching ${vulnerabilities.length} vulnerabilities with CVE data…`);
-
-    const total = vulnerabilities.length;
-
-    const enriched = await enrichVulnerabilities(
-      vulnerabilities,
-      (current, _total, packageName) => {
-        if (mainWindow && mainWindow.webContents) {
-          mainWindow.webContents.send('enrichment-progress', { current, total, packageName });
-        }
-      }
-    );
-
-    sendLogMessage(
-      'success',
-      `CVE enrichment complete: ${enriched.length} vulnerabilities enriched`
-    );
-    return { success: true, content: enriched };
-  } catch (err) {
-    console.error(`[IPC] enrich-vulnerabilities error: ${err.message}`);
-    sendLogMessage('error', `CVE enrichment failed: ${err.message}`);
-    return { success: false, error: err.message };
-  }
-});
-
-/**
- * Handler: Return current enrichment settings / status.
- */
-ipcMain.handle('get-enrichment-settings', () => {
-  const { ENRICHMENT_CONFIG } = require('./config/constants');
-  return {
-    success: true,
-    content: {
-      osvApiUrl: ENRICHMENT_CONFIG.OSV_API_URL,
-      nvdApiUrl: ENRICHMENT_CONFIG.NVD_API_URL,
-      githubAdvisoryApiUrl: ENRICHMENT_CONFIG.GITHUB_ADVISORY_API_URL,
-      nvdRateLimitMs: ENRICHMENT_CONFIG.NVD_RATE_LIMIT_MS,
-      nvdApiKeyConfigured: !!ENRICHMENT_CONFIG.NVD_API_KEY,
-      timeoutMs: ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS,
-      cacheTtlMs: ENRICHMENT_CONFIG.ENRICHMENT_CACHE_TTL_MS,
-    },
-  };
-});
-
-// ============================================
 // IPC HANDLERS - DEPENDENCY UPDATES (F13)
 // ============================================
 
@@ -650,6 +860,16 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
 
     const { scanDependencyUpdates } = require('./modules/dep-updates/dep-updates-scanner');
 
+    // Read recursive setting from stored settings
+    let recursive = false;
+    try {
+      const raw = storeGet('app:settings');
+      const saved = raw ? JSON.parse(raw) : {};
+      recursive = saved.recursive === true;
+    } catch {
+      /* use default */
+    }
+
     const progressCb = ({ current, total, repoName, packageName }) => {
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('dep-update-progress', {
@@ -664,25 +884,13 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
     // Mirror audit scan: run git prepare (reset+pull+removeOverrides+removePackageLock)
     // per repo whenever any prep option is active.
     if (allowReset || removeOverrides || removePackageLock) {
-      const fs = require('fs');
-      const path_ = require('path');
-      let repos = [];
-      try {
-        const entries = await fs.promises.readdir(sanitized, { withFileTypes: true });
-        const dirs = entries.filter((e) => e.isDirectory());
-        for (const d of dirs) {
-          const rp = path_.join(sanitized, d.name);
-          try {
-            await fs.promises.access(path_.join(rp, 'package.json'));
-            repos.push(rp);
-          } catch {
-            /* skip */
-          }
-        }
-        if (repos.length === 0) repos = [sanitized]; // single-repo fallback
-      } catch {
-        repos = [sanitized];
-      }
+      const discovery = require('./modules/discovery');
+      const prepDiscovery = await discovery.discoverProjects(sanitized, { recursive });
+      const repos =
+        prepDiscovery.success && prepDiscovery.content.length > 0
+          ? prepDiscovery.content.map((p) => p.path)
+          : [sanitized];
+
       for (const repoPath of repos) {
         sendLogMessage('info', `Preparing repository: ${path.basename(repoPath)}...`);
         try {
@@ -696,7 +904,7 @@ ipcMain.handle('scan-dep-updates', async (event, projectPath, allowReset = false
       }
     }
 
-    const result = await scanDependencyUpdates(sanitized, progressCb);
+    const result = await scanDependencyUpdates(sanitized, progressCb, { recursive });
 
     if (!result.success) {
       console.error(`[IPC] scan-dep-updates error: ${result.error}`);
@@ -909,7 +1117,7 @@ ipcMain.handle('get-trial-status', async () => {
     console.error('[IPC] get-trial-status error:', err.message);
     // Safe fallback — show full quota so the UI never incorrectly blocks the user.
     return {
-      fixesRemaining: 10,
+      fixesRemaining: TRIAL_CONFIG.MAX_FREE_FIXES,
       fixesConsumed: 0,
       daysUntilPriceChange: 30,
       trialExhausted: false,
@@ -935,6 +1143,172 @@ ipcMain.handle('get-analytics-opt-out', () => {
     return { optOut: storeGet('ao') === '1' };
   } catch {
     return { optOut: false };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - CREDENTIALS (Sprint 5 Feature B)
+// Security contract:
+//   - credentials:set   → stores encrypted credential, returns masked hint only
+//   - credentials:delete → removes credential, returns ok
+//   - credentials:getStatus → returns configured boolean + masked hint; NEVER plaintext
+//   - getCredential() internal function is the ONLY read path for plaintext
+// ============================================
+
+/**
+ * Handler: Store an encrypted credential for a known source.
+ * Returns only a masked hint — the plaintext is never echoed back.
+ *
+ * @param {string} sourceId - Must be in ALLOWED_CREDENTIAL_SOURCES
+ * @param {string} plaintext - The credential value (e.g. GitHub PAT)
+ * @returns {{ success: boolean, maskedHint?: string, error?: string }}
+ */
+ipcMain.handle('credentials:set', (_event, sourceId, plaintext) => {
+  try {
+    if (!ALLOWED_CREDENTIAL_SOURCES.has(sourceId)) {
+      return { success: false, error: 'Unknown source' };
+    }
+    if (!plaintext || typeof plaintext !== 'string' || !plaintext.trim()) {
+      return { success: false, error: 'Invalid credential value' };
+    }
+    if (plaintext.length > 500) {
+      return { success: false, error: 'Credential value too long' };
+    }
+    const trimmed = plaintext.trim();
+    const maskedHint = trimmed.slice(-4);
+    storeSet(`cred:${sourceId}`, trimmed);
+    storeSet(`cred:${sourceId}:hint`, maskedHint);
+    return { success: true, maskedHint };
+  } catch (err) {
+    console.error('[IPC] credentials:set error:', err.message);
+    return { success: false, error: 'Failed to save credential' };
+  }
+});
+
+/**
+ * Handler: Delete a stored credential and its hint.
+ *
+ * @param {string} sourceId - Must be in ALLOWED_CREDENTIAL_SOURCES
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('credentials:delete', (_event, sourceId) => {
+  try {
+    if (!ALLOWED_CREDENTIAL_SOURCES.has(sourceId)) {
+      return { success: false, error: 'Unknown source' };
+    }
+    storeRemove(`cred:${sourceId}`);
+    storeRemove(`cred:${sourceId}:hint`);
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] credentials:delete error:', err.message);
+    return { success: false, error: 'Failed to delete credential' };
+  }
+});
+
+/**
+ * Handler: Return configured status and masked hint for all known sources.
+ * NEVER returns the plaintext credential — only a boolean and the last-4-char hint.
+ *
+ * @returns {{ success: boolean, content?: Record<string, { configured: boolean, maskedHint: string|null }>, error?: string }}
+ */
+ipcMain.handle('credentials:getStatus', () => {
+  try {
+    const content = {};
+    for (const sourceId of ALLOWED_CREDENTIAL_SOURCES) {
+      const value = storeGet(`cred:${sourceId}`);
+      const hint = storeGet(`cred:${sourceId}:hint`);
+      content[sourceId] = {
+        configured: Boolean(value && value.trim()),
+        maskedHint: hint || null,
+      };
+    }
+    return { success: true, content };
+  } catch (err) {
+    console.error('[IPC] credentials:getStatus error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - SETTINGS (Sprint 5 Feature A)
+// ============================================
+
+const VALID_SETTING_SOURCES = new Set([
+  'npm-audit',
+  'osv',
+  'nvd',
+  'github-advisory',
+  'cisa-kev',
+  'epss',
+]);
+
+/**
+ * Handler: Retrieve persisted app settings.
+ * Returns defaults if no settings have been saved yet or JSON is corrupt.
+ * @returns {{ success: boolean, content?: { scanMode: string, enabledSources: string[] } }}
+ */
+ipcMain.handle('settings:get', () => {
+  try {
+    const raw = storeGet('app:settings');
+    const parsed = raw ? JSON.parse(raw) : {};
+    return { success: true, content: parsed };
+  } catch (err) {
+    console.error('[IPC] settings:get error:', err.message);
+    return { success: true, content: {} }; // safe default — caller uses DEFAULTS
+  }
+});
+
+/**
+ * Handler: Persist app settings.
+ * Validates enabledSources and boolean scan option fields before writing.
+ * Enforces npm-audit as always-present in enabledSources.
+ * Silently passes through unknown keys (e.g. legacy scanMode) for backward compatibility.
+ * @param {{ scanMode?: string, enabledSources?: string[], allowReset?: boolean,
+ *           bumpVersion?: boolean, removePackageLock?: boolean, removeOverrides?: boolean }} settingsObj
+ * @returns {{ success: boolean, error?: string }}
+ */
+ipcMain.handle('settings:set', (_event, settingsObj) => {
+  try {
+    if (!settingsObj || typeof settingsObj !== 'object' || Array.isArray(settingsObj)) {
+      return { success: false, error: 'Invalid settings object' };
+    }
+    if (settingsObj.enabledSources !== undefined) {
+      if (!Array.isArray(settingsObj.enabledSources)) {
+        return { success: false, error: 'enabledSources must be an array' };
+      }
+      if (settingsObj.enabledSources.length === 0) {
+        return { success: false, error: 'At least one source must be enabled' };
+      }
+      for (const s of settingsObj.enabledSources) {
+        if (!VALID_SETTING_SOURCES.has(s)) {
+          return { success: false, error: `Unknown source: ${s}` };
+        }
+      }
+      // Enforce npm-audit as always present
+      if (!settingsObj.enabledSources.includes('npm-audit')) {
+        settingsObj = {
+          ...settingsObj,
+          enabledSources: ['npm-audit', ...settingsObj.enabledSources],
+        };
+      }
+    }
+    const BOOLEAN_SETTING_KEYS = [
+      'allowReset',
+      'bumpVersion',
+      'removePackageLock',
+      'removeOverrides',
+      'recursive',
+    ];
+    for (const key of BOOLEAN_SETTING_KEYS) {
+      if (key in settingsObj && typeof settingsObj[key] !== 'boolean') {
+        return { success: false, error: `${key} must be a boolean` };
+      }
+    }
+    storeSet('app:settings', JSON.stringify(settingsObj));
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] settings:set error:', err.message);
+    return { success: false, error: 'Failed to save settings' };
   }
 });
 
@@ -992,7 +1366,9 @@ ipcMain.handle('get-active-price', async () => {
 /**
  * Handler: Open a payment BrowserWindow pointing at the PayPal payment link.
  * Monitors navigation events; when the success URL is detected the window is
- * closed, generateLicense() is called, and the result is returned to the renderer.
+ * closed and { ok: false, needsVerification: true } is returned to the renderer
+ * so it can advance to the verification phase. License generation is deferred
+ * to the verify-and-activate handler.
  * If the user closes the window manually before payment completes, resolves with
  * { ok: false, cancelled: true }.
  */
@@ -1040,25 +1416,24 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
 
     /**
      * Shared handler for both did-navigate and did-navigate-in-page.
-     * @param {Electron.Event} _event
+     * On success URL detection, closes the window and signals the renderer
+     * to advance to the verification phase (no license generated here).
+     * @param {Electron.Event} _evt
      * @param {string} url
      */
-    async function onNavigate(_event, url) {
+    function onNavigate(_evt, url) {
       if (settled) return;
       if (!isSuccessUrl(url)) return;
 
       settled = true;
-      console.log('[Payment] Success URL detected:', url);
+      console.log('[Payment] Success URL detected — advancing to verification:', url);
 
       if (!paymentWin.isDestroyed()) {
         paymentWin.close();
       }
 
-      const result = await license.generateLicense();
-      if (result.ok) {
-        analytics.trackEvent('paypal_purchase_success');
-      }
-      resolve(result);
+      // Signal renderer to show verification form
+      resolve({ ok: false, needsVerification: true });
     }
 
     paymentWin.webContents.on('did-navigate', onNavigate);
@@ -1073,6 +1448,160 @@ ipcMain.handle('open-payment-window', async (_event, isPromo) => {
       }
     });
   });
+});
+
+/**
+ * Handler: Verify a PayPal transaction via the Cloudflare Worker and generate
+ * a local license on success. Mirrors the CLI's handleActivate() logic from
+ * src/cli/purchase-handler.js.
+ *
+ * @param {string} email - Email used for PayPal payment
+ * @param {string} transactionId - PayPal transaction ID from receipt
+ * @returns {{ ok: true, key: string } | { ok: false, error: string }}
+ */
+ipcMain.handle('verify-and-activate', async (_event, email, transactionId) => {
+  // === Input Validation (mirrors CLI purchase-handler.js) ===
+  if (!email || !transactionId) {
+    return { ok: false, error: 'Email and Transaction ID are required.' };
+  }
+
+  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedTxn = transactionId.trim();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return { ok: false, error: 'Invalid email format.' };
+  }
+
+  if (!/^[A-Za-z0-9]{10,30}$/.test(trimmedTxn)) {
+    return { ok: false, error: 'Invalid Transaction ID format. Check your PayPal receipt.' };
+  }
+
+  // === Worker Verification ===
+  const verifyUrl = `${LICENSE_API_CONFIG.URL}${LICENSE_API_CONFIG.VERIFY_ENDPOINT}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LICENSE_API_CONFIG.TIMEOUT_MS);
+
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
+      },
+      body: JSON.stringify({ email: trimmedEmail, transactionId: trimmedTxn }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    const result = await response.json();
+
+    if (!result.verified) {
+      // Map Worker error codes to user-friendly messages
+      const messages = {
+        transaction_not_found:
+          'Transaction not found. Please verify your Transaction ID from the PayPal receipt.',
+        amount_mismatch: 'Payment amount does not match the license price.',
+        already_used: 'This transaction has already been used with a different email address.',
+        verification_in_progress:
+          'Verification already in progress. Please wait a moment and try again.',
+        invalid_status: 'Payment is still processing. Please wait a few minutes and try again.',
+        transaction_not_completed:
+          'Payment is still processing. Please wait a few minutes and try again.',
+        invalid_amount: 'Payment amount does not match the expected license price.',
+        missing_fields: 'Missing email or transaction ID.',
+        unauthorized: 'Client authentication failed. Please update VulnSweep.',
+        rate_limited: 'Too many attempts. Please wait a minute and try again.',
+        invalid_email: 'Invalid email format.',
+        invalid_transaction_id: 'Invalid Transaction ID format.',
+      };
+      return {
+        ok: false,
+        error: messages[result.error] || result.error || 'Verification failed. Please try again.',
+      };
+    }
+
+    // === Token Validation (mirrors CLI purchase-handler.js lines 125–144) ===
+    if (!result.activationToken || !result.activationToken.includes('.')) {
+      return { ok: false, error: 'Invalid activation response from server. Please try again.' };
+    }
+
+    const [payloadB64] = result.activationToken.split('.');
+    try {
+      const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
+
+      if (payload.exp && payload.exp < Date.now()) {
+        return { ok: false, error: 'Activation token expired. Please try again.' };
+      }
+
+      if (payload.email !== trimmedEmail || payload.txn !== trimmedTxn) {
+        return { ok: false, error: 'Activation token mismatch. Please try again.' };
+      }
+    } catch {
+      return { ok: false, error: 'Malformed activation token. Please try again.' };
+    }
+
+    // === License Generation ===
+    console.log('[Payment] Worker verification successful — generating license.');
+    const licenseResult = await license.generateLicense();
+
+    if (licenseResult && licenseResult.ok) {
+      analytics.trackEvent('paypal_purchase_success');
+      return { ok: true, key: licenseResult.key };
+    } else {
+      return { ok: false, error: 'License generation failed. Please contact support.' };
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      return {
+        ok: false,
+        error: 'License server timed out. Please check your internet connection and try again.',
+      };
+    }
+    if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message?.includes('fetch')) {
+      return {
+        ok: false,
+        error: 'Cannot reach the license server. Please check your internet connection.',
+      };
+    }
+    console.error('[Payment] verify-and-activate error:', err);
+    return { ok: false, error: `Activation error: ${err.message}` };
+  }
+});
+
+// ============================================
+// IPC HANDLERS - DEV PAYMENT BYPASS
+// ============================================
+
+ipcMain.handle('seed-dev-transaction', async (_event, email, amount) => {
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (!isDevelopment) {
+    return { success: false, error: 'Not available in production' };
+  }
+
+  const { LICENSE_API_CONFIG } = require('./config/constants');
+  const transactionId = `DEV${Date.now()}`;
+
+  try {
+    const response = await fetch(`${LICENSE_API_CONFIG.URL}/dev/seed-transaction`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
+      },
+      body: JSON.stringify({ email, transactionId, amount: amount || '29.99' }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return { success: false, error: data.error || 'Seed failed' };
+    }
+
+    return { success: true, transactionId };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // ============================================
@@ -1157,6 +1686,70 @@ ipcMain.handle('license-restore', async () => {
 // APP LIFECYCLE
 // ============================================
 
+// ============================================
+// IPC HANDLERS - SCAN CACHE
+// ============================================
+
+/**
+ * Handler: Return per-source entry counts for the scan result cache.
+ * Used by the renderer to display cache statistics in the settings UI.
+ * @returns {{ success: boolean, content?: object }}
+ */
+ipcMain.handle('cache:getStats', () => {
+  try {
+    return { success: true, content: scanCache.getStats() };
+  } catch (err) {
+    console.error('[IPC] cache:getStats error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Handler: Clear all scan cache entries and synchronously flush to disk.
+ * @returns {{ success: boolean }}
+ */
+ipcMain.handle('cache:clear', () => {
+  try {
+    scanCache.clearAll();
+    return { success: true };
+  } catch (err) {
+    console.error('[IPC] cache:clear error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// ============================================
+// IPC HANDLER - DEPENDENCY PATH (Dep Path Modal)
+// ============================================
+
+/**
+ * Handler: Retrieve dependency paths from root to a target package.
+ * Used by the Dependency Path Modal in the renderer.
+ *
+ * @param {string} projectPath - Absolute path to the project directory
+ * @param {string} packageName - Name of the vulnerable package
+ * @returns {Promise<{ success: boolean, content?: string[][], error?: string }>}
+ */
+ipcMain.handle('get-dependency-paths', async (_event, projectPath, packageName) => {
+  try {
+    if (
+      !projectPath ||
+      typeof projectPath !== 'string' ||
+      !packageName ||
+      typeof packageName !== 'string'
+    ) {
+      return { success: false, error: 'Missing or invalid projectPath/packageName' };
+    }
+    const sanitized = sanitizePath(projectPath);
+    const { buildDependencyPaths } = require('./modules/scanner/package-universe-builder');
+    const paths = await buildDependencyPaths(sanitized, packageName);
+    return { success: true, content: paths };
+  } catch (err) {
+    console.error('[IPC] get-dependency-paths error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
   // Pre-warm the secure store now that app.getPath('userData') is available.
@@ -1164,6 +1757,15 @@ app.whenReady().then(() => {
   // guarantees _getInstance() binds to the correct Electron userData path rather
   // than the ~/.vsweep-store fallback that would be used if called before app.ready.
   storeGet('_init'); // triggers lazy initialization while app is ready
+
+  // Pre-load the persistent scan cache now that app.getPath('userData') is available.
+  // This warms all 4 per-source Maps before the first scanProject() call so the
+  // first scan is never slower than subsequent ones.
+  try {
+    scanCache.load();
+  } catch (err) {
+    console.warn('[main] scan cache pre-load failed (non-fatal):', err.message);
+  }
 
   // analytics.init() is called at module top-level (before app.whenReady()) — see top of file.
   analytics.trackEvent('app_initialized');
@@ -1245,6 +1847,27 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  // Deferred integrity re-check (defense-in-depth)
+  setTimeout(
+    () => {
+      _verifyAsarIntegrity();
+    },
+    30000 + Math.random() * 15000
+  );
+});
+
+// Quit when all windows are closed, except on macOS
+// Flush the scan cache before the process exits so any pending debounced writes
+// are committed to disk. flushAndClose() cancels all timers and calls the
+// synchronous writeFileSync path, completing before the process shuts down.
+app.on('before-quit', () => {
+  try {
+    scanCache.flushAndClose();
+  } catch (err) {
+    console.warn('[main] scan cache flush on quit failed (non-fatal):', err.message);
+  }
+  analytics.trackEvent('app_closed');
 });
 
 // Quit when all windows are closed, except on macOS
@@ -1253,3 +1876,11 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+
+// Periodic integrity heartbeat — random interval to defeat pattern analysis
+setInterval(
+  () => {
+    _verifyAsarIntegrity();
+  },
+  300000 + Math.random() * 120000
+);

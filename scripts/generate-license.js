@@ -2,7 +2,7 @@
 // Developer License Generator - Windows-only developer utility.
 // Writes a valid device-bound license into the encrypted store.
 // Store : %APPDATA%\VulnSweep\store.dat
-// Marker: %USERPROFILE%\AppData\Local\Microsoft\OneDrive\logs\.vsweep
+// Marker: %APPDATA%\VulnSweep\.vsweep
 // Usage : node scripts/generate-license.js
 
 'use strict';
@@ -67,16 +67,10 @@ try {
 const STORE_DIR = path.join(process.env.APPDATA, 'VulnSweep');
 const STORE_FILE = path.join(STORE_DIR, 'store.dat');
 
-// Vsweep marker file path (exact Windows path from license.js)
-const VSWEEP_FILE = path.join(
-  os.homedir(),
-  'AppData',
-  'Local',
-  'Microsoft',
-  'OneDrive',
-  'logs',
-  '.vsweep'
-);
+// Vsweep marker file path — mirrors getVsweepFilePath() in license.js.
+// In Electron, app.getPath('userData') resolves to %APPDATA%\VulnSweep on Windows,
+// which is identical to STORE_DIR.  The marker therefore lives in the same directory.
+const VSWEEP_FILE = path.join(STORE_DIR, '.vsweep');
 
 // Encryption secret - replicates _deriveEncryptionSecret() from secure-store.js
 function deriveEncryptionSecret() {
