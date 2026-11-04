@@ -661,6 +661,21 @@ describe('audit module', () => {
       expect(strategy.type).toBe('UPDATE_DIRECT');
       expect(strategy.riskLevel).toBe('HIGH');
     });
+
+    it('Scenario C: falls through to patchedVersion when determineSafeVersion returns null', async () => {
+      const vuln = {
+        package: 'some-transient',
+        isDirect: false,
+        fixAvailable: true,
+        installedVersion: '1.5.0',
+        vulnerableRange: '>=1.0.0', // triggers null from determineSafeVersion (all versions vulnerable pattern)
+        patchedVersion: '2.0.0', // provided by advisory sources
+      };
+      const auditData = { vulnerabilities: { 'some-transient': { range: '>=1.0.0' } } };
+      const strategy = await audit.determineFixStrategy(vuln, auditData);
+      expect(strategy.type).toBe('ADD_OVERRIDE');
+      expect(strategy.targetVersion).toBe('2.0.0');
+    });
   });
 
   describe('generatePackageJsonChanges', () => {

@@ -238,9 +238,9 @@ async function determineFixStrategy(vulnerability, auditData) {
     );
     if (safeVersion) {
       targetVersion = safeVersion;
-    } else {
-      // No safe version could be determined (e.g., all versions vulnerable with >=X.Y.Z pattern)
-      // Or the only safe version would be a downgrade
+    } else if (!targetVersion) {
+      // No safe version could be determined AND no patchedVersion was provided upstream.
+      // Only return NO_FIX when we truly have no version to target.
       return {
         type: 'NO_FIX',
         package: pkgName,
@@ -251,6 +251,8 @@ async function determineFixStrategy(vulnerability, auditData) {
           'No safe version available (all versions may be vulnerable or would require downgrade)',
       };
     }
+    // If determineSafeVersion returned null but targetVersion (from patchedVersion) is already
+    // set, fall through — the patchedVersion is a valid fix target from upstream sources.
   }
 
   if (!targetVersion) {

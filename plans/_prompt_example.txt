@@ -1,0 +1,88 @@
+# Problem Definition
+
+This tool is a vulnerability scanner that fetches cve information from several sources. 
+We have made developments to version 1.1 where we moved from a 2 phased sequential pipeline to a new pipeline is a **three-phase, parallel, ungated** design. See plans/sprint-3-modular-scanner-architecture.md for the refactor details.
+
+In this update scanning is terribly slow even tough we are using cache at many levels, we need you and your team to investigate and implemet the following requirements
+
+## Scanning Choices
+
+Currently there is a setting in config regarding scan that uses full or fast , lets make that an option.
+Lets add a tab , left of the 'about' called settings.
+In there a panel called shources should have all sources (all selected by default) but that the user can select.
+
+The settings should be saved in the local database.
+
+
+## Sources Credentials
+
+Some sources are faster and have less rate limits if they are authenticated, for example github advisory can be authenticated by a apikey. Maybe other sources will do as well.
+
+So add the possibility of having a credentials panel where the user can add an apiKey or token or watever required by source. The credentials should be saved in the internal encrypted database and never allow the user to see after added. Can be deleted , chanaged but not edited in plain text for security purposes.
+
+## github advisory retries
+
+github advisery has rate limits, specially if unauthenticated, however it seems we are reaching the limit very fast. We are currently doing requests one per package and hitting the rate limit and always failing.
+
+Ex:
+
+[1] [github] Rate limited (403), retry 1/3 after 11911.318216745005ms
+[1] [github] Rate limited (403), retry 3/3 after 8081.974868744696ms
+[1] [github] Rate limited (403), retry 2/3 after 13031.156478264536ms
+[1] [github] Rate limit exceeded after 3 retries for CVE-2026-41673
+[1] [github] Rate limited (403), retry 1/3 after 7484.940611362425ms
+[1] [github] Rate limited (403), retry 2/3 after 5429.303290215207ms
+[1] [github] Rate limited (403), retry 3/3 after 10012.672035971633ms
+[1] [github] Rate limited (403), retry 1/3 after 2710.4564027492465ms
+[1] [github] Rate limited (403), retry 1/3 after 3698.788845908308ms
+[1] [github] Rate limited (403), retry 3/3 after 14781.104000773626ms
+[1] [github] Rate limited (403), retry 2/3 after 6827.697417080517ms
+[1] [github] Rate limited (403), retry 2/3 after 7337.914582484009ms
+[1] [github] Rate limit exceeded after 3 retries for CVE-2026-29786
+[1] [github] Rate limited (403), retry 1/3 after 3291.842665023022ms
+[1] [github] Rate limited (403), retry 3/3 after 16556.39122682168ms
+[1] [github] Rate limited (403), retry 3/3 after 17179.333695703972ms
+[1] [github] Rate limited (403), retry 2/3 after 5689.762150355262ms
+[1] [github] Rate limit exceeded after 3 retries for CVE-2026-41674
+[1] [github] Rate limited (403), retry 1/3 after 3512.806892972346ms
+[1] [github] Rate limited (403), retry 3/3 after 11583.645668232624ms
+[1] [github] Rate limited (403), retry 2/3 after 12368.722937328692ms
+
+This means they will never get to cache and as such will always take forever. every time it runs. Investage ways of improving these requests and increase the retry to 100. 
+This should maybe be a singleton, If we hit the rate limit we need to have all possible requests in parallel to wait.
+
+## Cancel scan
+
+Ok, so I started the scan on 100 repositories in full and its taking forever , I want to cancel. when scanning the 'Scan & Audit' should become "Cancel" and when pressed cancel all process and clear everything.
+
+
+# Team composition
+
+Team Lead: Code Pathologist
+Coder: Javascript Expert
+Code Reviewer: Code Pathologist
+Project success signoff manager: Code Pathologist
+Ask: To get information from what exists
+Debug: Expert on debugging
+
+
+# Workflow recommendation
+
+0) you orchestrator keep track of progress
+1) Ask should collect the information
+2) the code pathologist, having understood the problem and current implementation should instruct the developers on what to do
+3) Javascript expert should develop the changes
+4) Code Pathologist should make a strict code review, we believe in tough love so unless code is a professional elite A rate class it should loop and iterate with step 3 until it is flawless A or A+ rate. Do not sugar coat, be brutally honest but constructive.
+5) Code pathologist should give his signoff the implementation, application should be tested, having 0 eslint problems , builds sucessfully and is ready for commits
+6) you (orchestrator) update task progress
+
+
+# Important constraints to explain to all the team
+
+- If necessary to use temporary scripts use the tmp folder,make sure changes are tested , review and that functionality is implemented as required and ready to commit without eslint errors
+- We are in windows, so do not use linux commands like tail or grep, use powershell for advanced bash scripts
+- Your team will have trouble handing larger code files specially to write, so if they want to write large files , separate in small files in tmp folder and then concat to main folder. 
+
+# Goal
+
+Coordinate the team to the resolution of all the requirements, this interaction will only finish when implementation is performed correctly.

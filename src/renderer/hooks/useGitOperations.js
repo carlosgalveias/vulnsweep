@@ -1,3 +1,4 @@
+import { OP_COMMIT_AND_PUSH } from '@shared/renderer-api-opcodes.js';
 import { useState, useCallback } from 'react';
 import { DEFAULT_COMMIT_MESSAGE } from '../constants.js';
 
@@ -5,15 +6,10 @@ import { DEFAULT_COMMIT_MESSAGE } from '../constants.js';
  * Custom hook for managing git operations (commit and push)
  * @param {Function} addLog - Function to add log entries
  * @param {React.MutableRefObject} vulnerabilitiesRef - Ref to vulnerabilities array
- * @param {React.MutableRefObject} projectsRef - Ref to projects array
+ * @param {Function} onRepoCommitted - Optional callback when a repo is committed
  * @returns {Object} Git operations state and methods
  */
-export default function useGitOperations(
-  addLog,
-  vulnerabilitiesRef,
-  projectsRef,
-  onRepoCommitted = null
-) {
+export default function useGitOperations(addLog, vulnerabilitiesRef, onRepoCommitted = null) {
   const [isCommitting, setIsCommitting] = useState(false);
   const [allowReset, setAllowReset] = useState(true);
 
@@ -39,14 +35,12 @@ export default function useGitOperations(
     setIsCommitting(true);
     addLog('info', 'Starting commit and push operations...');
 
-    // Get current vulnerabilities and projects from refs
+    // Get current vulnerabilities from ref
     const vulnerabilities = vulnerabilitiesRef.current;
-    const projects = projectsRef.current;
 
     // Get unique projects that have resolved vulnerabilities
-    const projectsToCommit = new Set(
-      vulnerabilities.filter((v) => v.status === 'resolved').map((v) => v.projectPath)
-    );
+    const resolvedVulns = vulnerabilities.filter((v) => v.status === 'resolved');
+    const projectsToCommit = new Set(resolvedVulns.map((v) => v.projectPath));
 
     if (projectsToCommit.size === 0) {
       addLog('warning', 'No resolved vulnerabilities to commit');
@@ -54,23 +48,32 @@ export default function useGitOperations(
       return;
     }
 
+    const projects = vulnerabilitiesRef.current.reduce((acc, v) => {
+      if (!acc.some((p) => p.path === v.projectPath)) {
+        acc.push({ path: v.projectPath, name: v.projectName });
+      }
+      return acc;
+    }, []);
+
+    // Track successfully committed vulnerability IDs for removal
+    const committedVulnIds = [];
+
     for (const projectPath of projectsToCommit) {
       const projectName = projects.find((p) => p.path === projectPath)?.name || 'Unknown';
 
       try {
         // Get all resolved vulnerabilities for this project
-        const projectVulnerabilities = vulnerabilities.filter(
-          (v) => v.status === 'resolved' && v.projectPath === projectPath
-        );
+        const projectVulnerabilities = resolvedVulns.filter((v) => v.projectPath === projectPath);
 
         // Commit and push changes with vulnerability data
         addLog('info', `Committing and pushing ${projectName}...`);
-        const pushResult = await window.electronAPI.commitAndPush(projectPath, {
+        const pushResult = await window.electronAPI.invoke(OP_COMMIT_AND_PUSH, projectPath, {
           message: DEFAULT_COMMIT_MESSAGE,
           vulnerabilities: projectVulnerabilities,
         });
 
         if (pushResult.success) {
+          committedVulnIds.push(...projectVulnerabilities.map((v) => v.id));
           addLog('success', `Successfully committed and pushed ${projectName}`);
           // Clear dirty state for this repo now that changes are committed.
           if (typeof onRepoCommitted === 'function') {
@@ -87,7 +90,10 @@ export default function useGitOperations(
 
     setIsCommitting(false);
     addLog('success', 'Commit and push operations complete');
-  }, [addLog, vulnerabilitiesRef, projectsRef, onRepoCommitted]);
+
+    // Return committed IDs so caller can remove them from state
+    return committedVulnIds;
+  }, [addLog, vulnerabilitiesRef, onRepoCommitted]);
 
   /**
    * Commit and push changes

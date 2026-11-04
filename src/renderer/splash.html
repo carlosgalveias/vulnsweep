@@ -96,8 +96,8 @@
 
     <script>
       // Receive version data asynchronously from the main process via IPC
-      if (window.splashAPI && window.splashAPI.onData) {
-        window.splashAPI.onData((data) => {
+      if (window.splashAPI && window.splashAPI.on) {
+        window.splashAPI.on(0xf0, (data) => {
           const versionElement = document.getElementById('version');
           if (versionElement && data && data.version) {
             versionElement.textContent = `v${data.version}`;

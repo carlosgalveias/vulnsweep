@@ -1,4 +1,4 @@
-# VulnSweep Architecture Documentation
+﻿# VulnSweep Architecture Documentation
 
 This document provides a detailed technical overview of VulnSweep's architecture, design patterns, and implementation details.
 
@@ -17,7 +17,8 @@ This document provides a detailed technical overview of VulnSweep's architecture
 11. [Cross-Platform Storage](#cross-platform-storage)
 12. [License and Date Control Files](#license-and-date-control-files)
 13. [Build System and Packaging](#build-system-and-packaging)
-14. [Sprint 2 — Analytics, Yearly Licensing, About Tab, License Backup/Restore](#sprint-2--analytics-yearly-licensing-about-tab-license-backuprestore)
+14. [Sprint 2 â€” Analytics, Yearly Licensing, About Tab, License Backup/Restore](#sprint-2--analytics-yearly-licensing-about-tab-license-backuprestore)
+15. [Sprint 3 -- Modular Vulnerability Scanner Architecture](#sprint-3--modular-vulnerability-scanner-architecture)
 
 ## High-Level Architecture
 
@@ -45,10 +46,10 @@ VulnSweep follows Electron's multi-process architecture:
 
 ### Frontend (Renderer Process)
 
-- **React 18.2** — UI library with hooks-based architecture
-- **Vite 5.0** — Build tool and development server
-- **Tailwind CSS 3.4** — Utility-first CSS framework with custom compact utilities (v1.4.0+)
-- **PostCSS** — CSS processing
+- **React 18.2** â€” UI library with hooks-based architecture
+- **Vite 5.0** â€” Build tool and development server
+- **Tailwind CSS 3.4** â€” Utility-first CSS framework with custom compact utilities (v1.4.0+)
+- **PostCSS** â€” CSS processing
 
 **UI Design System (v1.4.0+)**:
 
@@ -59,20 +60,20 @@ VulnSweep follows Electron's multi-process architecture:
 
 ### Backend (Main Process)
 
-- **Electron 41.3** — Desktop application framework
-- **Node.js** — JavaScript runtime
-- **child_process** — CLI command execution
-- **semver 7.6** — Semantic versioning library
-- **secure-ls** — AES-encrypted file-backed key-value store (added in cross-platform migration)
-- **sludge-crypt** — Asymmetric encryption for license payload binding
-- **systeminformation** — Device identity for license anchoring
+- **Electron 41.3** â€” Desktop application framework
+- **Node.js** â€” JavaScript runtime
+- **child_process** â€” CLI command execution
+- **semver 7.6** â€” Semantic versioning library
+- **secure-ls** â€” AES-encrypted file-backed key-value store (added in cross-platform migration)
+- **sludge-crypt** â€” Asymmetric encryption for license payload binding
+- **systeminformation** â€” Device identity for license anchoring
 
 ### Development
 
-- **Concurrently** — Run multiple processes
-- **wait-on** — Wait for resources before proceeding
-- **cross-env** — Cross-platform environment variables
-- **electron-builder** — Multi-platform packaging (Windows, macOS, Linux)
+- **Concurrently** â€” Run multiple processes
+- **wait-on** â€” Wait for resources before proceeding
+- **cross-env** â€” Cross-platform environment variables
+- **electron-builder** â€” Multi-platform packaging (Windows, macOS, Linux)
 
 ## Application Layers
 
@@ -146,9 +147,9 @@ Located in `src/main/`, this layer handles all system operations and business lo
 
 **Key Functions**:
 
-- `discoverProjects(basePath)` — Main entry point, returns Result object
-- `isNodeProject(dir)` — Checks for package.json
-- `getProjectName(packageJson)` — Extracts project name
+- `discoverProjects(basePath)` â€” Main entry point, returns Result object
+- `isNodeProject(dir)` â€” Checks for package.json
+- `getProjectName(packageJson)` â€” Extracts project name
 
 ### git.js
 
@@ -258,7 +259,7 @@ A pre-warm call (storeGet('\_init')) is issued inside app.whenReady() in src/mai
 | storeRemove(key)     | Deletes the entry for key                            |
 | storeGetAll()        | Returns all stored key-value pairs as a plain object |
 
-**Initialisation Guard**: \_initFailed = true is set ONLY on MODULE_NOT_FOUND (permanent — secure-ls not installed). All other errors leave \_lsInstance = null so subsequent calls can retry.
+**Initialisation Guard**: \_initFailed = true is set ONLY on MODULE_NOT_FOUND (permanent â€” secure-ls not installed). All other errors leave \_lsInstance = null so subsequent calls can retry.
 
 **Directory Resolution Logic**:
 
@@ -280,7 +281,7 @@ A pre-warm call (storeGet('\_init')) is issued inside app.whenReady() in src/mai
 
 ## License and Date Control Files
 
-> Cross-platform .vsweep marker file — updated in Phase 2.
+> Cross-platform .vsweep marker file â€” updated in Phase 2.
 
 ### Purpose
 
@@ -300,7 +301,7 @@ If the marker file is deleted, the license can be restored from a `.vsbak` backu
 
 ### Implementation Notes
 
-- getVsweepFilePath() is a **pure function** — no filesystem I/O
+- getVsweepFilePath() is a **pure function** â€” no filesystem I/O
 - ensureVsweepDir(filePath) is a **separate function** called only from write paths (activateLicense, generateLicense)
 - checkLicense() calls getVsweepFilePath() and reads the file, but never calls ensureVsweepDir()
 - This separation ensures read-only callers never trigger unnecessary filesystem side effects
@@ -495,3 +496,214 @@ The `get-commercial-status` IPC handler surfaces `{ isLicensed, isExpired, daysR
 
 1. Opens `dialog.showOpenDialog` to select a `.vsbak` file
 2. Reads the binary file
+
+---
+
+## Sprint 3 -- Modular Vulnerability Scanner Architecture
+
+> Added in Sprint 3 (unreleased).
+
+### Overview
+
+Sprint 3 replaces the two-phase `analyze-project` + `enrich-vulnerabilities` IPC pattern with a single `scan-project` call backed by a modular, plugin-based scanner. The new pipeline builds a complete package universe from `package-lock.json`, then queries all five vulnerability intelligence sources in parallel for every installed package -- eliminating the npm gate that previously restricted enrichment to npm-audit-flagged packages only.
+
+**Before Sprint 3 (two-phase gated model):**
+
+- IPC `analyze-project` -- ran npm audit only -- returned vulnerability list
+- IPC `enrich-vulnerabilities` -- ran OSV / NVD / GitHub Advisory enrichment on npm-flagged packages only
+
+npm audit acted as a gatekeeper: packages absent from npm's advisory database were never queried against OSV, NVD, or GitHub Advisory.
+
+**After Sprint 3 (single-call parallel model):**
+
+- IPC `scan-project` -- builds complete package universe from `package-lock.json`, runs all five source plugins in parallel, aggregates results -- returns complete `ScanResult` in one call
+
+---
+
+### New Directory: src/main/modules/scanner/
+
+    src/main/modules/scanner/
+    +-- scanner-orchestrator.js          # Top-level orchestrator; coordinates the full pipeline
+    +-- package-universe-builder.js      # Reads package-lock.json; builds complete package inventory
+    +-- result-aggregator.js             # Merges SourceResult[] into UnifiedVulnerability[]; CVE dedup
+    +-- sources/
+        +-- npm-audit-source.js          # Plugin: wraps runNpmAudit(); memoized per projectPath
+        +-- osv-source.js                # Plugin: per-package OSV batch API query
+        +-- nvd-source.js                # Plugin: CVE ID -> NVD CVSS enrichment (OSV-first discovery)
+        +-- github-advisory-source.js    # Plugin: CVE/GHSA ID -> GitHub Advisory details
+        +-- cisa-kev-source.js           # Plugin: CISA KEV catalog + EPSS score lookup
+
+---
+
+### Package Universe Builder
+
+**File:** `src/main/modules/scanner/package-universe-builder.js`
+
+**Purpose:** Read `package-lock.json` (and root `package.json` for direct-dep detection) once and produce a flat `PackageDescriptor[]` covering every installed package -- direct and transitive. This executes before any source plugin is invoked and is the single source of truth for which packages exist in the project.
+
+**Lockfile version support:**
+
+| npm version | lockfileVersion | Strategy                                                                   |
+| ----------- | --------------- | -------------------------------------------------------------------------- |
+| <= 6        | 1               | Recursive DFS over `dependencies` map                                      |
+| 7-8         | 2               | Prefer `packages` map (canonical); `dependencies` kept for backward compat |
+| >= 9        | 3               | `packages` map only                                                        |
+
+**Exported API:**
+
+| Function                            | Returns                        | Description                                   |
+| ----------------------------------- | ------------------------------ | --------------------------------------------- |
+| `buildPackageUniverse(projectPath)` | `Promise<PackageDescriptor[]>` | All installed packages with metadata          |
+| `getUniqueQueryTargets(universe)`   | `Array of {name, version}`     | Deduped name+version pairs for source queries |
+
+**The npm-gate elimination:** Previously only npm-audit-flagged packages were passed to OSV/NVD/GitHub Advisory. Now ALL packages from the lockfile are queried against all enabled sources, providing complete vulnerability coverage regardless of npm's advisory database.
+
+---
+
+### Source Plugin Contract
+
+Each file in `sources/` exports an object conforming to:
+
+    {
+      SOURCE_ID: string,  // 'npm-audit' | 'osv' | 'nvd' | 'github-advisory' | 'cisa-kev'
+      query(pkg: PackageDescriptor): Promise<SourceResult[]>
+    }
+
+**Contract rules:**
+
+- `query()` must never reject -- all errors are caught internally; failures return `[]`
+- Returns `[]` when no vulnerabilities are found for the package
+- Each plugin self-cancels within `ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS` (15 000 ms)
+- Plugins are stateless per-call; internal caching is the plugin's own concern
+
+**Special handling -- npm-audit-source:** `npm audit --json` is memoized per `projectPath` and executes exactly once per project regardless of how many packages are in the universe. During the per-package query loop it performs only an in-memory map lookup -- zero additional I/O.
+
+**Adding a new source plugin:** Create `sources/my-source.js`, export `{ SOURCE_ID, query }`, and add it to the `SOURCES` array in `scanner-orchestrator.js`. No other files require modification.
+
+---
+
+### GitHub Advisory Source — Authentication and Rate-Limit Handling
+
+**File:** `src/main/modules/scanner/sources/github-advisory-source.js`
+
+#### GITHUB_TOKEN Environment Variable
+
+The GitHub Advisory source supports optional authenticated API access via the `GITHUB_TOKEN` environment variable. When set, the token is passed as a `Bearer` authorization header on all requests to the GitHub Advisory REST API.
+
+| Configuration          | Behaviour                                                                 |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `GITHUB_TOKEN` not set | Unauthenticated requests — GitHub rate limit: **60 requests / hour / IP** |
+| `GITHUB_TOKEN` set     | Authenticated requests — GitHub rate limit: **5,000 requests / hour**     |
+
+When authenticated access is active, the source logs:
+
+```
+[GitHubAdvisory] Using authenticated API access (GITHUB_TOKEN set)
+```
+
+No scopes are required on the token. A token generated with zero scopes (read-only public data) is sufficient for advisory lookups.
+
+#### GIT_CONFIG Retry Constants
+
+The retry and backoff behaviour for GitHub Advisory requests is governed by constants defined in the `GIT_CONFIG` block in [`src/main/config/constants.js`](src/main/config/constants.js):
+
+| Constant                     | Value   | Description                                                                             |
+| ---------------------------- | ------- | --------------------------------------------------------------------------------------- |
+| `GITHUB_MAX_RETRIES`         | `3`     | Maximum number of retry attempts on HTTP 429 / 403 rate-limit responses                 |
+| `GITHUB_RETRY_BASE_DELAY_MS` | `2000`  | Base delay in milliseconds for exponential backoff (doubles on each retry)              |
+| `GITHUB_RETRY_MAX_DELAY_MS`  | `60000` | Maximum backoff cap in milliseconds — delays are clamped to this ceiling                |
+| `GITHUB_RETRY_JITTER_MS`     | `1000`  | Maximum random jitter added to each computed delay to prevent thundering-herd behaviour |
+
+#### Retry and Backoff Algorithm
+
+When the GitHub Advisory API returns an HTTP 429 or HTTP 403 response:
+
+1. **`Retry-After` header present:** VulnSweep reads the header value (seconds) and waits exactly that duration before retrying.
+2. **`Retry-After` header absent:** VulnSweep computes the backoff delay via `computeBackoffDelay(attempt)`:
+   - `delay = min(GITHUB_RETRY_BASE_DELAY_MS × 2^attempt, GITHUB_RETRY_MAX_DELAY_MS)`
+   - `jitter = random value in [0, GITHUB_RETRY_JITTER_MS)`
+   - `finalDelay = delay + jitter`
+3. After `GITHUB_MAX_RETRIES` exhausted: the advisory record is marked `rate_limit_exceeded` and the scan continues — no crash, no data loss for other sources.
+
+This strategy ensures VulnSweep is a well-behaved API consumer that respects GitHub's rate-limiting signals and never contributes to thundering-herd amplification.
+
+---
+
+### Scanner Orchestrator
+
+**File:** `src/main/modules/scanner/scanner-orchestrator.js`
+
+**Purpose:** Top-level coordinator. Invokes `buildPackageUniverse()`, then for each unique `{name, version}` pair runs all enabled source plugins via `Promise.allSettled()`, passes the collected `SourceResult[]` to the result aggregator, and emits `scan-progress` events to the renderer.
+
+**Batched execution:** Packages are processed in batches of `SCANNER_CONFIG.MAX_CONCURRENT_PACKAGES` (default: 10). A `SCANNER_CONFIG.BATCH_PAUSE_MS` gap (default: 100 ms) between batches prevents thundering-herd effects against external APIs.
+
+**Exported function:** `scanProject(projectPath, progressCallback)` returns `Promise<ScanResult>`.
+
+---
+
+### Result Aggregator
+
+**File:** `src/main/modules/scanner/result-aggregator.js`
+
+**Purpose:** Receive all `SourceResult[]` from all plugins for a given package and merge them into `UnifiedVulnerability[]` -- one record per distinct vulnerability.
+
+**Deduplication (Union-Find algorithm):** Two `SourceResult` objects represent the same vulnerability if they share at least one CVE ID. A Union-Find algorithm links result groups transitively. When no CVE ID is present, a composite fallback key of `normalised(title) + packageName + packageVersion` is used.
+
+**Severity conflict resolution priority:**
+
+1. NVD CVSS v3 score (authoritative numeric source) -- mapped via `cvssScoreToCategory()`
+2. GitHub Advisory severity (ecosystem-specific, generally reliable)
+3. OSV severity (broad ecosystem, less precise)
+4. npm audit severity (npm-specific, may under-report)
+
+When sources disagree by more than one tier, `severityDiscrepancy: true` is set and a `discrepancyDetails` string is populated -- reusing the existing `mergeSeverity()` function from `severity-merger.js`.
+
+---
+
+### IPC Channel Changes (Sprint 3)
+
+| Old Channel              | New Channel     | Action                                                                           |
+| ------------------------ | --------------- | -------------------------------------------------------------------------------- |
+| `analyze-project`        | `scan-project`  | Replaced -- calls `scanProject()` in orchestrator; returns complete `ScanResult` |
+| `analyze-projects`       | `scan-projects` | Replaced -- batch wrapper for `scan-project`                                     |
+| `enrich-vulnerabilities` | (removed)       | Deleted -- enrichment is now integrated into the scan pipeline                   |
+| Old Channel              | New Channel     | Action                                                                           |
+| -----------              | -----------     | ------                                                                           |
+| analyze-project          | scan-project    | Replaced -- calls scanProject() in orchestrator; returns complete ScanResult     |
+| analyze-projects         | scan-projects   | Replaced -- batch wrapper for scan-project                                       |
+| enrich-vulnerabilities   | (removed)       | Deleted -- enrichment is now integrated into the scan pipeline                   |
+
+**New progress event:** scan-progress (main to renderer) -- emitted per package with phase, packageName, current, total, projectPath, partialResult fields. Enables streaming display of results as they arrive.
+
+---
+
+### SCANNER_CONFIG Constants
+
+Defined in `src/main/config/constants.js` under the `SCANNER_CONFIG` block:
+
+| Constant                  | Default       | Description                                                                  |
+| ------------------------- | ------------- | ---------------------------------------------------------------------------- |
+| `ENABLED_SOURCES`         | all 5 sources | Array of active source IDs; remove an ID to disable a source at config level |
+| `MAX_CONCURRENT_PACKAGES` | 10            | Packages queried in parallel per batch                                       |
+| `PER_PACKAGE_TIMEOUT_MS`  | 30000         | Total timeout per package across all sources                                 |
+| `BATCH_PAUSE_MS`          | 100           | Pause between package batches (ms)                                           |
+
+Scan modes are controlled by setting `ENABLED_SOURCES`: `["npm-audit", "osv"]` for fast mode; all five for full mode.
+
+---
+
+### Renderer Changes (Sprint 3)
+
+| File                                                | Change                                                                 |
+| --------------------------------------------------- | ---------------------------------------------------------------------- |
+| `src/renderer/hooks/useVulnerabilityScanner.js`     | Migrated to `scanProjects` IPC + `onScanProgress` event listener       |
+| `src/renderer/App.jsx`                              | Removed `isEnriching` state and enrichment `useEffect`                 |
+| `src/renderer/components/VulnerabilityGrid.jsx`     | Removed dead `isEnriching` and `enrichmentProgress` props              |
+| `src/main/modules/enrichment/sources/osv-source.js` | Added `fetchOsvRaw()`, `extractFixedIn()` with npm ecosystem filtering |
+
+---
+
+### Deprecated (Sprint 3)
+
+- `enrich-vulnerabilities` IPC channel -- removed; callers must use `scan-project`
+- `src/main/modules/enrichment/cve-enricher.js` -- deprecated; preserved until Sprint 4; do not add new callers

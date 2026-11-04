@@ -3,7 +3,7 @@
 **Application:** VulnSweep
 **Author / Publisher:** Carlos Galveias
 **Effective Date:** May 2025
-**Last Reviewed:** May 2026
+**Last Reviewed:** June 2026
 **Governing Law:** Portugal / European Union
 **Support Channel:** https://github.com/carlosgalveias/vulnsweep-releases/issues
 
@@ -17,7 +17,7 @@ BY DOWNLOADING, INSTALLING, COPYING, OR USING VULNSWEEP IN ANY WAY, YOU ACKNOWLE
 
 ## Plain-Language Summary
 
-> **In plain English:** VulnSweep is a powerful automation tool. Used correctly, it saves you hours. Used carelessly, it can modify files, alter dependency trees, and push commits to remote repositories — automatically. These actions can break your software. **You are fully responsible for what happens to your codebase.** Always back up your work. Always test before pushing to production. Carlos Galveias accepts no liability for any damage caused by use of this tool. Purchasing a license does not entitle you to support of any kind.
+> **In plain English:** VulnSweep is a powerful automation tool. Used correctly, it saves you hours. Used carelessly, it can modify files, alter dependency trees, and push commits to remote repositories — automatically. These actions can break your software. **You are fully responsible for what happens to your codebase.** Always back up your work. Always test before pushing to production. Carlos Galveias accepts no liability for any damage caused by use of this tool. Purchasing a license does not entitle you to support of any kind. Automated fix operations are intentionally disabled in headless/CI/CD environments for safety — circumventing this restriction is at your own risk and violates the license agreement.
 
 ---
 
@@ -150,7 +150,91 @@ By enabling the Git push feature, **you explicitly accept full and sole responsi
 
 ---
 
-## 8. Limitation of Liability
+## 8. Automated Fix Limitations — No Warranty for Code Modifications
+
+**VulnSweep's automated fix functionality ("Fix-and-Commit") modifies your source code, dependency manifests, lock files, and Git repository state. These modifications are performed algorithmically and without human judgment.**
+
+Carlos Galveias and VulnSweep make **no warranty or representation** that:
+
+- Any automated fix will resolve the targeted vulnerability completely or correctly
+- Any automated fix will not introduce new vulnerabilities, regressions, or breaking changes
+- The version selected by the fix algorithm is compatible with your specific codebase, runtime, or deployment environment
+- Automated Git commits and pushes will not trigger unintended downstream effects in your CI/CD pipelines, deployment systems, or team workflows
+- The fix strategy chosen (UPDATE_DIRECT, UPDATE_PARENT, ADD_OVERRIDE) is optimal or safe for your particular dependency graph
+
+**You, the user, are solely and entirely responsible for:**
+
+1. **Reviewing all automated changes** before merging or deploying to any environment beyond your local machine
+2. **Testing your application** after any automated fix to confirm functionality, compatibility, and security
+3. **Validating Git history** and ensuring that automated commits are acceptable to your team, compliance requirements, and deployment workflow
+4. **Reverting changes** if automated fixes introduce problems — VulnSweep does not provide automated rollback capability
+
+**The free tier includes a limited number of automated fix operations per device** (see [LICENSE.md](LICENSE.md) Section 3.2 and the project [README.md](README.md) for the specific quota applicable to your version). Exhaustion of this quota does not entitle you to any refund, credit, or extension.
+
+---
+
+## 9. Headless / CI/CD Environment Restrictions — Intentional Design
+
+**VulnSweep intentionally restricts automated code modification (autofix, commit, and push) in headless, ephemeral, and CI/CD environments. This restriction is enforced technically and represents a deliberate safety decision, not a deficiency or bug.**
+
+### 9.1 What Is Restricted
+
+The following operations are **completely and unconditionally disabled** when VulnSweep detects a headless or CI/CD environment:
+
+- Automated dependency fix application
+- Git staging of modified files
+- Git commit creation
+- Git push to remote repositories
+- Version bumping operations
+- Any operation that writes to source code or repository state in an unattended context
+
+### 9.2 What Remains Fully Operational
+
+The following operations are **unrestricted and free** in all environments, including headless and CI/CD:
+
+- Vulnerability scanning (unlimited)
+- 6-source CVE enrichment (NVD, OSV, GitHub Advisory, npm-audit, CISA KEV, EPSS)
+- SBOM generation (CycloneDX v1.6, SPDX v2.3)
+- HTML and JSON report generation
+- License compliance scanning
+- Threshold-based exit codes for pipeline gating
+- All read-only analysis and reporting functions
+
+### 9.3 Rationale for Restriction
+
+This restriction exists because automated code changes in unattended environments:
+
+- **Bypass human review**, removing the critical safety gate between automated changes and production
+- **Create supply-chain attack surface** — any system that modifies and pushes code in a headless environment is a high-value target for malicious actors
+- **Violate compliance requirements** — regulatory frameworks (including ISO 27001, SOC 2, and EU NIS2) require human-in-the-loop approval for code modifications in controlled environments
+- **Break determinism** — CI/CD pipelines should observe and validate code state, not mutate it
+
+### 9.4 User Responsibility for Circumvention Attempts
+
+**If you attempt to circumvent, disable, or bypass VulnSweep's headless environment detection:**
+
+- You do so **entirely at your own risk** and accept full, sole, and unlimited liability for any consequences
+- You are in **material breach of the License Agreement** (see [LICENSE.md](LICENSE.md) Sections 3.4 and 6.3), which results in immediate and automatic termination of your license
+- Carlos Galveias and VulnSweep bear **zero responsibility** for any damage, data loss, security incident, compliance violation, or service disruption resulting from code changes performed in circumvention of the headless detection mechanism
+- You **indemnify Carlos Galveias** against any third-party claims arising from code changes made in headless environments through circumvention of VulnSweep's safeguards
+
+**The headless restriction is your protection.** It exists to prevent automated, unreviewed code changes from reaching production systems. Circumventing it removes a safety mechanism that was designed for your benefit.
+
+### 9.5 Recommended CI/CD Workflow
+
+For users operating in CI/CD environments, VulnSweep is designed to function as a **security gate and intelligence tool**:
+
+1. **Scan** your dependencies in the pipeline (unlimited, free)
+2. **Generate reports** (HTML, JSON, SBOM) as pipeline artifacts
+3. **Fail the build** if vulnerabilities exceed your configured threshold (exit code 1)
+4. **Review** the vulnerability report on your local developer machine
+5. **Apply fixes locally** where you can visually inspect all changes before committing
+
+This workflow ensures that all code modifications pass through human review — the foundation of a secure software supply chain.
+
+---
+
+## 10. Limitation of Liability
 
 TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, the total aggregate liability of Carlos Galveias and VulnSweep to you for any claims arising from or related to VulnSweep — regardless of the form of action — **shall not exceed the greater of:**
 
@@ -165,7 +249,7 @@ Some jurisdictions do not allow exclusion or limitation of consequential damages
 
 ---
 
-## 9. No Professional Security Advice
+## 11. No Professional Security Advice
 
 VulnSweep is a software tool. It is **not a substitute for professional security advice, a penetration test, a security audit, or a formal vulnerability assessment**. The output of VulnSweep should be treated as one input into a broader security programme, not as a definitive security clearance.
 
@@ -180,7 +264,7 @@ For compliance with security standards (ISO 27001, SOC 2, PCI-DSS, NIS2 Directiv
 
 ---
 
-## 10. Indemnification
+## 12. Indemnification
 
 You agree to **indemnify, defend, and hold harmless** Carlos Galveias and VulnSweep from and against any claims, liabilities, damages, losses, costs, and expenses (including reasonable legal fees) arising out of or relating to:
 
@@ -189,10 +273,12 @@ You agree to **indemnify, defend, and hold harmless** Carlos Galveias and VulnSw
 - Any modifications to your codebase made by VulnSweep at your direction
 - Your breach of any applicable law or third-party rights in connection with your use of VulnSweep
 - Any claim by a third party arising from changes made by VulnSweep that you caused or permitted
+- Any damage, security incident, or compliance violation resulting from your circumvention or attempted circumvention of VulnSweep's headless/CI/CD environment detection mechanism
+- Any code changes pushed to remote repositories from headless environments through bypass of VulnSweep's safety restrictions
 
 ---
 
-## 11. Governing Law and Jurisdiction
+## 13. Governing Law and Jurisdiction
 
 This Disclaimer and any disputes arising from or related to VulnSweep shall be governed by and construed in accordance with the laws of **Portugal**, without regard to conflict of law provisions.
 
@@ -204,13 +290,13 @@ If any provision of this Disclaimer is held invalid or unenforceable, the remain
 
 ---
 
-## 12. Entire Agreement
+## 14. Entire Agreement
 
 This Disclaimer, together with the [License Agreement](LICENSE.md) and [Privacy Policy](PRIVACY_POLICY.md), constitutes the entire agreement between you and Carlos Galveias with respect to VulnSweep and supersedes all prior communications and proposals, whether oral or written.
 
 ---
 
-## 13. Contact and Support
+## 15. Contact and Support
 
 All support requests, bug reports, and questions must be submitted exclusively through the official project channel:
 
@@ -220,4 +306,4 @@ There is no email address for support or legal contact. **Submitting a ticket do
 
 ---
 
-_Last reviewed: May 2026. This Disclaimer is governed by the laws of Portugal / European Union._
+_Last reviewed: June 2026. This Disclaimer is governed by the laws of Portugal / European Union._

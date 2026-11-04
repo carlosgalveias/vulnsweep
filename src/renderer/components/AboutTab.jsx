@@ -1,4 +1,9 @@
 /* eslint-disable react/prop-types */
+import {
+  OP_LICENSE_BACKUP,
+  OP_LICENSE_RESTORE,
+  OP_OPEN_LOCAL_DOC,
+} from '@shared/renderer-api-opcodes.js';
 import { useState } from 'react';
 
 function AboutTab({
@@ -35,7 +40,7 @@ function AboutTab({
     setBkState('working');
     setBkMsg('');
     const r = await window.electronAPI
-      .licenseBackup()
+      .invoke(OP_LICENSE_BACKUP)
       .catch((e) => ({ success: false, error: e.message }));
     if (r.cancelled) {
       setBkState('idle');
@@ -49,7 +54,7 @@ function AboutTab({
     setBkState('working');
     setBkMsg('');
     const r = await window.electronAPI
-      .licenseRestore()
+      .invoke(OP_LICENSE_RESTORE)
       .catch((e) => ({ success: false, error: e.message }));
     if (r.cancelled) {
       setBkState('idle');
@@ -135,28 +140,33 @@ function AboutTab({
         <div className="flex flex-col gap-2">
           <button
             className={lk}
-            onClick={() => window.electronAPI.openLocalDoc('PRIVACY_POLICY.md')}
+            onClick={() => window.electronAPI.invoke(OP_OPEN_LOCAL_DOC, 'PRIVACY_POLICY.md')}
           >
             Privacy Policy
           </button>
-          <button className={lk} onClick={() => window.electronAPI.openLocalDoc('DISCLAIMER.md')}>
+          <button
+            className={lk}
+            onClick={() => window.electronAPI.invoke(OP_OPEN_LOCAL_DOC, 'DISCLAIMER.md')}
+          >
             Disclaimer
           </button>
         </div>
+        <p className="text-red-400 font-bold text-xs mt-3">
+          🔒 Your code never leaves your machine. All scanning and analysis is performed locally. We
+          only collect anonymous usage statistics (opt-out available below).
+        </p>
       </div>
 
       <div className={card}>
         <h2 className={hd}>Support</h2>
-        <button
-          className={lk}
-          onClick={() =>
-            window.electronAPI.openExternal(
-              'https://github.com/carlosgalveias/vulnsweep-releases/issues'
-            )
-          }
+        <a
+          href="https://github.com/carlosgalveias/vulnsweep-releases/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 text-sm underline"
         >
           Report an issue on GitHub
-        </button>
+        </a>
       </div>
 
       <div className={card}>

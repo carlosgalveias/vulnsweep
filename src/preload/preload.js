@@ -1,307 +1,135 @@
 const { contextBridge, ipcRenderer, shell } = require('electron');
+// Import opcode constants (bundled by esbuild at build time)
+const {
+  OP_SELECT_FOLDER,
+  OP_DISCOVER_PROJECTS,
+  OP_PREPARE_REPOSITORY,
+  OP_COMMIT_AND_PUSH,
+  OP_ANALYZE_PROJECT,
+  OP_ANALYZE_PROJECTS,
+  OP_SCAN_PROJECT,
+  OP_SCAN_PROJECTS,
+  OP_CANCEL_SCAN,
+  OP_GET_SCAN_SETTINGS,
+  OP_APPLY_FIXES,
+  OP_SCAN_DEP_UPDATES,
+  OP_APPLY_DEP_UPDATES,
+  OP_SCAN_LICENSES,
+  OP_SBOM_GET_SAVE_PATH,
+  OP_SBOM_EXPORT,
+  OP_GET_COMMERCIAL_STATUS,
+  OP_ACTIVATE_LICENSE,
+  OP_GET_INSTALL_INFO,
+  OP_GET_TRIAL_STATUS,
+  OP_INCREMENT_TRIAL_FIX,
+  OP_OPEN_PAYMENT_WINDOW,
+  OP_VERIFY_AND_ACTIVATE,
+  OP_SEED_DEV_TRANSACTION,
+  OP_GET_ACTIVE_PRICE,
+  OP_SET_ANALYTICS_OPT_OUT,
+  OP_GET_ANALYTICS_OPT_OUT,
+  OP_GET_APP_VERSION,
+  OP_OPEN_LOCAL_DOC,
+  OP_LICENSE_BACKUP,
+  OP_LICENSE_RESTORE,
+  OP_CACHE_CLEAR,
+  OP_CACHE_GET_STATS,
+  OP_GET_CREDENTIAL_STATUS,
+  OP_SET_CREDENTIAL,
+  OP_DELETE_CREDENTIAL,
+  OP_GET_SETTINGS,
+  OP_SET_SETTINGS,
+  OP_GET_DEPENDENCY_PATHS,
+  OP_OPEN_EXTERNAL,
+  OP_ON_LOG_MESSAGE,
+  OP_ON_SCAN_PROGRESS,
+  OP_ON_ANALYSIS_PROGRESS,
+  OP_ON_DEP_UPDATE_PROGRESS,
+} = require('../shared/renderer-api-opcodes.js');
 
-/**
- * VulnSweep IPC Bridge - Preload Script
- *
- * Exposes a secure API for the renderer process to communicate with the main process.
- * All methods use ipcRenderer.invoke() for async request-response patterns.
- */
+// ─── Invoke dispatch table ──────────────────────────────────────────────
+// Maps opcode → function that returns a Promise (or value for shell ops)
+const INVOKE_TABLE = {
+  [OP_SELECT_FOLDER]: () => ipcRenderer.invoke('select-folder'),
+  [OP_DISCOVER_PROJECTS]: (args) => ipcRenderer.invoke('discover-projects', ...args),
+  [OP_PREPARE_REPOSITORY]: (args) => ipcRenderer.invoke('prepare-repository', ...args),
+  [OP_COMMIT_AND_PUSH]: (args) => ipcRenderer.invoke('commit-and-push', ...args),
+  [OP_ANALYZE_PROJECT]: (args) => ipcRenderer.invoke('analyze-project', ...args),
+  [OP_ANALYZE_PROJECTS]: (args) => ipcRenderer.invoke('analyze-projects', ...args),
+  [OP_SCAN_PROJECT]: (args) => ipcRenderer.invoke('scan-project', ...args),
+  [OP_SCAN_PROJECTS]: (args) => ipcRenderer.invoke('scan-projects', ...args),
+  [OP_CANCEL_SCAN]: () => ipcRenderer.invoke('scan:cancel'),
+  [OP_GET_SCAN_SETTINGS]: () => ipcRenderer.invoke('get-scan-settings'),
+  [OP_APPLY_FIXES]: (args) => ipcRenderer.invoke('apply-fixes', ...args),
+  [OP_SCAN_DEP_UPDATES]: (args) => ipcRenderer.invoke('scan-dep-updates', ...args),
+  [OP_APPLY_DEP_UPDATES]: (args) => ipcRenderer.invoke('apply-dep-updates', ...args),
+  [OP_SCAN_LICENSES]: (args) => ipcRenderer.invoke('license:scan', ...args),
+  [OP_SBOM_GET_SAVE_PATH]: (args) => ipcRenderer.invoke('sbom:get-save-path', ...args),
+  [OP_SBOM_EXPORT]: (args) => ipcRenderer.invoke('sbom:export', ...args),
+  [OP_GET_COMMERCIAL_STATUS]: () => ipcRenderer.invoke('get-commercial-status'),
+  [OP_ACTIVATE_LICENSE]: (args) => ipcRenderer.invoke('activate-license', ...args),
+  [OP_GET_INSTALL_INFO]: () => ipcRenderer.invoke('get-install-info'),
+  [OP_GET_TRIAL_STATUS]: () => ipcRenderer.invoke('get-trial-status'),
+  [OP_INCREMENT_TRIAL_FIX]: () => ipcRenderer.invoke('increment-trial-fix'),
+  [OP_OPEN_PAYMENT_WINDOW]: (args) => ipcRenderer.invoke('open-payment-window', ...args),
+  [OP_VERIFY_AND_ACTIVATE]: (args) => ipcRenderer.invoke('verify-and-activate', ...args),
+  [OP_GET_ACTIVE_PRICE]: () => ipcRenderer.invoke('get-active-price'),
+  [OP_SET_ANALYTICS_OPT_OUT]: (args) => ipcRenderer.invoke('set-analytics-opt-out', ...args),
+  [OP_GET_ANALYTICS_OPT_OUT]: () => ipcRenderer.invoke('get-analytics-opt-out'),
+  [OP_GET_APP_VERSION]: () => ipcRenderer.invoke('get-app-version'),
+  [OP_OPEN_LOCAL_DOC]: (args) => ipcRenderer.invoke('open-local-doc', ...args),
+  [OP_LICENSE_BACKUP]: () => ipcRenderer.invoke('license-backup'),
+  [OP_LICENSE_RESTORE]: () => ipcRenderer.invoke('license-restore'),
+  [OP_CACHE_CLEAR]: () => ipcRenderer.invoke('cache:clear'),
+  [OP_CACHE_GET_STATS]: () => ipcRenderer.invoke('cache:getStats'),
+  [OP_GET_CREDENTIAL_STATUS]: () => ipcRenderer.invoke('credentials:getStatus'),
+  [OP_SET_CREDENTIAL]: (args) => ipcRenderer.invoke('credentials:set', ...args),
+  [OP_DELETE_CREDENTIAL]: (args) => ipcRenderer.invoke('credentials:delete', ...args),
+  [OP_GET_SETTINGS]: () => ipcRenderer.invoke('settings:get'),
+  [OP_SET_SETTINGS]: (args) => ipcRenderer.invoke('settings:set', ...args),
+  [OP_GET_DEPENDENCY_PATHS]: (args) => ipcRenderer.invoke('get-dependency-paths', ...args),
+  [OP_OPEN_EXTERNAL]: (args) => shell.openExternal(...args),
+};
 
-// Expose VulnSweep API
+// Conditionally add dev-only opcode
+if (process.env.VULNSWEEP_DEV === 'true') {
+  INVOKE_TABLE[OP_SEED_DEV_TRANSACTION] = (args) =>
+    ipcRenderer.invoke('seed-dev-transaction', ...args);
+}
+
+// ─── Event channel mapping ──────────────────────────────────────────────
+const EVENT_CHANNELS = {
+  [OP_ON_LOG_MESSAGE]: 'log-message',
+  [OP_ON_SCAN_PROGRESS]: 'scan-progress',
+  [OP_ON_ANALYSIS_PROGRESS]: 'analysis-progress',
+  [OP_ON_DEP_UPDATE_PROGRESS]: 'dep-update-progress',
+};
+
+// ─── Expose the opaque dispatch surface ─────────────────────────────────
 contextBridge.exposeInMainWorld('electronAPI', {
-  // ============================================
-  // PROJECT DISCOVERY
-  // ============================================
-
-  /**
-   * Opens native folder picker dialog
-   * @returns {Promise<string|null>} Selected folder path or null if cancelled
-   */
-  selectFolder: () => ipcRenderer.invoke('select-folder'),
-
-  /**
-   * Discovers all Node.js projects in the specified base directory
-   * @param {string} basePath - Base directory path to scan
-   * @returns {Promise<Object>} { success: boolean, content: Array, error?: string }
-   */
-  discoverProjects: (basePath) => ipcRenderer.invoke('discover-projects', basePath),
-
-  // ============================================
-  // GIT OPERATIONS
-  // ============================================
-
-  /**
-   * Prepares a repository by optionally resetting and pulling latest changes
-   * @param {string} projectPath - Project directory path
-   * @param {boolean} allowReset - Whether to perform git reset --hard
-   * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
-   */
-  prepareRepository: (projectPath, allowReset, options = {}) =>
-    ipcRenderer.invoke('prepare-repository', projectPath, allowReset, options),
-
-  /**
-   * Commits all changes and pushes to remote
-   * @param {string} projectPath - Project directory path
-   * @param {string} message - Commit message
-   * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
-   */
-  commitAndPush: (projectPath, message) =>
-    ipcRenderer.invoke('commit-and-push', projectPath, message),
-
-  // ============================================
-  // AUDIT OPERATIONS
-  // ============================================
-
-  /**
-   * Analyzes a single project for vulnerabilities
-   * @param {string} projectPath - Project directory path
-   * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
-   */
-  analyzeProject: (projectPath) => ipcRenderer.invoke('analyze-project', projectPath),
-
-  /**
-   * Analyzes multiple projects with progress updates
-   * @param {Array<string>} projectPaths - Array of project paths
-   * @param {boolean} allowReset - Whether to perform git reset before scanning
-   * @returns {Promise<Object>} { success: boolean, content?: Array, error?: string }
-   */
-  analyzeProjects: (projectPaths, allowReset) =>
-    ipcRenderer.invoke('analyze-projects', projectPaths, allowReset),
-
-  /**
-   * Applies fix strategies to a project
-   * @param {string} projectPath - Project directory path
-   * @param {Array} strategies - Array of fix strategy objects
-   * @param {Object} options - { bumpVersion, removePackageLock, removeOverrides }
-   * @returns {Promise<Object>} { success: boolean, content?: object, error?: string }
-   */
-  applyFixes: (projectPath, strategies, options) =>
-    ipcRenderer.invoke('apply-fixes', projectPath, strategies, options),
-
-  // ============================================
-  // COMMERCIAL & LICENSING
-  // ============================================
-
-  getCommercialStatus: () => ipcRenderer.invoke('get-commercial-status'),
-
-  activateLicense: (paymentData) => ipcRenderer.invoke('activate-license', paymentData),
-
-  getInstallInfo: () => ipcRenderer.invoke('get-install-info'),
-
-  /**
-   * Returns the current trial status for unlicensed users.
-   * @returns {Promise<{ fixesRemaining: number, fixesConsumed: number, daysUntilPriceChange: number, trialExhausted: boolean }>}
-   */
-  getTrialStatus: () => ipcRenderer.invoke('get-trial-status'),
-
-  /**
-   * Increments the trial fix counter by one for the current user-initiated
-   * "Apply Fixes" operation. No-op for licensed users (skipped server-side).
-   * @returns {Promise<{ success: boolean, fixesConsumed?: number, skipped?: boolean, error?: string }>}
-   */
-  incrementTrialFix: () => ipcRenderer.invoke('increment-trial-fix'),
-
-  /**
-   * Opens a managed payment BrowserWindow pointing at the PayPal payment link.
-   * Resolves when the user completes payment (success URL detected) or closes
-   * the window without paying.
-   * @returns {Promise<{ ok: true, key: string } | { ok: false, cancelled?: true, error?: string }>}
-   */
-  openPaymentWindow: (isPromo) => ipcRenderer.invoke('open-payment-window', isPromo),
-
-  /**
-   * Returns the active purchase price based on installation date.
-   * Promo price applies within the first PROMO_DAYS days; full price after that.
-   * @returns {Promise<{ price: number, isPromo: boolean, promoEndsAt: string|null }>}
-   */
-  getActivePrice: () => ipcRenderer.invoke('get-active-price'),
-
-  // ============================================
-  // ENRICHMENT (F1)
-  // ============================================
-
-  /**
-   * Enrich an array of vulnerability objects with cross-source CVE data
-   * (OSV.dev, NVD API v2, GitHub Advisory Database).
-   * Progress events are streamed via onEnrichmentProgress().
-   *
-   * @param {Array} vulnerabilities - Array of vulnerability objects
-   * @returns {Promise<{ success: boolean, content?: Array, error?: string }>}
-   */
-  enrichVulnerabilities: (vulnerabilities) =>
-    ipcRenderer.invoke('enrich-vulnerabilities', vulnerabilities),
-
-  /**
-   * Retrieve current enrichment configuration / status from the main process.
-   * @returns {Promise<{ success: boolean, content?: Object }>}
-   */
-  getEnrichmentSettings: () => ipcRenderer.invoke('get-enrichment-settings'),
-
-  /**
-   * Subscribe to per-vulnerability enrichment progress events.
-   * @param {Function} callback - Called with { current, total, packageName }
-   * @returns {Function} Unsubscribe function
-   */
-  onEnrichmentProgress: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('enrichment-progress', subscription);
-    return () => ipcRenderer.removeListener('enrichment-progress', subscription);
+  invoke: (op, ...args) => {
+    const handler = INVOKE_TABLE[op];
+    if (!handler) throw new Error(`Invalid op: ${op}`);
+    return handler(args);
   },
 
-  // ============================================
-  // DEPENDENCY UPDATES (F13)
-  // ============================================
-
-  /**
-   * Scans direct dependencies of a project for available updates.
-   * Progress events streamed via onDepUpdateProgress().
-   * @param {string} projectPath - Absolute path to the project directory
-   * @returns {Promise<{success: boolean, content?: UpdateCandidate[], error?: string}>}
-   */
-  scanDepUpdates: (projectPath, allowReset = false, options = {}) =>
-    ipcRenderer.invoke('scan-dep-updates', projectPath, allowReset, options),
-
-  /**
-   * Applies selected dependency updates via npm install and commits locally.
-   * @param {string} projectPath - Absolute path to the project directory
-   * @param {Array<{name:string, fromVersion:string, toVersion:string}>} updates
-   * @returns {Promise<{success: boolean, commitMessage?: string, error?: string}>}
-   */
-  applyDepUpdates: (projectPath, updates) =>
-    ipcRenderer.invoke('apply-dep-updates', projectPath, updates),
-
-  /**
-   * Subscribe to per-package dep update scan progress events.
-   * @param {Function} callback - Called with {current, total, packageName}
-   * @returns {Function} Unsubscribe function
-   */
-  onDepUpdateProgress: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('dep-update-progress', subscription);
-    return () => ipcRenderer.removeListener('dep-update-progress', subscription);
+  on: (op, cb) => {
+    const channel = EVENT_CHANNELS[op];
+    if (!channel) throw new Error(`Invalid event op: ${op}`);
+    const subscription = (_event, data) => cb(data);
+    ipcRenderer.on(channel, subscription);
+    // Return unsubscribe function (same pattern as before)
+    return () => ipcRenderer.removeListener(channel, subscription);
   },
 
-  // ============================================
-  // LICENSE SCAN & SBOM (F8/F9)
-  // ============================================
-
-  /**
-   * Scan all packages in a project for license information.
-   * No paywall — available to all users.
-   * @param {string} projectPath - Absolute path to the project directory
-   * @returns {Promise<{ success: boolean, content?: LicenseScanResult, error?: string }>}
-   */
-  scanLicenses: (projectPath) => ipcRenderer.invoke('license:scan', projectPath),
-
-  /**
-   * Show a native save-file dialog for the chosen SBOM format.
-   * @param {{ format: 'cyclonedx'|'spdx'|'csv' }} options
-   * @returns {Promise<{ filePath: string|null, canceled: boolean, error?: string }>}
-   */
-  sbomGetSavePath: (options) => ipcRenderer.invoke('sbom:get-save-path', options),
-
-  /**
-   * Generate SBOM content and write it to outputPath.
-   * @param {{ licenseResult: LicenseScanResult, format: string, outputPath: string }} params
-   * @returns {Promise<{ success: boolean, error?: string }>}
-   */
-  sbomExport: (params) => ipcRenderer.invoke('sbom:export', params),
-
-  // ============================================
-  // LOGGING & EVENTS
-  // ============================================
-
-  /**
-   * Subscribe to log messages from the backend
-   * @param {Function} callback - Callback function(logData)
-   * @returns {Function} Unsubscribe function
-   */
-  onLogMessage: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('log-message', subscription);
-
-    // Return unsubscribe function
-    return () => {
-      ipcRenderer.removeListener('log-message', subscription);
-    };
+  off: (op, cb) => {
+    const channel = EVENT_CHANNELS[op];
+    if (!channel) throw new Error(`Invalid event op: ${op}`);
+    ipcRenderer.removeListener(channel, cb);
   },
-
-  /**
-   * Subscribe to analysis progress updates
-   * @param {Function} callback - Callback function(progressData)
-   * @returns {Function} Unsubscribe function
-   */
-  onAnalysisProgress: (callback) => {
-    const subscription = (event, data) => callback(data);
-    ipcRenderer.on('analysis-progress', subscription);
-
-    // Return unsubscribe function
-    return () => {
-      ipcRenderer.removeListener('analysis-progress', subscription);
-    };
-  },
-
-  // ============================================
-  // SHELL UTILITIES
-  // ============================================
-
-  /**
-   * Open a URL in the system default browser.
-   * @param {string} url - The URL to open externally
-   * @returns {Promise<void>}
-   */
-  openExternal: (url) => shell.openExternal(url),
-
-  // ============================================
-  // ANALYTICS OPT-OUT (D)
-  // ============================================
-
-  /**
-   * Set the analytics opt-out preference.
-   * @param {boolean} value - true to opt out, false to opt in
-   * @returns {Promise<{ success: boolean, error?: string }>}
-   */
-  setAnalyticsOptOut: (value) => ipcRenderer.invoke('set-analytics-opt-out', value),
-
-  /**
-   * Get the current analytics opt-out preference.
-   * @returns {Promise<{ optOut: boolean }>}
-   */
-  getAnalyticsOptOut: () => ipcRenderer.invoke('get-analytics-opt-out'),
-
-  // ============================================
-  // APP INFO & DOCS (B)
-  // ============================================
-
-  /**
-   * Returns the application version and name from the main process.
-   * @returns {Promise<{ version: string, name: string }>}
-   */
-  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-
-  /**
-   * Opens a local documentation file in the system default application.
-   * Only 'PRIVACY_POLICY.md' and 'DISCLAIMER.md' are permitted.
-   * @param {string} filename - Allowed document filename
-   * @returns {Promise<{ success: boolean, error?: string }>}
-   */
-  openLocalDoc: (filename) => ipcRenderer.invoke('open-local-doc', filename),
-
-  /**
-   * Opens a save dialog and writes a license backup (.vsbak) file.
-   * Only available when a valid license is active.
-   * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
-   */
-  licenseBackup: () => ipcRenderer.invoke('license-backup'),
-
-  /**
-   * Opens an open dialog to select a .vsbak backup file and restores the license.
-   * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
-   */
-  licenseRestore: () => ipcRenderer.invoke('license-restore'),
 });
 
-// Expose app version metadata
+// Expose version metadata (non-sensitive, keep as-is)
 contextBridge.exposeInMainWorld('versions', {
   node: () => process.versions.node,
   chrome: () => process.versions.chrome,

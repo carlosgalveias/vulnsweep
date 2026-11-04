@@ -3,29 +3,38 @@
 /**
  * VulnSweep - EPSS (Exploit Prediction Scoring System) v3 Source Module
  *
- * Queries the EPSS v3 API for a single CVE ID and returns its exploit
- * probability score and percentile.
- *
- * No caching in this module. Caching is provided by cve-enricher.js
- * two-layer HOT+WARM cache on the full enrichment object.
- *
- * Return shape:
- *   queryEPSS(cveId) → Promise<{
- *     found:           boolean,
- *     epssScore:       number|null,
- *     epssPercentile:  number|null,
- *     error?:          string
- *   }>
+ * OPT-2: In-process cache plus batch pre-fetch. The orchestrator calls
+ * prefetchEPSS() before the scan loop, which fires ceil(N/100) parallel batch
+ * requests. Every queryEPSS() call afterward is a pure Map lookup.
  */
 
 const https = require('https');
 const { ENRICHMENT_CONFIG } = require('../../../config/constants');
 
-// ─── HTTP helper (identical pattern to nvd-source.js) ────────────────────────
+const EPSS_BATCH_SIZE = 100;
 
-function httpsGet(url, timeoutMs) {
+/**
+ * In-process cache: uppercase CVE ID -> epss result object.
+ * Populated by prefetchEPSS() before the per-package loop starts.
+ *
+ * @type {Map<string, {found: boolean, epssScore: number|null, epssPercentile: number|null}>}
+ */
+const _epssCache = new Map();
+
+function httpsGet(url, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
     const u = new URL(url);
+
+    const abortHandler = () => {
+      req.destroy(new Error('Request aborted'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
     const req = https.request(
       {
         hostname: u.hostname,
@@ -44,6 +53,10 @@ function httpsGet(url, timeoutMs) {
           data += c;
         });
         res.on('end', () => {
+          if (signal?.aborted) {
+            reject(new Error('Request aborted'));
+            return;
+          }
           if (res.statusCode === 404) {
             resolve(null);
             return;
@@ -60,41 +73,114 @@ function httpsGet(url, timeoutMs) {
         });
       }
     );
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (signal?.aborted) return;
+      reject(err);
+    });
     req.setTimeout(timeoutMs, () => req.destroy(new Error(`EPSS timeout ${timeoutMs}ms`)));
     req.end();
   });
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+/**
+ * Batch-fetches EPSS scores for an array of CVE IDs before the per-package scan loop.
+ * Chunks IDs into groups of 100, fires all chunks in parallel.
+ * Errors on individual chunks are silently ignored.
+ *
+ * @param {string[]} cveIds
+ * @returns {Promise<void>}
+ */
+async function prefetchEPSS(cveIds, signal) {
+  const notFound = { found: false, epssScore: null, epssPercentile: null };
+
+  const toFetch = [
+    ...new Set(
+      cveIds
+        .map((id) => id.toUpperCase())
+        .filter((id) => /^CVE-\d{4}-\d{4,}$/.test(id) && !_epssCache.has(id))
+    ),
+  ];
+
+  if (toFetch.length === 0) return;
+
+  const chunks = [];
+  for (let i = 0; i < toFetch.length; i += EPSS_BATCH_SIZE) {
+    chunks.push(toFetch.slice(i, i + EPSS_BATCH_SIZE));
+  }
+
+  await Promise.allSettled(
+    chunks.map(async (chunk) => {
+      const url = `${ENRICHMENT_CONFIG.EPSS_API_URL}?cve=${chunk.join(',')}`;
+      try {
+        if (signal?.aborted) return;
+
+        const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, signal);
+        if (json && Array.isArray(json.data)) {
+          for (const entry of json.data) {
+            if (!entry || !entry.cve) continue;
+            const score = parseFloat(entry.epss);
+            const pct = parseFloat(entry.percentile);
+            _epssCache.set(entry.cve.toUpperCase(), {
+              found: true,
+              epssScore: isNaN(score) ? null : score,
+              epssPercentile: isNaN(pct) ? null : pct,
+            });
+          }
+        }
+        for (const id of chunk) {
+          if (!_epssCache.has(id)) _epssCache.set(id, notFound);
+        }
+      } catch (err) {
+        console.warn('[epss-source] prefetchEPSS chunk error:', err.message);
+      }
+    })
+  );
+}
+
+/**
+ * Clears the in-process EPSS cache. Called by orchestrator at scan start.
+ *
+ * @returns {void}
+ */
+function clearEpssCache() {
+  _epssCache.clear();
+}
 
 /**
  * Query the EPSS v3 API for a given CVE ID.
- * Returns the exploit probability score and percentile (both 0–1 floats).
- * Always returns a result object — never throws.
+ * Checks _epssCache first. Falls back to a direct HTTP call if not cached.
+ * Always returns a result object, never throws.
  *
- * @param {string} cveId  e.g. "CVE-2021-44228"
+ * @param {string} cveId
  * @returns {Promise<{found: boolean, epssScore: number|null, epssPercentile: number|null, error?: string}>}
  */
-async function queryEPSS(cveId) {
+async function queryEPSS(cveId, signal) {
   const notFound = { found: false, epssScore: null, epssPercentile: null };
 
-  // Input validation — must match CVE-YYYY-NNNNN pattern
   if (!cveId || typeof cveId !== 'string' || !/^CVE-\d{4}-\d{4,}$/i.test(cveId)) {
     return { ...notFound, error: 'Invalid or missing CVE ID' };
   }
 
-  const url = `${ENRICHMENT_CONFIG.EPSS_API_URL}?cve=${encodeURIComponent(cveId.toUpperCase())}`;
+  const upperCveId = cveId.toUpperCase();
+
+  // Cache hit — populated by prefetchEPSS() before the scan loop
+  if (_epssCache.has(upperCveId)) {
+    return _epssCache.get(upperCveId);
+  }
+
+  const url = `${ENRICHMENT_CONFIG.EPSS_API_URL}?cve=${encodeURIComponent(upperCveId)}`;
+
+  if (signal?.aborted) {
+    return { ...notFound, error: 'Request aborted' };
+  }
 
   try {
-    const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS);
+    const json = await httpsGet(url, ENRICHMENT_CONFIG.ENRICHMENT_TIMEOUT_MS, signal);
 
-    // null means 404 — CVE not found in EPSS
     if (json === null) {
       return notFound;
     }
 
-    // EPSS v3 response: { status, status-code, version, access, total, offset, limit, data: [...] }
     if (!json || !Array.isArray(json.data) || json.data.length === 0) {
       return notFound;
     }
@@ -118,4 +204,4 @@ async function queryEPSS(cveId) {
   }
 }
 
-module.exports = { queryEPSS };
+module.exports = { queryEPSS, prefetchEPSS, clearEpssCache };

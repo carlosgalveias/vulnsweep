@@ -7,6 +7,8 @@
  * @module config/constants
  */
 
+const IS_DEV = process.env.NODE_ENV === 'development';
+
 // ============================================
 // GIT CONFIGURATION
 // ============================================
@@ -35,6 +37,37 @@ const GIT_CONFIG = {
    * @type {string}
    */
   DEFAULT_COMMIT_MESSAGE: 'fix(security): update vulnerable dependencies',
+
+  /**
+   * Maximum number of retry attempts for GitHub Advisory API rate-limit errors.
+   * On each attempt the request is retried after an exponential backoff delay.
+   * The first attempt (attempt=0) is not a retry; retries are attempts 1..GITHUB_MAX_RETRIES.
+   * Set to 100 so the singleton rate-limiter (Feature C) can absorb sustained 429/403
+   * bursts without giving up — the shared queue backoff prevents thundering-herd retries.
+   * @type {number}
+   */
+  GITHUB_MAX_RETRIES: 100,
+
+  /**
+   * Base delay for exponential backoff when GitHub rate-limits us (milliseconds).
+   * Actual delay = GITHUB_RETRY_BASE_DELAY_MS * 2^attempt + jitter
+   * @type {number}
+   */
+  GITHUB_RETRY_BASE_DELAY_MS: 2000,
+
+  /**
+   * Maximum backoff delay cap (milliseconds).
+   * Prevents runaway wait times on high attempt numbers.
+   * @type {number}
+   */
+  GITHUB_RETRY_MAX_DELAY_MS: 60000,
+
+  /**
+   * Maximum random jitter added to each backoff delay (milliseconds).
+   * Jitter prevents thundering-herd when multiple instances retry simultaneously.
+   * @type {number}
+   */
+  GITHUB_RETRY_JITTER_MS: 10000,
 };
 
 // ============================================
@@ -150,13 +183,17 @@ const PAYPAL_CONFIG = {
    * PayPal Payment Link URL for the promo price period.
    * @type {string}
    */
-  PAYMENT_URL_PROMO: 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
+  PAYMENT_URL_PROMO: IS_DEV
+    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_PROMO_ID'
+    : 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
 
   /**
    * PayPal Payment Link URL for the full (non-promo) price.
    * @type {string}
    */
-  PAYMENT_URL_FULL: 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
+  PAYMENT_URL_FULL: IS_DEV
+    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_FULL_ID'
+    : 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
 
   /**
    * Hostname of the success/return URL configured in the PayPal payment link.
@@ -170,6 +207,68 @@ const PAYPAL_CONFIG = {
    * @type {string}
    */
   SUCCESS_PATH: '/success',
+};
+
+// ============================================
+// LICENSE API CONFIGURATION
+// ============================================
+
+/**
+ * Derives the client API key at runtime from two XOR'd halves.
+ * Neither half alone reveals the key; both appear as random hex.
+ * @returns {string} 64-char hex API key
+ */
+function _deriveClientKey() {
+  const _a = '1876fda7b7230ed4b0eb8e855cce3914d845a49fae7534b070478241d3260d34';
+  const _b = '8064b378cce44f4c0654536452e824bb57fd30e44441ebf8fd5b2b1f70584747';
+  let r = '';
+  for (let i = 0; i < _a.length; i++) {
+    r += (parseInt(_a[i], 16) ^ parseInt(_b[i], 16)).toString(16);
+  }
+  return r;
+}
+
+/**
+ * License verification API configuration.
+ * The Cloudflare Worker at this URL handles PayPal transaction verification
+ * and returns activation tokens for valid purchases.
+ * @namespace LICENSE_API_CONFIG
+ */
+const LICENSE_API_CONFIG = {
+  /**
+   * Base URL of the license verification Worker.
+   * @type {string}
+   */
+  URL: IS_DEV
+    ? 'https://vulnsweep-license.crazyprints4u.workers.dev'
+    : 'https://vulnsweep-license-production.crazyprints4u.workers.dev',
+
+  /**
+   * Endpoint for verifying PayPal transactions.
+   * Accepts POST { email, transactionId } and returns { verified, activationToken } or { verified, error }.
+   * @type {string}
+   */
+  VERIFY_ENDPOINT: '/verify',
+
+  /**
+   * Health check endpoint for connectivity testing.
+   * @type {string}
+   */
+  HEALTH_ENDPOINT: '/health',
+
+  /**
+   * HTTP request timeout in milliseconds.
+   * @type {number}
+   */
+  TIMEOUT_MS: 15000,
+
+  /**
+   * Client API key sent in X-API-Key header for endpoint authentication.
+   * The real security is server-side PayPal verification; this prevents
+   * arbitrary access to the endpoint. Rotate annually.
+   * @type {string}
+   */
+  CLIENT_API_KEY: _deriveClientKey(),
 };
 
 // ============================================
@@ -195,7 +294,8 @@ const ENRICHMENT_CONFIG = {
   NVD_API_URL: 'https://services.nvd.nist.gov/rest/json/cves/2.0',
 
   /**
-   * GitHub Advisory REST API base endpoint (no auth required for public data)
+   * GitHub Advisory REST API base endpoint.
+   * Unauthenticated: 60 req/hr. Authenticated (GITHUB_TOKEN env var): 5,000 req/hr.
    * @type {string}
    */
   GITHUB_ADVISORY_API_URL: 'https://api.github.com/advisories',
@@ -209,19 +309,61 @@ const ENRICHMENT_CONFIG = {
   NVD_RATE_LIMIT_MS: 6000,
 
   /**
-   * Optional NVD API key read from environment variable.
-   * When set, NVD allows 50 req/30s instead of 5 req/30s.
+   * Minimum delay between consecutive NVD API calls when using an API key (ms).
+   * NVD API key allows 50 req/30s. 600ms between calls = 100 req/60s, safely within limit.
+   * The previous value of 500ms (120 req/min) exceeded the limit and caused 429 responses
+   * with exponential backoff retries adding 12-25s per retry.
+   * @type {number}
+   */
+  NVD_RATE_LIMIT_WITH_KEY_MS: 600,
+
+  /**
+   * Optional NVD API key read from the secure store (user-configured via Settings UI)
+   * or the NVD_API_KEY environment variable as fallback.
+   * When set, NVD allows 50 req/30s instead of 5 req/30s — a 10x improvement.
+   * Returns undefined (not empty string) when absent so callers can use it as a boolean guard.
    * @type {string|undefined}
    */
   get NVD_API_KEY() {
-    return process.env.NVD_API_KEY || undefined;
+    // Priority: secure store (user-configured via Settings UI) > env var > undefined
+    // Lazy require avoids circular dependency at module load time.
+    try {
+      const { storeGet } = require('../utils/secure-store');
+      const stored = storeGet('cred:nvd');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      // secure-store unavailable (e.g. CI environment) — fall through to env var
+    }
+    return process.env.VULNSWEEP_NVD_KEY || process.env.NVD_API_KEY || undefined;
+  },
+
+  /**
+   * Optional GitHub Personal Access Token read from environment variable.
+   * When set, GitHub API allows 5,000 req/hr instead of 60 req/hr (unauthenticated).
+   * Generate at: https://github.com/settings/tokens (no scopes required for public data)
+   * Returns undefined (not empty string) when the variable is absent or empty,
+   * so callers can safely use it as a boolean guard.
+   * @type {string|undefined}
+   */
+  get GITHUB_TOKEN() {
+    // Priority: secure store (user-configured via Settings UI) > env var > undefined
+    // Lazy require avoids circular dependency at module load time.
+    // This getter is called during scans (post app.ready), so the store is initialized.
+    try {
+      const { storeGet } = require('../utils/secure-store');
+      const stored = storeGet('cred:github-advisory');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      // secure-store unavailable (e.g. CI environment) — fall through to env var
+    }
+    return process.env.VULNSWEEP_GITHUB_TOKEN || process.env.GITHUB_TOKEN || undefined;
   },
 
   /**
    * Per-request HTTP timeout for all enrichment API calls (milliseconds).
    * @type {number}
    */
-  ENRICHMENT_TIMEOUT_MS: 15000,
+  ENRICHMENT_TIMEOUT_MS: 60000,
 
   /**
    * In-process enrichment cache TTL (milliseconds).
@@ -243,7 +385,7 @@ const ENRICHMENT_CONFIG = {
    * GitHub API requires a non-empty User-Agent; NVD recommends one.
    * @type {string}
    */
-  USER_AGENT: 'VulnSweep/1.0 (https://github.com/vulnsweep)',
+  USER_AGENT: 'VulnSweep/1.1.0 (https://github.com/vulnsweep)',
 
   /**
    * CISA Known Exploited Vulnerabilities catalog static JSON feed.
@@ -296,6 +438,23 @@ const LICENSE_CONFIG = {
 };
 
 // ============================================
+// TRIAL CONFIGURATION
+// ============================================
+
+/**
+ * Trial/freemium usage limits for unlicensed users.
+ * @namespace TRIAL_CONFIG
+ */
+const TRIAL_CONFIG = {
+  /**
+   * Maximum number of vulnerability fixes available in the free trial.
+   * Once consumed, user must purchase a license to apply further fixes.
+   * @type {number}
+   */
+  MAX_FREE_FIXES: 100,
+};
+
+// ============================================
 // DEPENDENCY UPDATES CONFIGURATION (F13)
 // ============================================
 
@@ -326,6 +485,122 @@ const DEP_UPDATES_CONFIG = {
 };
 
 // ============================================
+// SCAN CACHE CONFIGURATION (Sprint 3 cache layer)
+// ============================================
+
+/**
+ * Persistent scan result cache configuration.
+ * Controls TTLs per source, debounce timing, and the enabled flag.
+ *
+ * Security note: CISA KEV uses a 2 h TTL (not 24 h) because it tracks
+ * vulnerabilities actively being exploited RIGHT NOW.  A stale "not in KEV"
+ * answer that is up to 24 h old could cause VulnSweep to report a package as
+ * safe when it is under active exploitation.
+ *
+ * @namespace SCAN_CACHE_CONFIG
+ */
+const SCAN_CACHE_CONFIG = {
+  /** Master kill-switch. Set to false to bypass all cache reads and writes. */
+  CACHE_ENABLED: true,
+
+  /**
+   * TTL per source in milliseconds.
+   * Sources not listed here fall back to DEFAULT_TTL_MS.
+   */
+  TTL_BY_SOURCE: {
+    osv: 24 * 60 * 60 * 1000, // 24 h — versioned entries change rarely
+    nvd: 24 * 60 * 60 * 1000, // 24 h — CVSS data changes rarely
+    'github-advisory': 24 * 60 * 60 * 1000, // 24 h — advisory metadata stable
+    'cisa-kev': 2 * 60 * 60 * 1000, // 2 h  — actively exploited; MUST be fresh
+    epss: 24 * 60 * 60 * 1000, // 24 h — EPSS scores change daily at most
+  },
+
+  /** Fallback TTL for any source not listed in TTL_BY_SOURCE. */
+  DEFAULT_TTL_MS: 24 * 60 * 60 * 1000,
+
+  /**
+   * Debounce window for async disk writes (milliseconds).
+   * After a set() call the dirty source is written after this delay,
+   * unless another set() fires first and resets the timer.
+   */
+  SAVE_DEBOUNCE_MS: 2000,
+
+  /**
+   * Source IDs for which caching is active.
+   * npm-audit is intentionally absent — it reads the lockfile and must run fresh.
+   */
+  CACHEABLE_SOURCES: ['osv', 'nvd', 'github-advisory', 'cisa-kev', 'epss'],
+
+  /** Hard invalidation threshold: entries older than this are deleted unconditionally. */
+  HARD_INVALIDATE_AGE_MS: 365 * 24 * 60 * 60 * 1000, // 1 year
+
+  /** Soft refresh threshold: entries older than this trigger a refresh attempt. */
+  SOFT_REFRESH_AGE_MS: 30 * 24 * 60 * 60 * 1000, // 30 days
+
+  /**
+   * Maximum total number of entries across ALL sources before LRU eviction.
+   * 22,000 packages x 4 sources = 88,000 max theoretical entries.
+   * Setting a hard cap at 50,000 entries prevents unbounded disk growth.
+   * Set to 0 to disable size-based eviction.
+   */
+  CACHE_MAX_ENTRIES: 50000,
+
+  /**
+   * Maximum total size in bytes across all cache files before eviction.
+   * Default: 2 GB. Set to 0 to disable size-based eviction.
+   */
+  CACHE_MAX_SIZE_BYTES: 2 * 1024 * 1024 * 1024,
+
+  /** Entries whose CVE publishedDate is within this window are treated as "recent"
+   *  and trigger a soft-refresh attempt even if the cache entry itself is still fresh.
+   *  Default: 3 months. */
+  CVE_RECENT_AGE_MS: 90 * 24 * 60 * 60 * 1000, // 3 months in ms
+};
+
+// ============================================
+// SCANNER CONFIGURATION (Sprint 3)
+// ============================================
+
+/**
+ * Scanner orchestration configuration for the modular vulnerability scanner.
+ * Controls which source plugins are active, concurrency limits, timeouts, and
+ * the default scan mode used when no explicit mode is requested.
+ * @namespace SCANNER_CONFIG
+ */
+const SCANNER_CONFIG = {
+  /**
+   * Which source plugins are active. Order determines display priority.
+   * @type {string[]}
+   */
+  ENABLED_SOURCES: ['npm-audit', 'osv', 'nvd', 'github-advisory', 'cisa-kev'],
+
+  /**
+   * Max packages processed concurrently across all source plugins.
+   * @type {number}
+   */
+  MAX_CONCURRENT_PACKAGES: 10,
+
+  /**
+   * Per-package timeout in milliseconds (applies to each source plugin call).
+   * @type {number}
+   */
+  PER_PACKAGE_TIMEOUT_MS: 60000,
+
+  /**
+   * Pause between batches to avoid rate limiting (milliseconds).
+   * @type {number}
+   */
+  BATCH_PAUSE_MS: 100,
+
+  /**
+   * Scan mode: 'fast' (npm-audit + osv only) or 'full' (all sources).
+   * Unrecognized values fall back to 'fast' in scanner-orchestrator.js.
+   * @type {string}
+   */
+  DEFAULT_SCAN_MODE: 'full',
+};
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -335,7 +610,11 @@ module.exports = {
   API_CONFIG,
   UI_CONFIG,
   PAYPAL_CONFIG,
+  LICENSE_API_CONFIG,
   ENRICHMENT_CONFIG,
+  TRIAL_CONFIG,
   DEP_UPDATES_CONFIG,
   LICENSE_CONFIG,
+  SCANNER_CONFIG,
+  SCAN_CACHE_CONFIG,
 };

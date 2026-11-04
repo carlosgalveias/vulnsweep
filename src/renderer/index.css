@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@config "../../tailwind.config.js";
 
 /* Global Desktop App Aesthetics - Reduced font sizes and spacing */
 @layer base {

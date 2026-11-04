@@ -1,3 +1,4 @@
+import { OP_APPLY_FIXES, OP_INCREMENT_TRIAL_FIX } from '@shared/renderer-api-opcodes.js';
 import { useState, useCallback } from 'react';
 
 /**
@@ -77,7 +78,7 @@ export default function useFixApplication(
           continue;
         }
 
-        const result = await window.electronAPI.applyFixes(projectPath, strategies, {
+        const result = await window.electronAPI.invoke(OP_APPLY_FIXES, projectPath, strategies, {
           bumpVersion,
           removePackageLock,
           removeOverrides,
@@ -136,7 +137,7 @@ export default function useFixApplication(
     // Increment the trial counter exactly once for this entire operation,
     // only if at least one repository was fixed successfully.
     if (anySucceeded) {
-      await window.electronAPI.incrementTrialFix();
+      await window.electronAPI.invoke(OP_INCREMENT_TRIAL_FIX);
       if (typeof onTrialUpdated === 'function') onTrialUpdated();
     }
 

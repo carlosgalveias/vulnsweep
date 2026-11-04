@@ -45,6 +45,9 @@ function isOptedOut() {
 }
 
 function init() {
+  if (_initialized) {
+    return;
+  }
   if (!_loadSdk()) {
     return;
   }
@@ -68,6 +71,7 @@ function init() {
 
 function trackEvent(eventName, props) {
   if (!props) props = {};
+  props.source = 'ui';
 
   if (!_trackEvent) {
     return;
@@ -77,8 +81,6 @@ function trackEvent(eventName, props) {
     return;
   }
 
-  // Do NOT gate on _initialized: the SDK queues events internally (S[]) before
-  // its Promise resolves and flushes them via $() once app.whenReady() completes.
   try {
     const result = _trackEvent(eventName, props);
     if (result && typeof result.then === 'function') {
