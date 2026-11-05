@@ -7,15 +7,11 @@
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
-    "build:renderer": "cross-env NODE_ENV=production vite build && node build-renderer-obfuscate.js",
+    "build:renderer": "cross-env NODE_ENV=production vite build",
     "build": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder",
     "build:win": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --win",
     "build:mac": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --mac",
     "build:linux": "npm run build:renderer && cross-env NODE_ENV=production node build-main.js && electron-builder --linux",
-    "build_com": "cross-env COMMERCIAL_BUILD=true npm run build",
-    "build:win:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --win",
-    "build:mac:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --mac",
-    "build:linux:com": "cross-env COMMERCIAL_BUILD=true npm run build:renderer && cross-env COMMERCIAL_BUILD=true node build-main.js && cross-env COMMERCIAL_BUILD=true electron-builder --linux",
     "build_license": "node scripts/generate-license.js",
     "build:main": "node build-main.js",
     "start": "electron .",
@@ -34,8 +30,7 @@
     "cli:dev": "node src/cli/index.js",
     "cli:prod": "node dist-cli/vulnsweep.js",
     "nuke": "node scripts/nuke-all-data.js",
-    "build:cli:debug": "cross-env SKIP_OBFUSCATION=true node build-cli.js",
-    "build:main:debug": "cross-env SKIP_OBFUSCATION=true NODE_ENV=production node build-main.js"
+    "build:main:debug": "cross-env NODE_ENV=production node build-main.js"
   },
   "bin": {
     "vulnsweep": "./src/cli/index.js"
@@ -87,20 +82,17 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",
-    "javascript-obfuscator": "^5.4.3",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
     "lint-staged": "^17.0.8",
     "postcss": "^8.5.16",
     "prettier": "^3.9.3",
-    "sludge-crypt": "^1.0.5",
     "tailwindcss": "^4.3.2",
     "terser": "^5.48.0",
     "vite": "^8.1.0",
     "wait-on": "^9.0.10"
   },
   "dependencies": {
-    "@aptabase/electron": "0.3.1",
     "@tailwindcss/postcss": "^4.3.2",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
@@ -117,15 +109,6 @@
     "productName": "VulnSweep",
     "icon": "assets/logo.png",
     "asar": true,
-    "electronFuses": {
-      "runAsNode": false,
-      "enableNodeOptionsEnvironmentVariable": false,
-      "enableNodeCliInspectArguments": false,
-      "enableEmbeddedAsarIntegrityValidation": true,
-      "onlyLoadAppFromAsar": true,
-      "grantFileProtocolExtraPrivileges": true,
-      "enableCookieEncryption": true
-    },
     "asarUnpack": [
       "**/*.node"
     ],

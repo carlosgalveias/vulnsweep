@@ -7,8 +7,6 @@
  * @module config/constants
  */
 
-const IS_DEV = process.env.NODE_ENV === 'development';
-
 // ============================================
 // GIT CONFIGURATION
 // ============================================
@@ -168,110 +166,6 @@ const UI_CONFIG = {
 };
 
 // ============================================
-// PAYMENT CONFIGURATION
-// ============================================
-
-/**
- * PayPal payment link configuration for the "Success URL" payment flow.
- * The main process opens a BrowserWindow to PAYMENT_URL, then monitors
- * navigation events. When the URL matches SUCCESS_HOST + SUCCESS_PATH,
- * the window is closed and a license is generated automatically.
- * @namespace PAYPAL_CONFIG
- */
-const PAYPAL_CONFIG = {
-  /**
-   * PayPal Payment Link URL for the promo price period.
-   * @type {string}
-   */
-  PAYMENT_URL_PROMO: IS_DEV
-    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_PROMO_ID'
-    : 'https://www.paypal.com/ncp/payment/TP9D9QU6VRGBQ',
-
-  /**
-   * PayPal Payment Link URL for the full (non-promo) price.
-   * @type {string}
-   */
-  PAYMENT_URL_FULL: IS_DEV
-    ? 'https://www.sandbox.paypal.com/ncp/payment/SANDBOX_FULL_ID'
-    : 'https://www.paypal.com/ncp/payment/UXDUB588356H4',
-
-  /**
-   * Hostname of the success/return URL configured in the PayPal payment link.
-   * PayPal will redirect the buyer here after a successful payment.
-   * @type {string}
-   */
-  SUCCESS_HOST: 'vulnsweep.app',
-
-  /**
-   * Path portion of the success/return URL.
-   * @type {string}
-   */
-  SUCCESS_PATH: '/success',
-};
-
-// ============================================
-// LICENSE API CONFIGURATION
-// ============================================
-
-/**
- * Derives the client API key at runtime from two XOR'd halves.
- * Neither half alone reveals the key; both appear as random hex.
- * @returns {string} 64-char hex API key
- */
-function _deriveClientKey() {
-  const _a = '1876fda7b7230ed4b0eb8e855cce3914d845a49fae7534b070478241d3260d34';
-  const _b = '8064b378cce44f4c0654536452e824bb57fd30e44441ebf8fd5b2b1f70584747';
-  let r = '';
-  for (let i = 0; i < _a.length; i++) {
-    r += (parseInt(_a[i], 16) ^ parseInt(_b[i], 16)).toString(16);
-  }
-  return r;
-}
-
-/**
- * License verification API configuration.
- * The Cloudflare Worker at this URL handles PayPal transaction verification
- * and returns activation tokens for valid purchases.
- * @namespace LICENSE_API_CONFIG
- */
-const LICENSE_API_CONFIG = {
-  /**
-   * Base URL of the license verification Worker.
-   * @type {string}
-   */
-  URL: IS_DEV
-    ? 'https://vulnsweep-license.crazyprints4u.workers.dev'
-    : 'https://vulnsweep-license-production.crazyprints4u.workers.dev',
-
-  /**
-   * Endpoint for verifying PayPal transactions.
-   * Accepts POST { email, transactionId } and returns { verified, activationToken } or { verified, error }.
-   * @type {string}
-   */
-  VERIFY_ENDPOINT: '/verify',
-
-  /**
-   * Health check endpoint for connectivity testing.
-   * @type {string}
-   */
-  HEALTH_ENDPOINT: '/health',
-
-  /**
-   * HTTP request timeout in milliseconds.
-   * @type {number}
-   */
-  TIMEOUT_MS: 15000,
-
-  /**
-   * Client API key sent in X-API-Key header for endpoint authentication.
-   * The real security is server-side PayPal verification; this prevents
-   * arbitrary access to the endpoint. Rotate annually.
-   * @type {string}
-   */
-  CLIENT_API_KEY: _deriveClientKey(),
-};
-
-// ============================================
 // ENRICHMENT CONFIGURATION
 // ============================================
 
@@ -401,57 +295,6 @@ const ENRICHMENT_CONFIG = {
    * @type {string}
    */
   EPSS_API_URL: 'https://api.first.org/data/v1/epss',
-};
-
-// ============================================
-// LICENSE CONFIGURATION
-// ============================================
-
-/**
- * License pricing and duration constants for Feature A (Yearly Pricing).
- * @namespace LICENSE_CONFIG
- */
-const LICENSE_CONFIG = {
-  /**
-   * Promotional price in EUR, active within the first PROMO_DAYS days of install.
-   * @type {number}
-   */
-  PROMO_PRICE_EUR: 9.99,
-
-  /**
-   * Full price in EUR, active after the PROMO_DAYS window expires.
-   * @type {number}
-   */
-  FULL_PRICE_EUR: 29.99,
-
-  /**
-   * Number of days from install during which the promo price is active.
-   * @type {number}
-   */
-  PROMO_DAYS: 30,
-
-  /**
-   * Duration of a purchased license in days (365 = 1 year / annual license).
-   * @type {number}
-   */
-  LICENSE_DURATION_DAYS: 365,
-};
-
-// ============================================
-// TRIAL CONFIGURATION
-// ============================================
-
-/**
- * Trial/freemium usage limits for unlicensed users.
- * @namespace TRIAL_CONFIG
- */
-const TRIAL_CONFIG = {
-  /**
-   * Maximum number of vulnerability fixes available in the free trial.
-   * Once consumed, user must purchase a license to apply further fixes.
-   * @type {number}
-   */
-  MAX_FREE_FIXES: 100,
 };
 
 // ============================================
@@ -609,12 +452,8 @@ module.exports = {
   CACHE_CONFIG,
   API_CONFIG,
   UI_CONFIG,
-  PAYPAL_CONFIG,
-  LICENSE_API_CONFIG,
   ENRICHMENT_CONFIG,
-  TRIAL_CONFIG,
   DEP_UPDATES_CONFIG,
-  LICENSE_CONFIG,
   SCANNER_CONFIG,
   SCAN_CACHE_CONFIG,
 };

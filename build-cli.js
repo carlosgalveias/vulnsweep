@@ -1,23 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, unlinkSync } from 'fs';
 import { platform } from 'os';
 import esbuild from 'esbuild';
-import JavaScriptObfuscator from 'javascript-obfuscator';
-import { cliConfig } from './obfuscation.config.js';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf-8'));
-const skipObfuscation = process.env.SKIP_OBFUSCATION === 'true';
-
-/**
- * Obfuscates a built JS file in-place using javascript-obfuscator.
- * @param {string} filePath - Path to the file to obfuscate
- * @param {object} config - Obfuscation config object
- */
-function obfuscateFile(filePath, config) {
-  const code = readFileSync(filePath, 'utf-8');
-  const result = JavaScriptObfuscator.obfuscate(code, config);
-  writeFileSync(filePath, result.getObfuscatedCode());
-  console.log(`  ✓ Obfuscated: ${filePath}`);
-}
 
 async function buildCli() {
   console.log('Building VulnSweep CLI...');
@@ -38,7 +23,7 @@ async function buildCli() {
     drop: ['debugger'],
     dropLabels: ['DEV'],
     mangleProps: /_internal$|_private$/,
-    external: ['electron', 'sludge-crypt', 'systeminformation', 'secure-ls'],
+    external: ['electron', 'systeminformation', 'secure-ls'],
     define: {
       'process.env.NODE_ENV': '"production"',
     },
@@ -58,15 +43,6 @@ async function buildCli() {
     /* not present — OK */
   }
 
-  // Production obfuscation step
-  if (!skipObfuscation) {
-    console.log('\nApplying production obfuscation...');
-    obfuscateFile('dist-cli/vulnsweep.js', cliConfig);
-    console.log('✓ Obfuscation complete');
-  } else {
-    console.log('\n⚠ Obfuscation skipped (SKIP_OBFUSCATION=true)');
-  }
-
   // Generate platform-specific launcher scripts
   generateLaunchers();
 
@@ -80,7 +56,6 @@ async function buildCli() {
     os: ['win32', 'linux', 'darwin'],
     files: ['vulnsweep.js', 'vulnsweep.cmd', 'vulnsweep'],
     dependencies: {
-      'sludge-crypt': pkg.dependencies['sludge-crypt'],
       systeminformation: pkg.dependencies['systeminformation'],
       'secure-ls': pkg.dependencies['secure-ls'],
     },

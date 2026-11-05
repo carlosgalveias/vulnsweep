@@ -17,7 +17,7 @@ This document provides a detailed technical overview of VulnSweep's architecture
 11. [Cross-Platform Storage](#cross-platform-storage)
 12. [License and Date Control Files](#license-and-date-control-files)
 13. [Build System and Packaging](#build-system-and-packaging)
-14. [Sprint 2 â€” Analytics, Yearly Licensing, About Tab, License Backup/Restore](#sprint-2--analytics-yearly-licensing-about-tab-license-backuprestore)
+14. [Sprint 2 â€” Yearly Licensing, About Tab, License Backup/Restore](#sprint-2--yearly-licensing-about-tab-license-backuprestore)
 15. [Sprint 3 -- Modular Vulnerability Scanner Architecture](#sprint-3--modular-vulnerability-scanner-architecture)
 
 ## High-Level Architecture
@@ -93,10 +93,9 @@ Located in `src/renderer/`, this layer handles all user interactions and visual 
     |   +-- Modal.jsx              # Reusable confirmation dialog
     |   +-- Spinner.jsx            # Loading indicator component
     |   +-- Badge.jsx              # Severity/status/risk badge (v1.5.0+)
-    |   +-- BuyModal.jsx           # Commercial purchase flow
     |   +-- StatisticsTab.jsx      # Scan statistics display
     |   +-- InfoTooltip.jsx        # Reusable tooltip component (v1.4.0+)
-    |   +-- AboutTab.jsx           # About tab: license status, renewal, analytics opt-out (v1.1.0+)
+    |   +-- AboutTab.jsx           # About tab: license status, renewal (v1.1.0+)
     |   +-- ErrorBoundary.jsx      # React error boundary
     +-- hooks/
         +-- useProjectDiscovery.js     # Project discovery state management
@@ -120,12 +119,10 @@ Located in `src/main/`, this layer handles all system operations and business lo
     src/main/
     +-- main.js                 # Electron entry, window management, IPC handlers
     +-- config/
-    |   +-- constants.js        # UI, PayPal, and LICENSE_CONFIG pricing constants
+    |   +-- constants.js        # UI, scanner, cache, enrichment, git and API constants
     +-- modules/
     |   +-- discovery.js        # Project discovery logic
     |   +-- git.js              # Git operations wrapper
-    |   +-- license.js          # License validation, activation, expiry, backup/restore
-    |   +-- analytics.js        # Aptabase analytics module with opt-out (v1.1.0+)
     |   +-- audit/              # npm audit analysis and fix strategies
     |       +-- index.js
     |       +-- parsers/        # Vulnerability output parsers
@@ -176,18 +173,6 @@ Located in `src/main/`, this layer handles all system operations and business lo
 
 **Risk Assessment**: Major semver bump = HIGH; minor/patch = LOW.
 
-### license.js
-
-**Purpose**: License validation, activation, and install-date tracking for the commercial distribution.
-
-| Function              | Description                                                  |
-| --------------------- | ------------------------------------------------------------ |
-| checkLicense()        | Validates device-bound license from store and .vsweep marker |
-| activateLicense(data) | Generates and persists license after payment                 |
-| generateLicense()     | Called after PayPal success URL detected                     |
-| getInstallInfo()      | Returns promo pricing info based on install timestamp        |
-| getPromoDefaults()    | Returns safe fallback object for IPC error paths             |
-
 ## Data Flow
 
 1. **Select Folder** - select-folder IPC -> dialog -> path -> auto-triggers discover-projects
@@ -203,9 +188,9 @@ React hooks only (no Redux/MobX). Core state: selectedFolder, projects, vulnerab
 
 ## IPC Communication
 
-Active channels: select-folder, discover-projects, analyze-project, analyze-projects, apply-fixes, prepare-repository, commit-and-push, get-commercial-status, activate-license, get-install-info, open-payment-window, get-app-version, open-local-doc, backup-license, restore-license.
+Active channels: select-folder, discover-projects, analyze-project, analyze-projects, apply-fixes, prepare-repository, commit-and-push, get-app-version, open-local-doc, license:scan, sbom:export, sbom:get-save-path.
 
-All handlers return { success: true, content } or { success: false, error }. License handlers replace internal error messages with safe user-facing strings.
+All handlers return { success: true, content } or { success: false, error }.
 
 ## Security Model
 
@@ -267,15 +252,6 @@ A pre-warm call (storeGet('\_init')) is issued inside app.whenReady() in src/mai
 - require('electron') throws: cache ~/.vsweep-store permanently (non-Electron env)
 - app.getPath available: cache userData path permanently
 - app not yet ready: return ~/.vsweep-store WITHOUT caching (retries after app.ready)
-
-**Keys used by license.js**:
-
-| Key | Contents                                             |
-| --- | ---------------------------------------------------- |
-| i   | Install timestamp (ms since epoch, stored as string) |
-| p   | JSON-serialised public key (sludge-crypt)            |
-| k   | JSON-serialised private key (sludge-crypt)           |
-| v   | AES-encrypted license payload (device binding)       |
 
 ---
 
@@ -355,47 +331,17 @@ See BUILDING.md for step-by-step icon generation instructions.
 
 ---
 
-## Sprint 2 -- Analytics, Yearly Licensing, About Tab, License Backup/Restore
+## Sprint 2 -- Yearly Licensing, About Tab, License Backup/Restore
 
 > Added in Sprint 2 (v1.1.0, 2026-05-14).
 
-### Analytics Module
-
-**File:** `src/main/modules/analytics.js` (new)
-
-**Purpose:** Anonymous usage analytics via Aptabase (EU free tier, GDPR-compliant). Provides behavioural telemetry to guide product development without transmitting any personal data, source code, or repository contents.
-
-**Provider:** Aptabase EU region endpoint. App key: `A-EU-9601263447`.
-
-**Event Catalogue:**
-
-| Event Name            | Trigger                                               |
-| --------------------- | ----------------------------------------------------- |
-| `app_initialized`     | Fired once after `app.whenReady()` and store pre-warm |
-| `repo_scanned`        | Fired after each successful npm audit run             |
-| `sbom_generated`      | Fired after SBOM export completes                     |
-| `dependency_updated`  | Fired after each dependency update is applied         |
-| `vulnerability_fixed` | Fired after fix-and-commit cycle completes            |
-| `purchase_completed`  | Fired after successful license activation             |
-
-**Opt-Out Mechanism:**
-
-- Opt-out preference stored under key `analytics_opt_out` in `src/main/utils/secure-store.js`
-- Read once at module initialisation; cached in-process for the session lifetime
-- If opt-out is `true`, all `trackEvent()` calls return immediately without making any network request
-- Preference toggled from the About tab via `set-analytics-opt-out` IPC handler
-
-**Initialisation Sequence:**
-
-1. `app.whenReady()` resolves
-2. Store pre-warm call executes (`storeGet('_init')`)
-3. `analytics.init()` called -- reads opt-out preference, initialises Aptabase client if not opted out
-4. `app_initialized` event fired (if not opted out)
-5. All subsequent event calls use the cached client
+**Note:** The analytics module introduced in this sprint was removed for the open-source release; see the `Removed` entry under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
 ### Yearly Licensing
+
+**Note:** The licensing module and its pricing/trial constants were removed for the open-source release; see the `Removed` entries under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md). The subsections below describe the commercial design as it shipped in v1.1.0.
 
 **Files:** `src/main/modules/license.js` (modified), `src/main/config/constants.js` (modified)
 
@@ -441,7 +387,6 @@ The `get-commercial-status` IPC handler surfaces `{ isLicensed, isExpired, daysR
 - On mount: calls `get-commercial-status` (license data) and `get-app-version` (version string) via IPC
 - Renders: app name + version, license status badge (Licensed / Expired / Trial), masked serial number, renewal date with `daysRemaining` countdown
 - Links: Privacy Policy and Disclaimer opened via `open-local-doc` IPC handler; GitHub Issues link
-- Analytics opt-out toggle: reads initial state from `get-analytics-opt-out` IPC; writes via `set-analytics-opt-out` IPC
 - License Backup button: conditionally rendered when `isLicensed === true`
 - License Restore button: always rendered
 

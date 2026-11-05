@@ -437,7 +437,6 @@ async function prepareRepository(projectPath, allowReset = true, options = {}) {
   console.log(`[Git] removeOverrides: ${removeOverrides}, removePackageLock: ${removePackageLock}`);
 
   const logs = [];
-  let currentBranch = null;
 
   // Always get current branch and pull — skip only the destructive hard reset when allowReset=false
   const branchResult = await getCurrentBranch(projectPath);
@@ -449,7 +448,7 @@ async function prepareRepository(projectPath, allowReset = true, options = {}) {
   if (!branchResult.success) {
     return createError('Failed to get current branch', { branch: null, logs });
   }
-  currentBranch = branchResult.content;
+  const currentBranch = branchResult.content;
 
   if (allowReset) {
     const resetResult = await resetHard(projectPath);

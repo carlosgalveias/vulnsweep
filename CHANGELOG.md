@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Removed
+
+- **Usage telemetry** — all anonymous usage analytics removed from the desktop app and the CLI: the Aptabase client modules [`src/main/modules/analytics.js`](src/main/modules/analytics.js) and [`src/cli/analytics.js`](src/cli/analytics.js), every `trackEvent()` call site, the `set-analytics-opt-out` / `get-analytics-opt-out` IPC pair with its preload opcode pair, the Analytics opt-out toggle in the About tab, the CLI `TELEMETRY` help section, and the `@aptabase/electron` dependency.
+- **Licensing and paywall** — device-bound key issuance and the purchase UI removed: [`src/main/modules/license.js`](src/main/modules/license.js) with its CLI wrappers [`license-manager.js`](src/cli/license-manager.js), [`purchase-handler.js`](src/cli/purchase-handler.js), [`status-handler.js`](src/cli/status-handler.js) and the trial counter store [`trial-store.js`](src/main/utils/trial-store.js); the `BuyModal` purchase dialog, the Header Buy Now / LICENSED badges, the footer quota banner and the splash LICENSED badge; the license IPC channels (`get-commercial-status`, `activate-license`, `get-install-info`, `get-active-price`, `open-payment-window`, `verify-and-activate`, `seed-dev-transaction`, `increment-trial-fix`, `get-trial-status`, `license-backup`, `license-restore`) with their preload opcodes and obfuscation-map entries; the `apply-fixes` quota gate, so fix application is now unconditional.
+- **Commercial configuration constants** — the PayPal payment-link block (`PAYPAL_CONFIG`), the license-verification API block with its XOR-split client key (`LICENSE_API_CONFIG`), the pricing/duration block (`LICENSE_CONFIG`) and the trial fix quota (`TRIAL_CONFIG`) were removed from [`src/main/config/constants.js`](src/main/config/constants.js); only git, cache, API, UI, enrichment, dependency-update, scanner and scan-cache configuration remains.
+- **Electron Fuses hardening** — the `build.electronFuses` block in [`package.json`](package.json) (`runAsNode`, `enableNodeOptionsEnvironmentVariable`, `enableNodeCliInspectArguments`, `enableEmbeddedAsarIntegrityValidation`, `onlyLoadAppFromAsar`, `grantFileProtocolExtraPrivileges`, `enableCookieEncryption`) was removed; packaged builds now use standard electron-builder asar packaging (`"asar": true` with `"asarUnpack": ["**/*.node"]` unchanged). Renderer process isolation (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`) is untouched.
+
+---
+
 ## [1.3.5] - 2026-06-08
 
 > **Bug Fixes — GHSA Enrichment & Independent Advisory Discovery**

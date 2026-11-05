@@ -6,3 +6,4 @@ package.json.backup
 .eli
 
 dist-cli
+.wrangler

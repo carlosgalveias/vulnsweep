@@ -81,8 +81,13 @@ module.exports = {
   // Restore mocks between tests
   restoreMocks: true,
 
-  // Verbose output
-  verbose: true,
+  // Jest defaults verbose to true with multiple projects; keep it off so CI
+  // log captures of npm test stay under bounded output buffers.
+  verbose: false,
+
+  // Hide console.* noise emitted while passing tests run (network-failure
+  // fallback paths log warnings intentionally). Failing suites still print.
+  silent: true,
 
   // Test timeout (10 seconds)
   testTimeout: 10000,

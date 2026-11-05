@@ -2,158 +2,16 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import AboutTab from '../../../src/renderer/components/AboutTab';
 import { createElectronAPIMock, OP } from '../../utils/electron-api-mock';
 
-const LIC_VALID = {
-  isLicensed: true,
-  isExpired: false,
-  serialNumber: 'SN-TEST-1234',
-  expiryDate: new Date(Date.now() + 60 * 86400000).toISOString(),
-  daysUntilRenewal: 60,
-};
-
-const LIC_RENEW_TODAY = {
-  isLicensed: true,
-  isExpired: false,
-  serialNumber: 'SN-TODAY',
-  expiryDate: new Date().toISOString(),
-  daysUntilRenewal: 1,
-};
-
-const LIC_EXPIRED = {
-  isLicensed: false,
-  isExpired: true,
-  serialNumber: 'SN-EXPIRED',
-  expiryDate: new Date(Date.now() - 86400000).toISOString(),
-};
-
 const defaultProps = {
-  licStatus: null,
   appVersion: '1.2.3',
-  analyticsOptOut: false,
-  onAnalyticsOptOutChange: jest.fn(),
-  onLicenseRestored: jest.fn(),
 };
 
 beforeEach(() => {
   window.electronAPI = createElectronAPIMock({
-    [OP.OP_LICENSE_BACKUP]: () => Promise.resolve({ success: true }),
-    [OP.OP_LICENSE_RESTORE]: () => Promise.resolve({ success: true }),
     [OP.OP_OPEN_LOCAL_DOC]: () => Promise.resolve({ success: true }),
     [OP.OP_OPEN_EXTERNAL]: () => Promise.resolve(undefined),
   });
   jest.clearAllMocks();
-});
-
-describe('AboutTab — License Status', () => {
-  it('renders green Licensed badge when isLicensed is true and not expired', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    expect(screen.getByText('✓ Licensed')).toBeInTheDocument();
-  });
-
-  it('renders serialNumber when licStatus.serialNumber is present', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    expect(screen.getByText(/SN-TEST-1234/)).toBeInTheDocument();
-  });
-
-  it('renders expiry date and daysUntilRenewal when licensed', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    expect(screen.getByText(/Renews/)).toBeInTheDocument();
-  });
-
-  it('renders "Renews today" when daysUntilRenewal === 1', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_RENEW_TODAY} />);
-    expect(screen.getByText(/⚠ Renews today/)).toBeInTheDocument();
-  });
-
-  it('renders red Expired badge when licStatus.isExpired is true', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_EXPIRED} />);
-    expect(screen.getByText('✗ License Expired')).toBeInTheDocument();
-  });
-
-  it('renders gray Unlicensed badge when licStatus is null', () => {
-    render(<AboutTab {...defaultProps} licStatus={null} />);
-    expect(screen.getByText(/Unlicensed \(Trial Mode\)/)).toBeInTheDocument();
-  });
-
-  it('does NOT render Licensed badge when licStatus is null', () => {
-    render(<AboutTab {...defaultProps} licStatus={null} />);
-    expect(screen.queryByText('✓ Licensed')).not.toBeInTheDocument();
-  });
-
-  it('does NOT render Licensed badge when license is expired', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_EXPIRED} />);
-    expect(screen.queryByText('✓ Licensed')).not.toBeInTheDocument();
-  });
-});
-
-describe('AboutTab — Backup & Restore', () => {
-  it('shows Backup button only when licStatus.isLicensed === true', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    expect(screen.getByRole('button', { name: /Backup License/i })).toBeInTheDocument();
-  });
-
-  it('does NOT show Backup button when unlicensed', () => {
-    render(<AboutTab {...defaultProps} licStatus={null} />);
-    expect(screen.queryByRole('button', { name: /Backup License/i })).not.toBeInTheDocument();
-  });
-
-  it('does NOT show Backup button when expired', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_EXPIRED} />);
-    expect(screen.queryByRole('button', { name: /Backup License/i })).not.toBeInTheDocument();
-  });
-
-  it('always shows Restore button regardless of license state', () => {
-    render(<AboutTab {...defaultProps} licStatus={null} />);
-    expect(screen.getByRole('button', { name: /Restore License/i })).toBeInTheDocument();
-  });
-
-  it('shows Restore button when licensed', () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    expect(screen.getByRole('button', { name: /Restore License/i })).toBeInTheDocument();
-  });
-
-  it('calls licenseBackup IPC when Backup button is clicked', async () => {
-    render(<AboutTab {...defaultProps} licStatus={LIC_VALID} />);
-    fireEvent.click(screen.getByRole('button', { name: /Backup License/i }));
-    expect(window.electronAPI.invoke).toHaveBeenCalledWith(OP.OP_LICENSE_BACKUP);
-  });
-
-  it('calls licenseRestore IPC when Restore button is clicked', async () => {
-    render(<AboutTab {...defaultProps} licStatus={null} />);
-    fireEvent.click(screen.getByRole('button', { name: /Restore License/i }));
-    expect(window.electronAPI.invoke).toHaveBeenCalledWith(OP.OP_LICENSE_RESTORE);
-  });
-});
-
-describe('AboutTab — Analytics Toggle', () => {
-  it('renders analytics checkbox checked when analyticsOptOut is false', () => {
-    render(<AboutTab {...defaultProps} analyticsOptOut={false} />);
-    const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeChecked();
-  });
-
-  it('renders analytics checkbox unchecked when analyticsOptOut is true', () => {
-    render(<AboutTab {...defaultProps} analyticsOptOut={true} />);
-    const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).not.toBeChecked();
-  });
-
-  it('calls onAnalyticsOptOutChange with toggled value when checkbox changes', () => {
-    const onChange = jest.fn();
-    render(
-      <AboutTab {...defaultProps} analyticsOptOut={false} onAnalyticsOptOutChange={onChange} />
-    );
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(onChange).toHaveBeenCalledWith(true);
-  });
-
-  it('calls onAnalyticsOptOutChange(false) when checkbox is unchecked from opted-out state', () => {
-    const onChange = jest.fn();
-    render(
-      <AboutTab {...defaultProps} analyticsOptOut={true} onAnalyticsOptOutChange={onChange} />
-    );
-    fireEvent.click(screen.getByRole('checkbox'));
-    expect(onChange).toHaveBeenCalledWith(false);
-  });
 });
 
 describe('AboutTab — Documentation & Support', () => {

@@ -40,26 +40,9 @@ export const OP_SCAN_LICENSES = 0x0e;
 export const OP_SBOM_GET_SAVE_PATH = 0x0f;
 export const OP_SBOM_EXPORT = 0x10;
 
-// Commercial & Licensing
-export const OP_GET_COMMERCIAL_STATUS = 0x11;
-export const OP_ACTIVATE_LICENSE = 0x12;
-export const OP_GET_INSTALL_INFO = 0x13;
-export const OP_GET_TRIAL_STATUS = 0x14;
-export const OP_INCREMENT_TRIAL_FIX = 0x15;
-export const OP_OPEN_PAYMENT_WINDOW = 0x16;
-export const OP_VERIFY_AND_ACTIVATE = 0x17;
-export const OP_SEED_DEV_TRANSACTION = 0x18; // DEV-only
-export const OP_GET_ACTIVE_PRICE = 0x19;
-
-// Analytics
-export const OP_SET_ANALYTICS_OPT_OUT = 0x1a;
-export const OP_GET_ANALYTICS_OPT_OUT = 0x1b;
-
 // App Info & Docs
 export const OP_GET_APP_VERSION = 0x1c;
 export const OP_OPEN_LOCAL_DOC = 0x1d;
-export const OP_LICENSE_BACKUP = 0x1e;
-export const OP_LICENSE_RESTORE = 0x1f;
 
 // Scan Cache
 export const OP_CACHE_CLEAR = 0x20;

@@ -214,24 +214,6 @@ export default [
     },
   },
 
-  // Cloudflare Worker globals
-  {
-    files: ['license-worker/**/*.js'],
-    languageOptions: {
-      globals: {
-        Response: 'readonly',
-        Request: 'readonly',
-        TextEncoder: 'readonly',
-        btoa: 'readonly',
-        atob: 'readonly',
-        crypto: 'readonly',
-        fetch: 'readonly',
-        URL: 'readonly',
-        Headers: 'readonly',
-      },
-    },
-  },
-
   // CLI and build scripts — allow console
   {
     files: ['src/cli/**/*.js', 'build-cli.js'],

@@ -99,10 +99,23 @@ function _scheduleSave(sourceId) {
   if (_saveTimers[sourceId]) {
     clearTimeout(_saveTimers[sourceId]);
   }
-  _saveTimers[sourceId] = setTimeout(() => {
+  // Resolve the dir now, in the caller context: the deferred callback must
+  // never hit require() after a Jest environment (or exiting process) dies.
+  const cacheDir = _resolveCacheDirPath();
+  const timer = setTimeout(() => {
     _saveTimers[sourceId] = null;
-    _writeSingleSource(sourceId, _resolveCacheDirPath());
+    try {
+      _writeSingleSource(sourceId, cacheDir);
+    } catch (err) {
+      // Async context: an uncaught throw here surfaces as an unhandled
+      // exception and kills the process. Same non-fatal contract as sync.
+      console.warn(`[scan-cache] Debounced save failed for ${sourceId}: ${err.message}`);
+    }
   }, SCAN_CACHE_CONFIG.SAVE_DEBOUNCE_MS);
+  // Pending debounced writes must not hold the event loop open on their
+  // own; production commits them via flushAndClose() on before-quit.
+  if (typeof timer.unref === 'function') timer.unref();
+  _saveTimers[sourceId] = timer;
 }
 
 /**
