@@ -210,7 +210,7 @@ The check runs:
 
 ## 6. Client API Key Protection
 
-**Note:** The license-verification client API key and its runtime derivation were removed for the open-source release; see the `Removed` entries under `[Unreleased]` in [`CHANGELOG.md`](../CHANGELOG.md). What follows describes the commercial design as it shipped in v1.1.0.
+**Note:** The license-verification client API key and its runtime derivation were removed for the open-source release; see the `Removed` entries under `[1.4.0]` in [`CHANGELOG.md`](../CHANGELOG.md). What follows describes the commercial design as it shipped in v1.1.0.
 
 ### XOR Derivation
 

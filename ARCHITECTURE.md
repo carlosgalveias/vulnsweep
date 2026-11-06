@@ -48,10 +48,10 @@ VulnSweep follows Electron's multi-process architecture:
 
 - **React 18.2** â€” UI library with hooks-based architecture
 - **Vite 5.0** â€” Build tool and development server
-- **Tailwind CSS 3.4** â€” Utility-first CSS framework with custom compact utilities (v1.4.0+)
+- **Tailwind CSS 3.4** â€” Utility-first CSS framework with custom compact utilities (v1.0.4+)
 - **PostCSS** â€” CSS processing
 
-**UI Design System (v1.4.0+)**:
+**UI Design System (v1.0.4+)**:
 
 - Compact desktop app aesthetic with 13px base font size
 - Custom utility classes: `compact-cell`, `compact-header`, `compact-input`, `compact-btn`, `compact-text`, `compact-text-xs`
@@ -92,9 +92,9 @@ Located in `src/renderer/`, this layer handles all user interactions and visual 
     |   +-- LogConsole.jsx         # Real-time log display
     |   +-- Modal.jsx              # Reusable confirmation dialog
     |   +-- Spinner.jsx            # Loading indicator component
-    |   +-- Badge.jsx              # Severity/status/risk badge (v1.5.0+)
+    |   +-- Badge.jsx              # Severity/status/risk badge (v1.0.5+)
     |   +-- StatisticsTab.jsx      # Scan statistics display
-    |   +-- InfoTooltip.jsx        # Reusable tooltip component (v1.4.0+)
+    |   +-- InfoTooltip.jsx        # Reusable tooltip component (v1.0.4+)
     |   +-- AboutTab.jsx           # About tab: license status, renewal (v1.1.0+)
     |   +-- ErrorBoundary.jsx      # React error boundary
     +-- hooks/
@@ -184,7 +184,7 @@ Located in `src/main/`, this layer handles all system operations and business lo
 
 React hooks only (no Redux/MobX). Core state: selectedFolder, projects, vulnerabilities, selectedVulns (Set), logs, progress, isScanning, isApplying, isCommitting, allowReset, modalState.
 
-**v1.6.0+ optimisations**: memo() on Badge/Spinner/InfoTooltip/Modal; useMemo on buttonsState; useCallback/useMemo on sort and selection in VulnerabilityGrid.
+**v1.0.6+ optimisations**: memo() on Badge/Spinner/InfoTooltip/Modal; useMemo on buttonsState; useCallback/useMemo on sort and selection in VulnerabilityGrid.
 
 ## IPC Communication
 
@@ -208,8 +208,8 @@ Renderer: every IPC call checks result.success; failures are logged. ErrorBounda
 ## Performance Considerations
 
 - Registry Cache (src/main/utils/registry-cache.js): caches npm registry responses per scan session
-- React Optimizations: memo(), useCallback, useMemo at all significant boundaries (v1.6.0+)
-- Dynamic Skeleton Rows: ResizeObserver drives skeleton count to match actual grid height (v1.6.0+)
+- React Optimizations: memo(), useCallback, useMemo at all significant boundaries (v1.0.6+)
+- Dynamic Skeleton Rows: ResizeObserver drives skeleton count to match actual grid height (v1.0.6+)
 - Sequential Audit: projects analysed sequentially to avoid overwhelming the npm process pool
 
 ---
@@ -335,13 +335,13 @@ See BUILDING.md for step-by-step icon generation instructions.
 
 > Added in Sprint 2 (v1.1.0, 2026-05-14).
 
-**Note:** The analytics module introduced in this sprint was removed for the open-source release; see the `Removed` entry under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
+**Note:** The analytics module introduced in this sprint was removed for the open-source release; see the `Removed` entry under `[1.4.0]` in [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
 ### Yearly Licensing
 
-**Note:** The licensing module and its pricing/trial constants were removed for the open-source release; see the `Removed` entries under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md). The subsections below describe the commercial design as it shipped in v1.1.0.
+**Note:** The licensing module and its pricing/trial constants were removed for the open-source release; see the `Removed` entries under `[1.4.0]` in [`CHANGELOG.md`](CHANGELOG.md). The subsections below describe the commercial design as it shipped in v1.1.0.
 
 **Files:** `src/main/modules/license.js` (modified), `src/main/config/constants.js` (modified)
 
