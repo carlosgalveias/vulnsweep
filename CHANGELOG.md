@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - TBD
+
+<!-- Placeholder: replace "TBD" with the release date (YYYY-MM-DD) and fill in entries before shipping.
+Open-source conversion release; package.json is already at 1.4.0. The 1.4.0 slot was previously
+blocked by a merge-conflict artifact that mislabeled already-shipped 1.0.x history under inflated minor
+numbers; those sections are now renumbered to their true versions, freeing the 1.4.0 slot again. -->
+
+### Removed
+
+- **Usage telemetry** — all anonymous usage analytics removed from the desktop app and the CLI: the Aptabase client modules [`src/main/modules/analytics.js`](src/main/modules/analytics.js) and [`src/cli/analytics.js`](src/cli/analytics.js), every `trackEvent()` call site, the `set-analytics-opt-out` / `get-analytics-opt-out` IPC pair with its preload opcode pair, the Analytics opt-out toggle in the About tab, the CLI `TELEMETRY` help section, and the `@aptabase/electron` dependency.
+- **Licensing and paywall** — device-bound key issuance and the purchase UI removed: [`src/main/modules/license.js`](src/main/modules/license.js) with its CLI wrappers [`license-manager.js`](src/cli/license-manager.js), [`purchase-handler.js`](src/cli/purchase-handler.js), [`status-handler.js`](src/cli/status-handler.js) and the trial counter store [`trial-store.js`](src/main/utils/trial-store.js); the `BuyModal` purchase dialog, the Header Buy Now / LICENSED badges, the footer quota banner and the splash LICENSED badge; the license IPC channels (`get-commercial-status`, `activate-license`, `get-install-info`, `get-active-price`, `open-payment-window`, `verify-and-activate`, `seed-dev-transaction`, `increment-trial-fix`, `get-trial-status`, `license-backup`, `license-restore`) with their preload opcodes and obfuscation-map entries; the `apply-fixes` quota gate, so fix application is now unconditional.
+- **Commercial configuration constants** — the PayPal payment-link block (`PAYPAL_CONFIG`), the license-verification API block with its XOR-split client key (`LICENSE_API_CONFIG`), the pricing/duration block (`LICENSE_CONFIG`) and the trial fix quota (`TRIAL_CONFIG`) were removed from [`src/main/config/constants.js`](src/main/config/constants.js); only git, cache, API, UI, enrichment, dependency-update, scanner and scan-cache configuration remains.
+- **Electron Fuses hardening** — the `build.electronFuses` block in [`package.json`](package.json) (`runAsNode`, `enableNodeOptionsEnvironmentVariable`, `enableNodeCliInspectArguments`, `enableEmbeddedAsarIntegrityValidation`, `onlyLoadAppFromAsar`, `grantFileProtocolExtraPrivileges`, `enableCookieEncryption`) was removed; packaged builds now use standard electron-builder asar packaging (`"asar": true` with `"asarUnpack": ["**/*.node"]` unchanged). Renderer process isolation (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`) is untouched.
+
+---
+
 ## [1.3.5] - 2026-06-08
 
 > **Bug Fixes — GHSA Enrichment & Independent Advisory Discovery**
@@ -41,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.0] - 2025-06-02
+## [1.2.0] - 2026-06-02
 
 > **CLI Implementation — Full CLI interface for VulnSweep scanner (cross-platform Windows + Linux)**
 
@@ -77,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [1.1.0] - 2026-05-20
+
+<!-- Consolidated: a duplicated "## [1.1.0] - 2026-05-14" section (same release, artifact of the package.json 1.0.4 -> 1.0.0 -> 1.1.0 version regression) was merged into this one. -->
 
 > **Sprints 3, 4 & 5 — Modular Scanner Pipeline, Scan Cache, EPSS, Settings Tab, API Credentials, Rate-Limit Resilience, Cancel Scan**
 
@@ -132,8 +150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPSS scores propagated through `result-aggregator.js` and surfaced in the vulnerability grid for all CVEs regardless of KEV status
 - `epss` registered as a sixth source in `scanner-orchestrator.js`; `result-aggregator.js` updated to merge EPSS fields from the standalone source
 
-#### Sprint 4 — `resolvesDependents` B
-
 #### Sprint 4 -- resolvesDependents BFS Fix
 
 - Fixed `resolvesDependents` field in [`npm-audit-source.js`](src/main/modules/scanner/sources/npm-audit-source.js): BFS traversal now correctly computes which root-cause packages are resolved transitively; previously always empty in the modular scanner
@@ -164,51 +180,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CISA KEV and EPSS score integration into the unified scan result
 - `fetchOsvRaw()` and `extractFixedIn()` added to [`src/main/modules/enrichment/sources/osv-source.js`](src/main/modules/enrichment/sources/osv-source.js); `extractSeverity`, `extractAliases`, `extractUrl` exported for scanner plugin use
 - 12 new behavioural tests for GitHub Advisory source: authenticated header injection, unauthenticated fallback, `Retry-After` respect, exponential backoff computation, jitter bounds, max-retry exhaustion, graceful degradation
-
-### Changed
-
-- GitHub Advisory retry limit increased from **3 to 100** with exponential backoff + jitter (`GITHUB_MAX_RETRIES` in [`constants.js`](src/main/config/constants.js))
-- Scan options (Allow Git Reset, Bump Version, Remove package-lock.json, Remove overrides) moved from Header toolbar into Settings tab; Header now contains only folder selector, Browse button, progress bar, and action buttons
-- Scanner resolves plugins from `enabledSources` only â€” scan mode preset drives source selection
-- [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js) migrated to `scanProjects` IPC + `onScanProgress` event listener; `isEnriching` state and enrichment `useEffect` removed from [`App.jsx`](src/renderer/App.jsx)
-- Scan pipeline: replaced two-phase `analyze-project` + `enrich-vulnerabilities` with single `scan-project` call
-- **Recursive project discovery**: root folder containing package.json is now included as a project, and nested subdirectories with package.json use relative path naming (e.g., 'my_proj/demo')
-- **NVD enrichment with GitHub advisory data**: when NVD CVE references contain GitHub advisory URLs, queries GitHub Advisory for additional patched version information
-
-### Fixed
-
-- **Fast preset source selection bug**: `enabledSources` from settings now correctly limits scanner to selected sources only â€” stale dual-hook settings bug fixed
-- **GitHub Advisory thundering-herd**: rate limiting no longer causes cascading independent backoff delays across concurrent requests (singleton queue shares one wait period)
-- [`VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx): removed dead `isEnriching` / `enrichmentProgress` props
-- Fixed NVD keyword source ([`nvd-keyword-source.js`](src/main/modules/enrichment/sources/nvd-keyword-source.js)) to correctly match CVEs by CPE package identity, extract vulnerable version ranges and `fixedIn` versions from NVD API CPE data, and eliminate false-positive matches for unrelated packages.
-- Fixed NVD keyword source false positive where CPE entries with a pinned exact version (e.g. `cpe:...:1.5.1:*`) incorrectly flagged all installed versions as vulnerable instead of only matching the exact pinned version via `semver.eq()`.
-- Fixed `scripts/full-scan-proj0.js` returning 0 vulnerabilities due to NVD rate-limit queue starvation; [`scanner-orchestrator.js`](src/main/modules/scanner/scanner-orchestrator.js) now accepts a `perPackageTimeoutMs` override for CLI scripts operating at the free-tier rate limit.
-- **Aliases tooltip links fixed**: each CVE/GHSA ID in the Sources column now links to its correct specific URL (CVE to NVD, GHSA to GitHub Advisories) instead of all links incorrectly pointing to the first CVE's NVD page
-- **Cancel scan now aborts in-flight HTTP requests**: AbortSignal propagation added to NVD, GitHub Advisory, OSV, and CISA KEV sources for immediate termination when cancel is pressed
-- **Multi-repo commit state fixed**: resolved vulnerabilities are now removed from the list after successful commit, preventing duplicate commit attempts on the same fixes
-
-### Security
-
-- API credentials stored with AES-256 encryption via `secure-ls` in [`secure-store.js`](src/main/utils/secure-store.js)
-- Credential plaintext cleared from renderer memory immediately after submission â€” before the IPC promise resolves
-- No credential-read IPC channel exposed to renderer process; `credentials:getStatus` returns only masked hint
-- `GITHUB_TOKEN` getter lazy-reads from encrypted store before environment variable fallback
-
-### Added
-
-- **Recursive project discovery**: root folder containing package.json is now included as a project, and nested subdirectories with package.json use relative path naming (e.g., 'my_proj/demo')
-- **NVD enrichment with GitHub advisory data**: when NVD CVE references contain GitHub advisory URLs, queries GitHub Advisory for additional patched version information
-
-### Deprecated
-
-- `enrich-vulnerabilities` IPC channel â€” removed; callers must use `scan-project`
-- [`cve-enricher.js`](src/main/modules/enrichment/cve-enricher.js) â€” deprecated; preserved for test migration; do not add new callers
-
----
-
-## [1.1.0] - 2026-05-14
-
-### Added
 
 #### Feature D -- Usage Analytics ([`src/main/modules/analytics.js`](src/main/modules/analytics.js) NEW
 
@@ -244,12 +215,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- GitHub Advisory retry limit increased from **3 to 100** with exponential backoff + jitter (`GITHUB_MAX_RETRIES` in [`constants.js`](src/main/config/constants.js))
+- Scan options (Allow Git Reset, Bump Version, Remove package-lock.json, Remove overrides) moved from Header toolbar into Settings tab; Header now contains only folder selector, Browse button, progress bar, and action buttons
+- Scanner resolves plugins from `enabledSources` only â€” scan mode preset drives source selection
+- [`useVulnerabilityScanner.js`](src/renderer/hooks/useVulnerabilityScanner.js) migrated to `scanProjects` IPC + `onScanProgress` event listener; `isEnriching` state and enrichment `useEffect` removed from [`App.jsx`](src/renderer/App.jsx)
+- Scan pipeline: replaced two-phase `analyze-project` + `enrich-vulnerabilities` with single `scan-project` call
+- **Recursive project discovery**: root folder containing package.json is now included as a project, and nested subdirectories with package.json use relative path naming (e.g., 'my_proj/demo')
+- **NVD enrichment with GitHub advisory data**: when NVD CVE references contain GitHub advisory URLs, queries GitHub Advisory for additional patched version information
 - Pricing changed from session-count to annual subscription model
 - Free tier fix-and-commit sessions (10) unchanged for unlicensed users
 
+### Fixed
+
+- **Fast preset source selection bug**: `enabledSources` from settings now correctly limits scanner to selected sources only â€” stale dual-hook settings bug fixed
+- **GitHub Advisory thundering-herd**: rate limiting no longer causes cascading independent backoff delays across concurrent requests (singleton queue shares one wait period)
+- [`VulnerabilityGrid.jsx`](src/renderer/components/VulnerabilityGrid.jsx): removed dead `isEnriching` / `enrichmentProgress` props
+- Fixed NVD keyword source ([`nvd-keyword-source.js`](src/main/modules/enrichment/sources/nvd-keyword-source.js)) to correctly match CVEs by CPE package identity, extract vulnerable version ranges and `fixedIn` versions from NVD API CPE data, and eliminate false-positive matches for unrelated packages.
+- Fixed NVD keyword source false positive where CPE entries with a pinned exact version (e.g. `cpe:...:1.5.1:*`) incorrectly flagged all installed versions as vulnerable instead of only matching the exact pinned version via `semver.eq()`.
+- Fixed `scripts/full-scan-proj0.js` returning 0 vulnerabilities due to NVD rate-limit queue starvation; [`scanner-orchestrator.js`](src/main/modules/scanner/scanner-orchestrator.js) now accepts a `perPackageTimeoutMs` override for CLI scripts operating at the free-tier rate limit.
+- **Aliases tooltip links fixed**: each CVE/GHSA ID in the Sources column now links to its correct specific URL (CVE to NVD, GHSA to GitHub Advisories) instead of all links incorrectly pointing to the first CVE's NVD page
+- **Cancel scan now aborts in-flight HTTP requests**: AbortSignal propagation added to NVD, GitHub Advisory, OSV, and CISA KEV sources for immediate termination when cancel is pressed
+- **Multi-repo commit state fixed**: resolved vulnerabilities are now removed from the list after successful commit, preventing duplicate commit attempts on the same fixes
+
+### Security
+
+- API credentials stored with AES-256 encryption via `secure-ls` in [`secure-store.js`](src/main/utils/secure-store.js)
+- Credential plaintext cleared from renderer memory immediately after submission â€” before the IPC promise resolves
+- No credential-read IPC channel exposed to renderer process; `credentials:getStatus` returns only masked hint
+- `GITHUB_TOKEN` getter lazy-reads from encrypted store before environment variable fallback
+
+### Deprecated
+
+- `enrich-vulnerabilities` IPC channel â€” removed; callers must use `scan-project`
+- [`cve-enricher.js`](src/main/modules/enrichment/cve-enricher.js) â€” deprecated; preserved for test migration; do not add new callers
+
 ---
 
-## [1.7.0] - 2026-05-07
+## [1.0.7] - 2026-05-07
 
 ### Breaking Changes
 
@@ -273,7 +275,7 @@ Previous releases stored license data in the Windows Registry via REG.exe. This 
 
 ---
 
-## [1.6.0] - 2026-04-30
+## [1.0.6] - 2026-04-30
 
 ### Added
 
@@ -292,7 +294,7 @@ Previous releases stored license data in the Windows Registry via REG.exe. This 
 
 ---
 
-## [1.5.0] - 2026-04-30
+## [1.0.5] - 2026-04-30
 
 ### Added
 
@@ -302,8 +304,7 @@ Previous releases stored license data in the Windows Registry via REG.exe. This 
 ### Changed
 
 - Replaced all arbitrary `bg-gray-*` / `bg-black` classes with semantic `bg-surface-*` / `bg-brand-*` tokens across 6 files
-- Icon system via `luc
-  ide-react icons added to Badge component (severity, status, risk icons)
+- Icon system via `lucide-react` icons added to Badge component (severity, status, risk icons)
 - Eliminated `bg-gray-850` (non-existent class); replaced with `bg-surface-mid`
 
 ### Fixed
@@ -314,7 +315,7 @@ Previous releases stored license data in the Windows Registry via REG.exe. This 
 
 ---
 
-## [1.4.0] - 2026-04-27
+## [1.0.4] - 2026-04-27
 
 ### Added
 

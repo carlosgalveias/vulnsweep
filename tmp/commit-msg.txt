@@ -1,6 +1,0 @@
-fix(build): resolve npm install peer-dep conflict and PostCSS build error
-
-- Add .npmrc with legacy-peer-deps=true to handle eslint-plugin-import/
-  eslint-plugin-react peer dep conflicts with eslint 10
-- Add @tailwindcss/postcss devDependency and update postcss.config.js
-  for tailwindcss v4 compatibility (plugin moved to separate package)

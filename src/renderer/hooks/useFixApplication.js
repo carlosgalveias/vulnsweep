@@ -1,4 +1,4 @@
-import { OP_APPLY_FIXES, OP_INCREMENT_TRIAL_FIX } from '@shared/renderer-api-opcodes.js';
+import { OP_APPLY_FIXES } from '@shared/renderer-api-opcodes.js';
 import { useState, useCallback } from 'react';
 
 /**
@@ -9,8 +9,6 @@ import { useState, useCallback } from 'react';
  * @param {Function} setVulnerabilities - Function to update vulnerabilities state
  * @param {Array} projects - Array of discovered projects
  * @param {boolean} bumpVersion - Whether to bump patch version when applying fixes
- * @param {Function|null} onTrialUpdated - Optional callback invoked after a successful fix
- *   application so the caller can refresh the trial status shown in the footer.
  * @param {Function|null} onRepoDirtied - Optional callback when a repo gets dirty fixes applied.
  * @param {boolean} removePackageLock - Whether to delete package-lock.json before applying fixes
  * @param {boolean} removeOverrides - Whether to strip overrides/resolutions from package.json
@@ -23,7 +21,6 @@ export default function useFixApplication(
   setVulnerabilities,
   projects,
   bumpVersion = true,
-  onTrialUpdated = null,
   onRepoDirtied = null,
   removePackageLock = false,
   removeOverrides = false
@@ -51,7 +48,6 @@ export default function useFixApplication(
     });
 
     // Apply fixes per project
-    let anySucceeded = false;
     for (const [projectPath, projectVulns] of vulnsByProject.entries()) {
       const projectName = projects.find((p) => p.path === projectPath)?.name || 'Unknown';
       addLog('info', `Applying ${projectVulns.length} fix(es) to ${projectName}...`);
@@ -85,7 +81,6 @@ export default function useFixApplication(
         });
 
         if (result.success) {
-          anySucceeded = true;
           // Update status to 'resolved' for applied fixes
           setVulnerabilities((prev) =>
             prev.map((v) =>
@@ -105,15 +100,6 @@ export default function useFixApplication(
           if (typeof onRepoDirtied === 'function') {
             onRepoDirtied(projectPath);
           }
-        } else if (result.trialExhausted) {
-          // Trial exhausted — reset status back to 'pending' so the vulnerability remains
-          // visible and actionable once the user upgrades.
-          setVulnerabilities((prev) =>
-            prev.map((v) =>
-              projectVulns.find((pv) => pv.id === v.id) ? { ...v, status: 'pending' } : v
-            )
-          );
-          addLog('error', result.error || 'Free fixes exhausted. Please upgrade to continue.');
         } else {
           // Update status to 'failed'
           setVulnerabilities((prev) =>
@@ -134,13 +120,6 @@ export default function useFixApplication(
       }
     }
 
-    // Increment the trial counter exactly once for this entire operation,
-    // only if at least one repository was fixed successfully.
-    if (anySucceeded) {
-      await window.electronAPI.invoke(OP_INCREMENT_TRIAL_FIX);
-      if (typeof onTrialUpdated === 'function') onTrialUpdated();
-    }
-
     setIsApplying(false);
     addLog('success', 'Fix application complete');
   }, [
@@ -152,7 +131,6 @@ export default function useFixApplication(
     bumpVersion,
     removePackageLock,
     removeOverrides,
-    onTrialUpdated,
     onRepoDirtied,
   ]);
 

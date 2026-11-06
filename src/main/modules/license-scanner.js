@@ -6,8 +6,7 @@
  * Scans all packages declared in a project's package-lock.json for
  * SPDX license information and classifies each into a risk tier.
  *
- * IMPORTANT: This file is the F9 license-compliance module.
- * Do NOT confuse with src/main/modules/license.js (payment module).
+ * F9 license-compliance module.
  */
 
 const fs = require('fs');

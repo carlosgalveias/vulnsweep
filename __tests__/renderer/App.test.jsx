@@ -206,7 +206,7 @@ describe('App component', () => {
       render(<App />);
 
       // useFixApplication: addLog, vulnerabilities, selectedVulns, setVulnerabilities,
-      // projects, bumpVersion, refreshTrialStatus, addDirtyRepo, removePackageLock, removeOverrides
+      // projects, bumpVersion, addDirtyRepo, removePackageLock, removeOverrides
       expect(useFixApplication).toHaveBeenCalled();
       expect(useFixApplication).toHaveBeenCalledWith(
         expect.any(Function), // addLog
@@ -215,7 +215,6 @@ describe('App component', () => {
         expect.any(Function), // setVulnerabilities
         [], // projects
         true, // bumpVersion
-        expect.any(Function), // refreshTrialStatus
         expect.any(Function), // addDirtyRepo
         false, // removePackageLock default
         false // removeOverrides default
@@ -621,8 +620,7 @@ describe('App component', () => {
 
       // depUpdatesDirty is false on initial render, so commitAndPush must not
       // call the IPC endpoint for any repo.
-      // Note: invoke may be called for other purposes (e.g. BuyModal fetches pricing),
-      // so we assert specifically that OP_COMMIT_AND_PUSH (0x04) was never dispatched.
+      // We assert specifically that OP_COMMIT_AND_PUSH (0x04) was never dispatched.
       const commitCalls = window.electronAPI.invoke.mock.calls.filter((args) => args[0] === 0x04);
       expect(commitCalls).toHaveLength(0);
     });

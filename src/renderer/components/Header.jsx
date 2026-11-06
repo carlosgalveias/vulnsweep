@@ -9,30 +9,12 @@ function Header({
   buttonsState,
   scanButtonLabel = 'Scan & Audit',
   applyButtonLabel = 'Apply Selected Fixes',
-  licStatus,
-  trialStatus,
-  onBuyNow,
   isScanning = false,
   isCancelling = false,
 }) {
   const showProgress = progress && progress.total > 0;
-  const isUnlicensedCommercial = licStatus?.isCommercial && !licStatus?.isLicensed;
-  const trialActive = isUnlicensedCommercial && trialStatus && !trialStatus.trialExhausted;
-  const canApplyFix = !isUnlicensedCommercial || trialActive;
-
-  const disableApplyFixes = !buttonsState.applyFixes || !canApplyFix;
-  const applyFixesTitle = trialActive
-    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
-    : isUnlicensedCommercial
-      ? 'Requires commercial license or active trial'
-      : '';
-
-  const disableCommitPush = !buttonsState.commitPush || !canApplyFix;
-  const commitPushTitle = trialActive
-    ? `${trialStatus.fixesRemaining} fix${trialStatus.fixesRemaining !== 1 ? 'es' : ''} remaining in trial`
-    : isUnlicensedCommercial
-      ? 'Requires commercial license or active trial'
-      : '';
+  const disableApplyFixes = !buttonsState.applyFixes;
+  const disableCommitPush = !buttonsState.commitPush;
 
   // Derive scan button appearance based on scanning/cancelling state:
   //   - Cancelling (in-flight abort): muted grey, disabled
@@ -100,7 +82,6 @@ function Header({
           <button
             onClick={onApplyFixes}
             disabled={disableApplyFixes}
-            title={applyFixesTitle}
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
               !disableApplyFixes
                 ? 'bg-orange-600 hover:bg-orange-700 text-white'
@@ -112,7 +93,6 @@ function Header({
           <button
             onClick={onCommitPush}
             disabled={disableCommitPush}
-            title={commitPushTitle}
             className={`compact-btn rounded transition-colors duration-200 whitespace-nowrap ${
               !disableCommitPush
                 ? 'bg-green-600 hover:bg-green-700 text-white'
@@ -121,19 +101,6 @@ function Header({
           >
             Commit &amp; Push
           </button>
-          {licStatus?.isCommercial && !licStatus?.isLicensed && (
-            <button
-              onClick={onBuyNow}
-              className="compact-btn bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors duration-200 whitespace-nowrap font-bold"
-            >
-              Buy Now
-            </button>
-          )}
-          {licStatus?.isCommercial && licStatus?.isLicensed && (
-            <span className="compact-btn bg-green-700 text-green-100 rounded whitespace-nowrap font-bold tracking-wide cursor-default select-none">
-              &#10003; LICENSED
-            </span>
-          )}
         </div>
       </div>
     </header>

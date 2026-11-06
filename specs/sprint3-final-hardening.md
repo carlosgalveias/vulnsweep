@@ -289,7 +289,7 @@ Everything else (OP\_ names, IPC channel strings, internal variable names) gets 
 [`LICENSE_API_CONFIG.CLIENT_API_KEY`](src/main/config/constants.js:256) is a 64-character hex string sitting as a single literal:
 
 ```javascript
-CLIENT_API_KEY: '98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73',
+CLIENT_API_KEY: '<REDACTED — rotated on release>',
 ```
 
 Even with `splitStrings` (10-char chunks) and `stringArrayEncoding: ['base64']`, the fragments are trivially reassembled. A `strings` dump of the bundle → base64 decode each fragment → concatenate → you have the key. This is the equivalent of hiding your house key under a transparent doormat.
@@ -304,7 +304,7 @@ The developer stored a secret as a literal string and trusted the obfuscator to 
 
 ```javascript
 // Run this ONCE to generate the mask and XOR'd value:
-const REAL_KEY = '98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73';
+const REAL_KEY = '<REDACTED — rotated on release>';
 // Generate random 64-char hex mask:
 const crypto = require('crypto');
 const _K1 = crypto.randomBytes(32).toString('hex'); // 64 hex chars
@@ -341,7 +341,7 @@ console.log('_K2:', _K2);
 +
  const LICENSE_API_CONFIG = {
    // ...
--  CLIENT_API_KEY: '98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73',
+-  CLIENT_API_KEY: '<REDACTED — rotated on release>',
 +  CLIENT_API_KEY: _deriveClientKey(),
  };
 ```
@@ -378,10 +378,10 @@ This is NOT "unbreakable." It raises the bar from "5 seconds with `strings`" to 
 
 ### Verification
 
-1. Add a temporary `console.log(LICENSE_API_CONFIG.CLIENT_API_KEY)` → confirm it outputs `98124edf7bc74198b6bfdde10e261daf8fb8947bea34df488d1ca95ea37e4a73`
+1. Add a temporary `console.log(LICENSE_API_CONFIG.CLIENT_API_KEY)` → confirm it outputs `<REDACTED — rotated on release>`
 2. Run `npm test -- --testPathPattern=license`
 3. Test CLI activation: `node src/cli/index.js activate --email test@test.com --txn ABC1234567890` → should reach the server (even if verification fails, the key is sent correctly)
-4. Build → unpack ASAR → search for `98124edf` in all files → ZERO matches
+4. Build → unpack ASAR → search for the released key's first 8 hex characters (from the pre-rotation value, kept out of this document) in all files → ZERO matches
 5. Search for `CLIENT_API_KEY` → should appear only as an obfuscated property name (if at all)
 
 ---
@@ -395,7 +395,7 @@ This is NOT "unbreakable." It raises the bar from "5 seconds with `strings`" to 
   - [ ] No `node_modules/sludge-crypt/` directory
   - [ ] No `.ps1` files
   - [ ] No `OP_*` string literals in preload bundle
-  - [ ] No `98124edf...` literal anywhere
+  - [ ] No plaintext client API key literal anywhere
   - [ ] `electronAPI`, `invoke`, `on`, `off` still present in preload (reserved)
 - [ ] App functional smoke test:
   - [ ] Scan a project

@@ -12,7 +12,7 @@
 3. [Renderer Obfuscation](#3-renderer-obfuscation)
 4. [Preload Obfuscation](#4-preload-obfuscation)
 5. [ASAR Integrity](#5-asar-integrity)
-6. [CLIENT_API_KEY Protection](#6-client_api_key-protection)
+6. [Client API Key Protection](#6-client-api-key-protection)
 7. [Build Pipeline Overview](#7-build-pipeline-overview)
 8. [Common Mistakes to Avoid](#8-common-mistakes-to-avoid)
 9. [Security Testing](#9-security-testing)
@@ -208,38 +208,15 @@ The check runs:
 
 ---
 
-## 6. CLIENT_API_KEY Protection
+## 6. Client API Key Protection
+
+**Note:** The license-verification client API key and its runtime derivation were removed for the open-source release; see the `Removed` entries under `[1.4.0]` in [`CHANGELOG.md`](../CHANGELOG.md). What follows describes the commercial design as it shipped in v1.1.0.
 
 ### XOR Derivation
 
-The license API key is **never** stored as a single plaintext string. Instead, two hex halves are XOR'd at runtime in [`src/main/config/constants.js`](../src/main/config/constants.js:221):
+In the commercial build the license API key was **never** stored as a single plaintext string. Two 64-character hex halves were XOR'd at runtime, so neither half alone reveals the key and both look like random hex in the obfuscated bundle.
 
-```js
-function _deriveClientKey() {
-  const _a = '1876fda7b7230ed4...'; // Half A (64 hex chars)
-  const _b = '8064b378cce44f4c...'; // Half B (64 hex chars)
-  let r = '';
-  for (let i = 0; i < _a.length; i++) {
-    r += (parseInt(_a[i], 16) ^ parseInt(_b[i], 16)).toString(16);
-  }
-  return r;
-}
-```
-
-Neither half alone reveals the key. Both look like random hex in the obfuscated bundle.
-
-### Where the Halves Live
-
-- Both in `src/main/config/constants.js`, in the `_deriveClientKey()` function.
-- After obfuscation, they end up as entries in the string array (base64 encoded, shuffled).
-
-### Updating the Key
-
-1. Generate a new 64-char hex key.
-2. Generate a random 64-char hex value for `_b`.
-3. Compute `_a = newKey XOR _b` (character by character, hex).
-4. Replace both values in `_deriveClientKey()`.
-5. Deploy the same key to your Cloudflare Worker.
+After obfuscation the halves ended up as entries in the string array (base64 encoded, shuffled).
 
 ---
 

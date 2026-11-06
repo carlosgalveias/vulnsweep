@@ -4,15 +4,12 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import esbuild from 'esbuild';
-import JavaScriptObfuscator from 'javascript-obfuscator';
 import { IPC_CHANNEL_MAP } from './ipc-channel-map.js';
-import { mainProcessConfig, preloadConfig } from './obfuscation.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const isProduction = process.env.NODE_ENV === 'production';
-const skipObfuscation = process.env.SKIP_OBFUSCATION === 'true';
 
 // Build configuration for main process
 const mainBuildOptions = {
@@ -21,7 +18,7 @@ const mainBuildOptions = {
   platform: 'node',
   target: 'node18',
   outfile: 'dist-main/main.js',
-  external: ['electron', '@aptabase/electron'],
+  external: ['electron'],
   minify: isProduction,
   sourcemap: !isProduction,
   treeShaking: true,
@@ -56,18 +53,6 @@ const preloadBuildOptions = {
     drop: ['debugger'],
   }),
 };
-
-/**
- * Obfuscates a built JS file in-place using javascript-obfuscator.
- * @param {string} filePath - Path to the file to obfuscate
- * @param {object} config - Obfuscation config object
- */
-function obfuscateFile(filePath, config) {
-  const code = readFileSync(filePath, 'utf-8');
-  const result = JavaScriptObfuscator.obfuscate(code, config);
-  writeFileSync(filePath, result.getObfuscatedCode());
-  console.log(`  ✓ Obfuscated: ${filePath}`);
-}
 
 /**
  * Strips OP_* constant names from bundled output.
@@ -201,10 +186,13 @@ async function build() {
         }
       }
 
-      // Sanity check: we expect at least 44 replacements across main + preload
-      // (each channel appears in at least main.js AND one preload file)
-      if (grandTotal < 44) {
-        console.error(`\n✗ FATAL: Only ${grandTotal} IPC replacements made (expected ≥44).`);
+      // Sanity check: each mapped channel is referenced by main.js AND a preload
+      // script, so the floor tracks the map rather than a hard-coded count.
+      const minReplacements = Object.keys(IPC_CHANNEL_MAP).length;
+      if (grandTotal < minReplacements) {
+        console.error(
+          `\n✗ FATAL: Only ${grandTotal} IPC replacements made (expected ≥${minReplacements}).`
+        );
         console.error('  This means some channels were not found in the build output.');
         console.error(
           '  Possible causes: channel name typo, esbuild tree-shook it, or quote style issue.'
@@ -230,17 +218,6 @@ async function build() {
     writeFileSync('dist-main/package.json', JSON.stringify(minimalPackageJson, null, 2));
     console.log('✓ Package.json copied to dist-main');
 
-    // Production obfuscation step
-    if (isProduction && !skipObfuscation) {
-      console.log('\nApplying production obfuscation...');
-      obfuscateFile('dist-main/main.js', mainProcessConfig);
-      obfuscateFile('dist-main/preload/preload.js', preloadConfig);
-      obfuscateFile('dist-main/preload/splash-preload.js', preloadConfig);
-      console.log('✓ Obfuscation complete');
-    } else if (skipObfuscation) {
-      console.log('\n⚠ Obfuscation skipped (SKIP_OBFUSCATION=true)');
-    }
-
     // ── ASAR Integrity Hash Injection (production only) ─────────────────
     if (isProduction) {
       console.log('\nComputing ASAR integrity hashes...');
@@ -257,9 +234,9 @@ async function build() {
 
       if (!preloadReplaced || !splashReplaced) {
         console.error('✗ FATAL: Integrity hash placeholders not found in dist-main/main.js');
-        console.error('  The obfuscator may have transformed the placeholder strings.');
+        console.error('  A build step may have transformed the placeholder strings.');
         console.error('  Ensure {{PRELOAD_INTEGRITY_HASH}} and {{SPLASH_INTEGRITY_HASH}}');
-        console.error('  are in reservedStrings in obfuscation.config.js');
+        console.error('  survive intact to the end of the pipeline.');
         process.exit(1);
       }
 

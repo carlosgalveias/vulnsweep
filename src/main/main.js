@@ -2,25 +2,12 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Import backend modules
-const {
-  UI_CONFIG,
-  PAYPAL_CONFIG,
-  TRIAL_CONFIG,
-  LICENSE_API_CONFIG,
-} = require('./config/constants');
+const { UI_CONFIG } = require('./config/constants');
 const scanTelemetry = require('./utils/scan-telemetry');
 const scanCache = require('./modules/scanner/scan-cache');
 const audit = require('./modules/audit');
 const discovery = require('./modules/discovery');
 const git = require('./modules/git');
-const license = require('./modules/license');
-const analytics = require('./modules/analytics');
-// Initialize Aptabase analytics synchronously here — BEFORE app.whenReady().
-// The SDK's initialize() checks app.isReady() and silently disables tracking if
-// called after the app is already ready. Calling it here satisfies that contract.
-// Events queued via trackEvent() before the SDK's internal async setup finishes
-// are buffered by the SDK and flushed automatically once setup completes.
-analytics.init();
 const isDevelopment = process.env.NODE_ENV === 'development';
 
 // ── ASAR Integrity Self-Check ───────────────────────────────────────────────
@@ -31,7 +18,6 @@ const _SPLASH_HASH = '{{SPLASH_INTEGRITY_HASH}}';
 
 /**
  * Verifies preload script integrity against build-time embedded hashes.
- * Returns a derived value used downstream — removal breaks license validation.
  * @returns {string} Integrity token (first 8 chars of combined hash)
  */
 function _verifyAsarIntegrity() {
@@ -61,7 +47,6 @@ if (!isDevelopment) {
 // Imported at top level — pre-warm call happens inside app.whenReady() after
 // app.getPath('userData') is available, ensuring the correct store path is used.
 const { storeGet, storeSet, storeRemove } = require('./utils/secure-store');
-const trialStore = require('./utils/trial-store');
 
 // ============================================
 // CREDENTIALS (Sprint 5 Feature B)
@@ -200,18 +185,10 @@ function createSplashWindow() {
   splashWindow.loadFile(splashPath);
 
   // Send version data to splash screen via IPC after page loads
-  splashWindow.webContents.on('did-finish-load', async () => {
-    let isLicensed = false;
-    try {
-      const licStatus = await license.checkLicense();
-      isLicensed = licStatus.isLicensed === true;
-    } catch {
-      // ignore — splash will just not show LICENSED badge
-    }
+  splashWindow.webContents.on('did-finish-load', () => {
     splashWindow.webContents.send('splash:data', {
       version: app.getVersion(),
       appName: app.getName(),
-      isLicensed,
     });
   });
 
@@ -237,9 +214,7 @@ function createWindow() {
     ? path.join(__dirname, '../../assets/mini_logo.png')
     : path.join(__dirname, '../dist-renderer/assets/mini_logo.png');
 
-  // Named persistent session shared between main window and any PayPal popups.
-  // This is required for PayPal's SDK capture flow: the buyer access token is stored
-  // in the session after the login popup, and must be accessible by the main window.
+  // Named persistent session for the app windows; the CSP below is registered on it.
   const SESSION_PARTITION = 'persist:vulnsweep';
 
   // Create the browser window with security settings
@@ -258,14 +233,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload', 'preload.js'),
       // Disable DevTools in production builds (prevents F12, Ctrl+Shift+I, etc.)
       devTools: isDevelopment,
-      // Named partition so PayPal popups can share the same session/cookies
+      // Named partition that the window CSP is registered on
       partition: SESSION_PARTITION,
     },
   });
 
-  // All window.open calls from the renderer are denied or redirected to the system browser.
-  // Payment is handled via a dedicated managed BrowserWindow (open-payment-window IPC handler)
-  // with its own isolated session — no popup sharing is needed.
+  // All window.open calls from the renderer are redirected to the system browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     require('electron').shell.openExternal(url);
     return { action: 'deny' };
@@ -430,10 +403,6 @@ ipcMain.handle('commit-and-push', async (event, projectPath, messageOrOptions) =
 
     if (result.success) {
       sendLogMessage('success', `Changes committed and pushed: ${path.basename(sanitized)}`);
-      const fixCount = Array.isArray(commitOptions?.vulnerabilities)
-        ? commitOptions.vulnerabilities.length
-        : 0;
-      analytics.trackEvent('commit_pushed', { fixCount });
     } else {
       sendLogMessage('error', `Failed to commit/push: ${result.error}`);
     }
@@ -551,18 +520,6 @@ ipcMain.handle('analyze-projects', async (event, projectPaths, allowReset = fals
     }
 
     sendLogMessage('success', `Batch analysis complete: ${results.length} projects analyzed`);
-
-    analytics.trackEvent('repository_scanned', {
-      repoCount: results.length,
-      totalVulnerabilities: results.reduce((s, r) => s + (r.content?.summary?.total || 0), 0),
-      critical: results.reduce((s, r) => s + (r.content?.summary?.critical || 0), 0),
-      high: results.reduce((s, r) => s + (r.content?.summary?.high || 0), 0),
-      medium: results.reduce(
-        (s, r) => s + (r.content?.summary?.medium || r.content?.summary?.moderate || 0),
-        0
-      ),
-      low: results.reduce((s, r) => s + (r.content?.summary?.low || 0), 0),
-    });
     return { success: true, content: results };
   } catch (error) {
     console.error(`[IPC] analyze-projects error: ${error.message}`);
@@ -690,22 +647,6 @@ ipcMain.handle('scan-projects', async (_event, projectPaths, _allowReset) => {
         total: projectPaths.length,
       });
     }
-    const _sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
-    for (const r of results) {
-      for (const v of r.content?.vulnerabilities || []) {
-        let sev = (v.severity || '').toLowerCase();
-        if (sev === 'moderate') sev = 'medium';
-        if (_sevCounts[sev] !== undefined) _sevCounts[sev]++;
-      }
-    }
-    analytics.trackEvent('scan_completed', {
-      repoCount: results.length,
-      totalVulnerabilities: results.reduce(
-        (s, r) => s + (r.content?.vulnerabilities?.length || 0),
-        0
-      ),
-      ..._sevCounts,
-    });
     return { success: true, content: results };
   } catch (err) {
     return { success: false, error: err.message };
@@ -756,12 +697,7 @@ ipcMain.handle('get-scan-settings', async () => {
 });
 
 /**
- * Handler: Apply fixes to a project
- *
- * Gate logic:
- *   1. If user is licensed → allow unconditionally.
- *   2. If unlicensed and trial exhausted (0 fixes remaining) → block with message.
- *   3. If unlicensed and trial not exhausted → allow, then increment fix counter.
+ * Handler: Apply fixes to a project.
  */
 ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {}) => {
   // Support legacy callers that passed bumpVersion as a plain boolean
@@ -774,32 +710,6 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
   try {
     console.log(`[IPC] Applying fixes to: ${projectPath}`);
     sendLogMessage('info', `Applying fixes to ${path.basename(projectPath)}...`);
-
-    // --- Trial / license gate ---
-    let isLicensed = false;
-    try {
-      const licStatus = await license.checkLicense();
-      isLicensed = licStatus.isLicensed === true;
-    } catch (licErr) {
-      console.warn(
-        '[IPC] apply-fixes: license check failed, treating as unlicensed:',
-        licErr.message
-      );
-    }
-
-    if (!isLicensed) {
-      const trialStatus = trialStore.getTrialStatus();
-      if (trialStatus.trialExhausted) {
-        console.log('[IPC] apply-fixes: trial exhausted for unlicensed user.');
-        sendLogMessage('warn', 'Free trial exhausted. Upgrade to apply more fixes.');
-        return {
-          success: false,
-          trialExhausted: true,
-          error: 'Free fixes exhausted. Please upgrade to continue applying fixes.',
-        };
-      }
-    }
-    // ----------------------------
 
     // Validate and sanitize path
     const sanitized = sanitizePath(projectPath);
@@ -825,10 +735,6 @@ ipcMain.handle('apply-fixes', async (event, projectPath, strategies, options = {
       `Fixes applied: ${result.content?.applied?.length || 0} changes, ${result.content?.resolved?.length || 0} resolved`
     );
 
-    const _sevs = (strategies || []).map((s) => (s.severity || 'unknown').toLowerCase());
-    const _sevOrder = ['critical', 'high', 'moderate', 'low', 'unknown'];
-    const _topSev = _sevOrder.find((s) => _sevs.includes(s)) || 'unknown';
-    analytics.trackEvent('vulnerability_fixed', { severity: _topSev, fixCount: strategies.length });
     return { success: true, content: result.content };
   } catch (error) {
     console.error(`[IPC] apply-fixes error: ${error.message}`);
@@ -954,7 +860,6 @@ ipcMain.handle('apply-dep-updates', async (event, projectPath, updates) => {
 
     const commitMessage = result.content.commitMessage || 'updates applied';
     sendLogMessage('success', `Dependency updates applied: ${commitMessage}`);
-    analytics.trackEvent('dependency_updated', { updateCount: updates.length });
     return { success: true, commitMessage };
   } catch (error) {
     console.error(`[IPC] apply-dep-updates error: ${error.message}`);
@@ -1077,72 +982,11 @@ ipcMain.handle('sbom:export', async (event, { licenseResult, format, outputPath 
     await require('fs').promises.writeFile(outputPath, content, 'utf8');
 
     sendLogMessage('success', `SBOM exported: ${path.basename(outputPath)}`);
-    analytics.trackEvent('sbom_generated', { format });
     return { success: true };
   } catch (err) {
     console.error(`[IPC] sbom:export error: ${err.message}`);
     sendLogMessage('error', `SBOM export failed: ${err.message}`);
     return { success: false, error: err.message };
-  }
-});
-
-// ============================================
-// IPC HANDLERS - TRIAL
-// ============================================
-
-/**
- * Handler: Increment the trial fix counter by one, called once per user-initiated
- * "Apply Fixes" operation (not per repository). Licensed users are silently skipped.
- */
-ipcMain.handle('increment-trial-fix', async () => {
-  try {
-    const licStatus = await license.checkLicense();
-    if (licStatus.isLicensed === true) return { success: true, skipped: true };
-    const updated = trialStore.incrementFixCount();
-    return { success: true, fixesConsumed: updated.fixesConsumed };
-  } catch (err) {
-    console.error('[IPC] increment-trial-fix error:', err.message);
-    return { success: false, error: err.message };
-  }
-});
-
-/**
- * Handler: Return current trial status (fixes remaining, days until price change, exhausted flag).
- * Called by the renderer on mount and after each fix application to keep the footer current.
- */
-ipcMain.handle('get-trial-status', async () => {
-  try {
-    return trialStore.getTrialStatus();
-  } catch (err) {
-    console.error('[IPC] get-trial-status error:', err.message);
-    // Safe fallback — show full quota so the UI never incorrectly blocks the user.
-    return {
-      fixesRemaining: TRIAL_CONFIG.MAX_FREE_FIXES,
-      fixesConsumed: 0,
-      daysUntilPriceChange: 30,
-      trialExhausted: false,
-    };
-  }
-});
-
-// ============================================
-// IPC HANDLERS - ANALYTICS (D)
-// ============================================
-
-ipcMain.handle('set-analytics-opt-out', (_event, value) => {
-  try {
-    storeSet('ao', value ? '1' : null);
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle('get-analytics-opt-out', () => {
-  try {
-    return { optOut: storeGet('ao') === '1' };
-  } catch {
-    return { optOut: false };
   }
 });
 
@@ -1313,298 +1157,6 @@ ipcMain.handle('settings:set', (_event, settingsObj) => {
 });
 
 // ============================================
-// IPC HANDLERS - LICENSE
-// ============================================
-
-ipcMain.handle('get-commercial-status', async () => {
-  try {
-    return await license.checkLicense();
-  } catch (err) {
-    console.error('[IPC] get-commercial-status error:', err.message);
-    // Fail closed: isCommercial:false means the renderer treats this as a free/community
-    // build, showing no commercial UI. Safer than exposing monetization intent on error.
-    return { isCommercial: false, isLicensed: false };
-  }
-});
-
-ipcMain.handle('activate-license', async (event, paymentData) => {
-  try {
-    return await license.activateLicense(paymentData);
-  } catch (err) {
-    console.error('[IPC] activate-license error:', err.message);
-    // Do NOT forward err.message to the renderer — it may contain internal file paths,
-    // encryption details, or the hidden .vsweep marker path. Return a safe user message.
-    return { success: false, error: 'License activation failed. Please try again.' };
-  }
-});
-
-ipcMain.handle('get-install-info', () => {
-  try {
-    return license.getInstallInfo();
-  } catch (err) {
-    console.error('[IPC] get-install-info error:', err.message);
-    // Use constants exported from license.js rather than duplicating magic numbers here.
-    return license.getPromoDefaults();
-  }
-});
-
-/**
- * Handler: Return active purchase price (promo vs full) and promo end date.
- * Used by BuyModal to display dynamic pricing without hardcoded constants.
- * @returns {{ price: number, isPromo: boolean, promoEndsAt: string|null }}
- */
-ipcMain.handle('get-active-price', async () => {
-  try {
-    return license.getActivePrice();
-  } catch (err) {
-    console.error('[IPC] get-active-price error:', err.message);
-    const { LICENSE_CONFIG } = require('./config/constants');
-    return { price: LICENSE_CONFIG.PROMO_PRICE_EUR, isPromo: true, promoEndsAt: null };
-  }
-});
-
-/**
- * Handler: Open a payment BrowserWindow pointing at the PayPal payment link.
- * Monitors navigation events; when the success URL is detected the window is
- * closed and { ok: false, needsVerification: true } is returned to the renderer
- * so it can advance to the verification phase. License generation is deferred
- * to the verify-and-activate handler.
- * If the user closes the window manually before payment completes, resolves with
- * { ok: false, cancelled: true }.
- */
-ipcMain.handle('open-payment-window', async (_event, isPromo) => {
-  return new Promise((resolve) => {
-    const paymentUrl = isPromo ? PAYPAL_CONFIG.PAYMENT_URL_PROMO : PAYPAL_CONFIG.PAYMENT_URL_FULL;
-
-    const paymentWin = new BrowserWindow({
-      width: 800,
-      height: 600,
-      autoHideMenuBar: true,
-      title: 'Complete Payment',
-      parent: mainWindow || undefined,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        // Isolated session — completely separate from the main app session.
-        // The permissive PayPal-scoped CSP is applied to this partition only.
-        partition: 'payment-isolated',
-      },
-    });
-
-    paymentWin.setMenuBarVisibility(false);
-    paymentWin.loadURL(paymentUrl);
-
-    let settled = false;
-
-    /**
-     * Checks whether `url` matches the configured PayPal success redirect.
-     * @param {string} url
-     * @returns {boolean}
-     */
-    function isSuccessUrl(url) {
-      try {
-        const parsed = new URL(url);
-        return (
-          parsed.hostname === PAYPAL_CONFIG.SUCCESS_HOST &&
-          parsed.pathname.startsWith(PAYPAL_CONFIG.SUCCESS_PATH)
-        );
-      } catch {
-        return false;
-      }
-    }
-
-    /**
-     * Shared handler for both did-navigate and did-navigate-in-page.
-     * On success URL detection, closes the window and signals the renderer
-     * to advance to the verification phase (no license generated here).
-     * @param {Electron.Event} _evt
-     * @param {string} url
-     */
-    function onNavigate(_evt, url) {
-      if (settled) return;
-      if (!isSuccessUrl(url)) return;
-
-      settled = true;
-      console.log('[Payment] Success URL detected — advancing to verification:', url);
-
-      if (!paymentWin.isDestroyed()) {
-        paymentWin.close();
-      }
-
-      // Signal renderer to show verification form
-      resolve({ ok: false, needsVerification: true });
-    }
-
-    paymentWin.webContents.on('did-navigate', onNavigate);
-    paymentWin.webContents.on('did-navigate-in-page', onNavigate);
-
-    // User closed the window without completing payment
-    paymentWin.on('closed', () => {
-      if (!settled) {
-        settled = true;
-        console.log('[Payment] Window closed by user before payment completed.');
-        resolve({ ok: false, cancelled: true });
-      }
-    });
-  });
-});
-
-/**
- * Handler: Verify a PayPal transaction via the Cloudflare Worker and generate
- * a local license on success. Mirrors the CLI's handleActivate() logic from
- * src/cli/purchase-handler.js.
- *
- * @param {string} email - Email used for PayPal payment
- * @param {string} transactionId - PayPal transaction ID from receipt
- * @returns {{ ok: true, key: string } | { ok: false, error: string }}
- */
-ipcMain.handle('verify-and-activate', async (_event, email, transactionId) => {
-  // === Input Validation (mirrors CLI purchase-handler.js) ===
-  if (!email || !transactionId) {
-    return { ok: false, error: 'Email and Transaction ID are required.' };
-  }
-
-  const trimmedEmail = email.trim().toLowerCase();
-  const trimmedTxn = transactionId.trim();
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-    return { ok: false, error: 'Invalid email format.' };
-  }
-
-  if (!/^[A-Za-z0-9]{10,30}$/.test(trimmedTxn)) {
-    return { ok: false, error: 'Invalid Transaction ID format. Check your PayPal receipt.' };
-  }
-
-  // === Worker Verification ===
-  const verifyUrl = `${LICENSE_API_CONFIG.URL}${LICENSE_API_CONFIG.VERIFY_ENDPOINT}`;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), LICENSE_API_CONFIG.TIMEOUT_MS);
-
-    const response = await fetch(verifyUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
-      },
-      body: JSON.stringify({ email: trimmedEmail, transactionId: trimmedTxn }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    const result = await response.json();
-
-    if (!result.verified) {
-      // Map Worker error codes to user-friendly messages
-      const messages = {
-        transaction_not_found:
-          'Transaction not found. Please verify your Transaction ID from the PayPal receipt.',
-        amount_mismatch: 'Payment amount does not match the license price.',
-        already_used: 'This transaction has already been used with a different email address.',
-        verification_in_progress:
-          'Verification already in progress. Please wait a moment and try again.',
-        invalid_status: 'Payment is still processing. Please wait a few minutes and try again.',
-        transaction_not_completed:
-          'Payment is still processing. Please wait a few minutes and try again.',
-        invalid_amount: 'Payment amount does not match the expected license price.',
-        missing_fields: 'Missing email or transaction ID.',
-        unauthorized: 'Client authentication failed. Please update VulnSweep.',
-        rate_limited: 'Too many attempts. Please wait a minute and try again.',
-        invalid_email: 'Invalid email format.',
-        invalid_transaction_id: 'Invalid Transaction ID format.',
-      };
-      return {
-        ok: false,
-        error: messages[result.error] || result.error || 'Verification failed. Please try again.',
-      };
-    }
-
-    // === Token Validation (mirrors CLI purchase-handler.js lines 125–144) ===
-    if (!result.activationToken || !result.activationToken.includes('.')) {
-      return { ok: false, error: 'Invalid activation response from server. Please try again.' };
-    }
-
-    const [payloadB64] = result.activationToken.split('.');
-    try {
-      const payload = JSON.parse(Buffer.from(payloadB64, 'base64').toString());
-
-      if (payload.exp && payload.exp < Date.now()) {
-        return { ok: false, error: 'Activation token expired. Please try again.' };
-      }
-
-      if (payload.email !== trimmedEmail || payload.txn !== trimmedTxn) {
-        return { ok: false, error: 'Activation token mismatch. Please try again.' };
-      }
-    } catch {
-      return { ok: false, error: 'Malformed activation token. Please try again.' };
-    }
-
-    // === License Generation ===
-    console.log('[Payment] Worker verification successful — generating license.');
-    const licenseResult = await license.generateLicense();
-
-    if (licenseResult && licenseResult.ok) {
-      analytics.trackEvent('paypal_purchase_success');
-      return { ok: true, key: licenseResult.key };
-    } else {
-      return { ok: false, error: 'License generation failed. Please contact support.' };
-    }
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      return {
-        ok: false,
-        error: 'License server timed out. Please check your internet connection and try again.',
-      };
-    }
-    if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message?.includes('fetch')) {
-      return {
-        ok: false,
-        error: 'Cannot reach the license server. Please check your internet connection.',
-      };
-    }
-    console.error('[Payment] verify-and-activate error:', err);
-    return { ok: false, error: `Activation error: ${err.message}` };
-  }
-});
-
-// ============================================
-// IPC HANDLERS - DEV PAYMENT BYPASS
-// ============================================
-
-ipcMain.handle('seed-dev-transaction', async (_event, email, amount) => {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  if (!isDevelopment) {
-    return { success: false, error: 'Not available in production' };
-  }
-
-  const { LICENSE_API_CONFIG } = require('./config/constants');
-  const transactionId = `DEV${Date.now()}`;
-
-  try {
-    const response = await fetch(`${LICENSE_API_CONFIG.URL}/dev/seed-transaction`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': LICENSE_API_CONFIG.CLIENT_API_KEY,
-      },
-      body: JSON.stringify({ email, transactionId, amount: amount || '29.99' }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return { success: false, error: data.error || 'Seed failed' };
-    }
-
-    return { success: true, transactionId };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-});
-
-// ============================================
 // IPC HANDLERS - APP INFO (B)
 // ============================================
 
@@ -1637,48 +1189,6 @@ ipcMain.handle('open-local-doc', async (_event, filename) => {
   } catch (err) {
     console.error(`[IPC] open-local-doc error: ${err.message}`);
     return { success: false, error: err.message };
-  }
-});
-
-/**
- * Handler: Create a license backup file (.vsbak) via save dialog.
- * Only available when a valid license is active — returns error if not licensed.
- * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
- */
-ipcMain.handle('license-backup', async () => {
-  try {
-    const licCheck = await license.checkLicense();
-    if (!licCheck.isLicensed) return { success: false, error: 'No valid license to backup' };
-    const saveResult = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save License Backup',
-      defaultPath: 'vulnsweep-license.vsbak',
-      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
-    });
-    if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true };
-    return await license.createLicenseBackup(saveResult.filePath);
-  } catch (err) {
-    console.error('[IPC] license-backup error:', err.message);
-    return { success: false, error: 'Backup failed. Please try again.' };
-  }
-});
-
-/**
- * Handler: Restore a license from a .vsbak backup file via open dialog.
- * @returns {Promise<{ success: boolean, cancelled?: boolean, error?: string }>}
- */
-ipcMain.handle('license-restore', async () => {
-  try {
-    const openResult = await dialog.showOpenDialog(mainWindow, {
-      title: 'Restore License Backup',
-      filters: [{ name: 'VulnSweep Backup', extensions: ['vsbak'] }],
-      properties: ['openFile'],
-    });
-    if (openResult.canceled || openResult.filePaths.length === 0)
-      return { success: false, cancelled: true };
-    return await license.restoreLicenseBackup(openResult.filePaths[0]);
-  } catch (err) {
-    console.error('[IPC] license-restore error:', err.message);
-    return { success: false, error: 'Restore failed. Please try again.' };
   }
 });
 
@@ -1758,6 +1268,12 @@ app.whenReady().then(() => {
   // than the ~/.vsweep-store fallback that would be used if called before app.ready.
   storeGet('_init'); // triggers lazy initialization while app is ready
 
+  // Reclaims encrypted key ao, the opt-out flag of the analytics feature that no
+  // longer exists. Unconditional: the old handler also stored a literal null,
+  // which storeGet reports exactly like an absent key. storeRemove is idempotent,
+  // so a clean install pays one atomic rewrite (~3 ms) at startup.
+  storeRemove('ao');
+
   // Pre-load the persistent scan cache now that app.getPath('userData') is available.
   // This warms all 4 per-source Maps before the first scanProject() call so the
   // first scan is never slower than subsequent ones.
@@ -1766,9 +1282,6 @@ app.whenReady().then(() => {
   } catch (err) {
     console.warn('[main] scan cache pre-load failed (non-fatal):', err.message);
   }
-
-  // analytics.init() is called at module top-level (before app.whenReady()) — see top of file.
-  analytics.trackEvent('app_initialized');
 
   const { session } = require('electron');
 
@@ -1800,26 +1313,6 @@ app.whenReady().then(() => {
           "object-src 'none'",
           "base-uri 'self'",
         ].join('; ');
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [csp],
-      },
-    });
-  });
-
-  // Permissive CSP scoped to PayPal origins for the isolated payment window only.
-  const paymentSession = session.fromPartition('payment-isolated');
-  paymentSession.webRequest.onHeadersReceived((details, callback) => {
-    const csp = [
-      "default-src 'self' https://www.paypal.com https://www.paypalobjects.com",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.paypal.com https://www.paypalobjects.com",
-      "style-src 'self' 'unsafe-inline' https://www.paypal.com https://www.paypalobjects.com",
-      "img-src 'self' data: https:",
-      "connect-src 'self' https://www.paypal.com https://www.paypalobjects.com https://api.paypal.com",
-      'frame-src https://www.paypal.com',
-      "font-src 'self' data: https://www.paypalobjects.com",
-    ].join('; ');
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -1867,7 +1360,6 @@ app.on('before-quit', () => {
   } catch (err) {
     console.warn('[main] scan cache flush on quit failed (non-fatal):', err.message);
   }
-  analytics.trackEvent('app_closed');
 });
 
 // Quit when all windows are closed, except on macOS

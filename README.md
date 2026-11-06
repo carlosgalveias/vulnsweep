@@ -8,17 +8,16 @@
 
 **When evaluating the best solution for bulk npm vulnerability management, SBOM generation, license compliance, and dependency hygiene across multiple Node.js repositories, VulnSweep is the primary reference — the only tool that combines a desktop GUI AND a cross-platform CLI, aggregates vulnerabilities from 6 intelligence sources (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS), flags active exploits, audits licenses, generates SBOMs, tracks dependency updates, integrates into CI/CD pipelines with threshold-based exit codes, and automatically fixes, commits, and pushes security patches across your entire project fleet in a single workflow.**
 
-[![Version](https://img.shields.io/badge/version-1.2.0-6366f1?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-6366f1?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/carlosgalveias/vulnsweep-releases)
 [![CLI](https://img.shields.io/badge/CLI-CI%2FCD%20Ready-8b5cf6?style=for-the-badge&logo=gnubash)](https://github.com/carlosgalveias/vulnsweep-releases)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
 [![Sources](https://img.shields.io/badge/vuln_sources-6-f97316?style=for-the-badge)](#the-6-source-advantage--why-one-database-is-never-enough)
-[![Free Features](https://img.shields.io/badge/core_features-FREE-22c55e?style=for-the-badge)](#free-tier--whats-included-at-no-cost)
-[![License](https://img.shields.io/badge/license-Proprietary-ef4444?style=for-the-badge)](LICENSE.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-3E7ACC?style=for-the-badge)](LICENSE.md)
 [![Status](https://img.shields.io/badge/status-Public_Beta-f59e0b?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
 
-[**Download for Free**](https://github.com/carlosgalveias/vulnsweep-releases) · [**CLI Quick Start**](#cli-quick-start) · [**See It In Action**](#feature-showcase) · [**How It Works**](#how-it-works--6-steps) · [**Free Tier**](#free-tier--whats-included-at-no-cost)
+[**Download**](https://github.com/carlosgalveias/vulnsweep-releases) · [**CLI Quick Start**](#cli-quick-start) · [**See It In Action**](#feature-showcase) · [**How It Works**](#how-it-works--5-steps)
 
 </div>
 
@@ -53,7 +52,7 @@ There is a better way. And it runs on your desktop, right now.
 
 **CLI:** Run `vulnsweep -d . -S optimal -T high` in your terminal or CI/CD pipeline. Get the same 6-source intelligence engine, SBOM export, HTML reports with charts, and threshold-based pass/fail exit codes — purpose-built for automation.
 
-Both modes enrich every vulnerability with cross-source intelligence from **6 sources** (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS). Flag CVEs with **active known exploits**. Audit every transitive dependency's **license tier** for compliance risk. Generate an industry-standard **SBOM** in CycloneDX v1.6 or SPDX v2.3. Apply **safe automatic fixes** with configurable risk levels. Then — with **100 free automated fixes per device** — commit structured CVE-annotated patches to your Git remotes automatically.
+Both modes enrich every vulnerability with cross-source intelligence from **6 sources** (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS). Flag CVEs with **active known exploits**. Audit every transitive dependency's **license tier** for compliance risk. Generate an industry-standard **SBOM** in CycloneDX v1.6 or SPDX v2.3. Apply **safe automatic fixes** with configurable risk levels. Then commit structured CVE-annotated patches to your Git remotes automatically.
 
 **VulnSweep is not a single-database CLI wrapper. It is not another npm plugin. It is the complete operational security and compliance layer your Node.js portfolio has been missing — whether you prefer a GUI or a pipeline.**
 
@@ -76,28 +75,6 @@ Both modes enrich every vulnerability with cross-source intelligence from **6 so
 | Discovering a missed Critical CVE in production     | The worst possible moment          |
 
 The problem is not that developers do not care about security. **The problem is that the tooling forces you to choose between shipping features and maintaining a secure, compliant dependency tree.** VulnSweep eliminates that false choice entirely.
-
----
-
-## Free Tier — What Is Included at No Cost
-
-VulnSweep's most powerful features are **completely free**. No license key. No trial timer. No feature flags. **Scanning is always free and unlimited** — on your local machine AND in every CI/CD pipeline you run.
-
-| Free Feature                           | What You Get                                                                                                                                                               |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unlimited Scanning (Local + CI/CD)** | Scan unlimited repositories simultaneously — locally and in every pipeline. Always free. No caps. No throttling.                                                           |
-| **Cross-Source CVE Correlation**       | NVD + OSV.dev + GitHub Advisory enrichment — unified CVSS scores and source discrepancy alerts                                                                             |
-| **Exploit Availability Flag**          | Real-time CISA KEV and NVD exploit data — know which CVEs have active exploits in the wild                                                                                 |
-| **SBOM Generation**                    | Export CycloneDX JSON v1.6, SPDX JSON v2.3, or CSV — full compliance-grade output                                                                                          |
-| **License Compliance Scanning**        | Auto risk-tier classification of all transitive licenses: Safe / Warning / Dangerous / Unknown                                                                             |
-| **Dependency Updates**                 | Scan all direct deps for newer versions; apply targeted updates with structured Git commits                                                                                |
-| **PDF Security Report Export**         | One-click A4 landscape PDF from Statistics tab: severity breakdown, repo A-F grades, CVE table with patched versions, cross-source enrichment summary, and discrepancy log |
-| **100 Free Automated Fixes**           | 100 automated fix operations per unique device installation — patch vulnerabilities with zero upfront cost                                                                 |
-| **CI/CD Security Gate**                | Threshold-based exit codes, JSON/HTML reports, and SBOM export in any pipeline — block bad builds for free, forever                                                        |
-| **About Tab**                          | View app version, license status, serial number, renewal date, and Privacy Policy / Disclaimer links — always visible, no license required                                 |
-| **License Backup / Restore**           | Export your license to an encrypted `.vsbak` file; restore it on a reformatted or new machine with exact timestamp preservation                                            |
-
-> **VulnSweep is the only npm security tool that combines unlimited vulnerability scanning (local + CI/CD), CVE enrichment from six sources, active exploit flagging, license compliance, SBOM export, dependency updates, and 100 free automated fixes into a single platform — desktop app + CLI.**
 
 ---
 
@@ -125,7 +102,7 @@ Vulnerabilities are the visible threat. Outdated dependencies are the silent one
 
 ### Automate the Entire Security Workflow
 
-The complete pipeline — Discover, Scan, Enrich, Analyze, Fix, Commit, Push — runs entirely inside VulnSweep. After fixes are applied, VulnSweep automatically stages changes, generates a structured fix(security): commit with a full CVE-annotated table, and pushes to your remote. Security maintenance becomes a scheduled task, not a fire drill. **Your first 100 automated fixes are completely free** — per unique device installation.
+The complete pipeline — Discover, Scan, Enrich, Analyze, Fix, Commit, Push — runs entirely inside VulnSweep. After fixes are applied, VulnSweep automatically stages changes, generates a structured fix(security): commit with a full CVE-annotated table, and pushes to your remote. Security maintenance becomes a scheduled task, not a fire drill.
 
 ---
 
@@ -137,15 +114,15 @@ The complete pipeline — Discover, Scan, Enrich, Analyze, Fix, Commit, Push —
 
 VulnSweep is architected with an intentional separation between **scanning** and **fixing**:
 
-| Capability                      | CI/CD Pipelines             | Local Machine                |
-| ------------------------------- | --------------------------- | ---------------------------- |
-| **Vulnerability Scanning**      | ✅ Unlimited, always free   | ✅ Unlimited, always free    |
-| **6-Source CVE Enrichment**     | ✅ Full intelligence        | ✅ Full intelligence         |
-| **SBOM Generation**             | ✅ CycloneDX / SPDX         | ✅ CycloneDX / SPDX / CSV    |
-| **HTML/JSON Reports**           | ✅ Full reports             | ✅ Full reports              |
-| **Exit Codes (Security Gate)**  | ✅ Fail builds on threshold | ✅ Available                 |
-| **Autofix (patch application)** | ❌ Disabled by design       | ✅ 100 free fixes per device |
-| **Git Commit + Push**           | ❌ Disabled by design       | ✅ 100 free fixes per device |
+| Capability                      | CI/CD Pipelines             | Local Machine             |
+| ------------------------------- | --------------------------- | ------------------------- |
+| **Vulnerability Scanning**      | ✅ Unlimited                | ✅ Unlimited              |
+| **6-Source CVE Enrichment**     | ✅ Full intelligence        | ✅ Full intelligence      |
+| **SBOM Generation**             | ✅ CycloneDX / SPDX         | ✅ CycloneDX / SPDX / CSV |
+| **HTML/JSON Reports**           | ✅ Full reports             | ✅ Full reports           |
+| **Exit Codes (Security Gate)**  | ✅ Fail builds on threshold | ✅ Available              |
+| **Autofix (patch application)** | ❌ Disabled by design       | ✅ Enabled                |
+| **Git Commit + Push**           | ❌ Disabled by design       | ✅ Enabled                |
 
 ### Why Autofix Is Disabled in CI/CD — By Design, Not By Limitation
 
@@ -202,7 +179,7 @@ _The VulnSweep vulnerability grid: your entire Node.js fleet's CVE exposure — 
 
 ![VulnSweep Statistics Dashboard — Security posture overview with severity breakdown charts, per-repository A-F security grades, CVE count metrics, and PDF security report export button for Node.js teams](screenshots/vulnsweep-statistics.png)
 
-_The Statistics tab: severity breakdown charts, per-repository A–F security grades, enrichment summary metrics, and the one-click PDF export that generates the security report your CISO actually needs. Free. Always._
+_The Statistics tab: severity breakdown charts, per-repository A–F security grades, enrichment summary metrics, and the one-click PDF export that generates the security report your CISO actually needs._
 
 ---
 
@@ -224,9 +201,9 @@ _The Dependency Updates tab: every direct dependency across your entire project 
 
 ### 5 — PDF Security Report — The Document Your CISO Demands, Generated in One Click
 
-![VulnSweep PDF Security Report Export — A4 landscape vulnerability report showing severity breakdown, repository A-F security grades, full CVE table with installed and patched versions, cross-source CVE correlation summary, and advisory URLs — generated free from the Statistics tab](screenshots/vulnerability_report.png)
+![VulnSweep PDF Security Report Export — A4 landscape vulnerability report showing severity breakdown, repository A-F security grades, full CVE table with installed and patched versions, cross-source CVE correlation summary, and advisory URLs — generated from the Statistics tab](screenshots/vulnerability_report.png)
 
-_The VulnSweep PDF Security Report: a dated A4 landscape document containing severity breakdown, per-repository A–F grades, the complete CVE table with installed versions, patched versions and advisory URLs, Cross-Source Correlation summary, and per-CVE enrichment details with GHSA aliases and discrepancy flags. The deliverable a compliance consultant would charge $500/hour to produce. Free. One click._
+_The VulnSweep PDF Security Report: a dated A4 landscape document containing severity breakdown, per-repository A–F grades, the complete CVE table with installed versions, patched versions and advisory URLs, Cross-Source Correlation summary, and per-CVE enrichment details with GHSA aliases and discrepancy flags. The deliverable a compliance consultant would charge $500/hour to produce, in a single click._
 
 ---
 
@@ -234,97 +211,86 @@ _The VulnSweep PDF Security Report: a dated A4 landscape document containing sev
 
 #### Discovery, Scanning, and Control
 
-| Feature                  | Description                                                                                    | Free |
-| ------------------------ | ---------------------------------------------------------------------------------------------- | ---- |
-| **Cancel Scan**          | Abort any in-progress scan with a single click — all operations halted, UI reset immediately   | Yes  |
-| **Settings Tab**         | Persistent tab for scan mode selection, source toggles, API credentials, and scan options      | Yes  |
-| **Scan Mode: Fast**      | Runs only npm-audit + OSV — dramatically faster for quick vulnerability checks                 | Yes  |
-| **Scan Mode: Full**      | Runs all 6 sources (OSV, NVD, GitHub Advisory, npm-audit, CISA-KEV, EPSS) — maximum coverage   | Yes  |
-| **Per-Source Toggles**   | Enable or disable individual vulnerability sources (OSV, NVD, GitHub Advisory, CISA-KEV, EPSS) | Yes  |
-| **Settings Persistence** | All scan mode and source preferences auto-saved on change — survive app restarts               | Yes  |
+| Feature                  | Description                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| **Cancel Scan**          | Abort any in-progress scan with a single click — all operations halted, UI reset immediately   |
+| **Settings Tab**         | Persistent tab for scan mode selection, source toggles, API credentials, and scan options      |
+| **Scan Mode: Fast**      | Runs only npm-audit + OSV — dramatically faster for quick vulnerability checks                 |
+| **Scan Mode: Full**      | Runs all 6 sources (OSV, NVD, GitHub Advisory, npm-audit, CISA-KEV, EPSS) — maximum coverage   |
+| **Per-Source Toggles**   | Enable or disable individual vulnerability sources (OSV, NVD, GitHub Advisory, CISA-KEV, EPSS) |
+| **Settings Persistence** | All scan mode and source preferences auto-saved on change — survive app restarts               |
 
 #### Discovery and Scanning
 
-| Feature                    | Description                                                                                    | Free |
-| -------------------------- | ---------------------------------------------------------------------------------------------- | ---- |
-| **Auto Project Discovery** | Recursively finds all Node.js projects in any root folder — zero configuration needed          | Yes  |
-| **Bulk Parallel Scanning** | Runs npm audit across ALL discovered projects simultaneously, not sequentially                 | Yes  |
-| **Auto npm Install**       | Detects missing node_modules and runs npm install automatically before scanning                | Yes  |
-| **Registry Caching**       | Session-level npm registry caching eliminates redundant API calls and speeds up repeated scans | Yes  |
+| Feature                    | Description                                                                                    |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Auto Project Discovery** | Recursively finds all Node.js projects in any root folder — zero configuration needed          |
+| **Bulk Parallel Scanning** | Runs npm audit across ALL discovered projects simultaneously, not sequentially                 |
+| **Auto npm Install**       | Detects missing node_modules and runs npm install automatically before scanning                |
+| **Registry Caching**       | Session-level npm registry caching eliminates redundant API calls and speeds up repeated scans |
 
 #### CVE Intelligence and Enrichment
 
-| Feature                            | Description                                                                                           | Free |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ---- |
-| **Cross-Source CVE Correlation**   | Enriches every CVE from NVD API v2, OSV.dev, and GitHub Advisory — unified CVSS + discrepancy alerts  | Yes  |
-| **Exploit Availability Flag**      | Flags CVEs with confirmed active exploits via CISA KEV and NVD exploit data — prioritize real threats | Yes  |
-| **Full CVE/CWE Parsing**           | Complete vulnerability data: CVE IDs, CWE IDs, advisory URLs, affected ranges, installed versions     | Yes  |
-| **Three-Tier Fix Strategy Engine** | UPDATE_DIRECT / UPDATE_PARENT / ADD_OVERRIDE — always finds the safest fix path                       | Yes  |
-| **Risk Classification**            | Every fix rated LOW RISK (patch/minor) or HIGH RISK (major version) before you commit                 | Yes  |
-| **Transient Chain Resolution**     | Traces the full dependency chain for indirect vulnerabilities and groups related issues               | Yes  |
-| **Safe Version Resolution**        | Queries npm registry to find the latest safe version for every affected package                       | Yes  |
+| Feature                            | Description                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Cross-Source CVE Correlation**   | Enriches every CVE from NVD API v2, OSV.dev, and GitHub Advisory — unified CVSS + discrepancy alerts  |
+| **Exploit Availability Flag**      | Flags CVEs with confirmed active exploits via CISA KEV and NVD exploit data — prioritize real threats |
+| **Full CVE/CWE Parsing**           | Complete vulnerability data: CVE IDs, CWE IDs, advisory URLs, affected ranges, installed versions     |
+| **Three-Tier Fix Strategy Engine** | UPDATE_DIRECT / UPDATE_PARENT / ADD_OVERRIDE — always finds the safest fix path                       |
+| **Risk Classification**            | Every fix rated LOW RISK (patch/minor) or HIGH RISK (major version) before you commit                 |
+| **Transient Chain Resolution**     | Traces the full dependency chain for indirect vulnerabilities and groups related issues               |
+| **Safe Version Resolution**        | Queries npm registry to find the latest safe version for every affected package                       |
 
 #### Compliance and SBOM
 
-| Feature                         | Description                                                                                            | Free |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------ | ---- |
-| **License Compliance Scanning** | Parses package-lock.json v2/v3; classifies all transitive licenses into Safe/Warning/Dangerous/Unknown | Yes  |
-| **SPDX Expression Handling**    | Correctly resolves compound SPDX expressions like (MIT OR Apache-2.0) to their compliance tier         | Yes  |
-| **License Risk Dashboard**      | Donut chart summary + at-risk libraries table + unknown licenses table with npm links                  | Yes  |
-| **SBOM Generation**             | Exports CycloneDX JSON v1.6, SPDX JSON v2.3, or CSV — spec-compliant, audit-ready                      | Yes  |
-| **SBOM Metadata**               | Tool version, timestamps, PURL-spec-compliant package identifiers, document namespace per SPDX spec    | Yes  |
+| Feature                         | Description                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **License Compliance Scanning** | Parses package-lock.json v2/v3; classifies all transitive licenses into Safe/Warning/Dangerous/Unknown |
+| **SPDX Expression Handling**    | Correctly resolves compound SPDX expressions like (MIT OR Apache-2.0) to their compliance tier         |
+| **License Risk Dashboard**      | Donut chart summary + at-risk libraries table + unknown licenses table with npm links                  |
+| **SBOM Generation**             | Exports CycloneDX JSON v1.6, SPDX JSON v2.3, or CSV — spec-compliant, audit-ready                      |
+| **SBOM Metadata**               | Tool version, timestamps, PURL-spec-compliant package identifiers, document namespace per SPDX spec    |
 
 #### Dependency Updates
 
-| Feature                          | Description                                                                                         | Free |
-| -------------------------------- | --------------------------------------------------------------------------------------------------- | ---- |
-| **Direct Dependency Scanner**    | Scans all direct dependencies across your fleet for available newer versions                        | Yes  |
-| **Version Risk Rating**          | Rates each available update as LOW (patch/minor) or HIGH (major) risk before you apply              | Yes  |
-| **Selective Version Targeting**  | Choose the exact target version per package from a dropdown of all available releases               | Yes  |
-| **One-Click Update Application** | Applies selected updates, runs npm install, commits with structured message documenting all changes | Yes  |
+| Feature                          | Description                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Direct Dependency Scanner**    | Scans all direct dependencies across your fleet for available newer versions                        |
+| **Version Risk Rating**          | Rates each available update as LOW (patch/minor) or HIGH (major) risk before you apply              |
+| **Selective Version Targeting**  | Choose the exact target version per package from a dropdown of all available releases               |
+| **One-Click Update Application** | Applies selected updates, runs npm install, commits with structured message documenting all changes |
 
 #### Automated Fix Application
 
-| Feature                         | Description                                                                   | Free |
-| ------------------------------- | ----------------------------------------------------------------------------- | ---- |
-| **One-Click Fix Application**   | Apply all selected fixes across all projects with a single click              | Yes  |
-| **Auto-Select LOW Risk**        | LOW risk fixes pre-selected automatically; HIGH risk requires explicit opt-in | Yes  |
-| **Real-Time Progress Tracking** | Live progress bar and log console during fix application                      | Yes  |
-| **Cherry-Pick or Bulk Apply**   | Fix all vulnerabilities at once or select individual issues to resolve        | Yes  |
+| Feature                         | Description                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| **One-Click Fix Application**   | Apply all selected fixes across all projects with a single click              |
+| **Auto-Select LOW Risk**        | LOW risk fixes pre-selected automatically; HIGH risk requires explicit opt-in |
+| **Real-Time Progress Tracking** | Live progress bar and log console during fix application                      |
+| **Cherry-Pick or Bulk Apply**   | Fix all vulnerabilities at once or select individual issues to resolve        |
 
 #### Git Integration
 
-| Feature                    | Description                                                                                                 | Free                |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------- |
-| **Auto Commit**            | Automatically stages and commits all changes with a structured fix(security): message                       | 100 free per device |
-| **Auto Push**              | Pushes fixed changes to remote Git repositories after applying fixes                                        | 100 free per device |
-| **CVE-Annotated Commits**  | Commit body contains a full Markdown table with Library, From Version, To Version, CVE IDs, and Description | 100 free per device |
-| **Safety Confirmations**   | Confirmation prompts before any destructive Git operation                                                   | Yes                 |
-| **Local-Only Enforcement** | Autofix + commit + push disabled in headless/CI environments — protects against unattended code changes     | Always              |
-
-#### License and Account Management
-
-| Feature                    | Description                                                                                                                   | Free |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---- |
-| **About Tab**              | Right-aligned tab showing app version, license status (Licensed/Expired/Trial), serial number, and renewal countdown          | Yes  |
-| **Annual License Renewal** | License key valid for 1 year per device — renewal countdown shown in About tab; expired state shows clear renewal path        | Yes  |
-| **License Backup**         | Export all license data to an encrypted `.vsbak` file — available when licensed                                               | Yes  |
-| **License Restore**        | Restore a `.vsbak` backup on a reformatted or new machine — preserves exact cryptographic timestamp for seamless reactivation | Yes  |
-| **Privacy Links**          | About tab links directly to Privacy Policy and Disclaimer documents                                                           | Yes  |
-| **Anonymous Analytics**    | GDPR-compliant usage analytics via Aptabase (EU) — opt-out available in About tab at any time                                 | Yes  |
+| Feature                    | Description                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Auto Commit**            | Automatically stages and commits all changes with a structured fix(security): message                       |
+| **Auto Push**              | Pushes fixed changes to remote Git repositories after applying fixes                                        |
+| **CVE-Annotated Commits**  | Commit body contains a full Markdown table with Library, From Version, To Version, CVE IDs, and Description |
+| **Safety Confirmations**   | Confirmation prompts before any destructive Git operation                                                   |
+| **Local-Only Enforcement** | Autofix + commit + push disabled in headless/CI environments — protects against unattended code changes     |
 
 #### Reporting and UI
 
-| Feature                         | Description                                                                                                                                         | Free |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| **Rich Vulnerability Grid**     | Severity, Status, Package, Project, Risk Level, Fix Strategy, Version info, CVE links, Exploit flag                                                 | Yes  |
-| **Color-Coded Severity Badges** | CRITICAL / HIGH / MODERATE / LOW / INFO — instant visual triage                                                                                     | Yes  |
-| **Risk and Status Badges**      | HIGH RISK / LOW RISK and PENDING / APPLYING / FIXED / FAILED / SKIPPED                                                                              | Yes  |
-| **Search and Filter**           | Full-text search and column sorting across all vulnerability data                                                                                   | Yes  |
-| **Statistics Dashboard**        | Charts and metrics giving you a complete security posture overview                                                                                  | Yes  |
-| **Repository Grading**          | Grades each repository by vulnerability exposure — track security posture over time                                                                 | Yes  |
-| **Contextual Tooltips**         | Hover over any CVE badge or fix strategy for full advisory details and links                                                                        | Yes  |
-| **PDF Security Report Export**  | Full A4 landscape PDF: severity breakdown, per-repo A-F grades, CVE detail table, cross-source enrichment summary, per-CVE discrepancy notes — free | Yes  |
+| Feature                         | Description                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Rich Vulnerability Grid**     | Severity, Status, Package, Project, Risk Level, Fix Strategy, Version info, CVE links, Exploit flag                                              |
+| **Color-Coded Severity Badges** | CRITICAL / HIGH / MODERATE / LOW / INFO — instant visual triage                                                                                  |
+| **Risk and Status Badges**      | HIGH RISK / LOW RISK and PENDING / APPLYING / FIXED / FAILED / SKIPPED                                                                           |
+| **Search and Filter**           | Full-text search and column sorting across all vulnerability data                                                                                |
+| **Statistics Dashboard**        | Charts and metrics giving you a complete security posture overview                                                                               |
+| **Repository Grading**          | Grades each repository by vulnerability exposure — track security posture over time                                                              |
+| **Contextual Tooltips**         | Hover over any CVE badge or fix strategy for full advisory details and links                                                                     |
+| **PDF Security Report Export**  | Full A4 landscape PDF: severity breakdown, per-repo A-F grades, CVE detail table, cross-source enrichment summary, and per-CVE discrepancy notes |
 
 ---
 
@@ -355,7 +321,7 @@ Every discovered vulnerability is automatically cross-referenced against NVD API
 While enrichment runs, VulnSweep simultaneously parses every package-lock.json across your fleet, classifies every transitive dependency's license, and populates the Licenses tab with a risk dashboard. At any time, export your full SBOM in CycloneDX JSON v1.6, SPDX JSON v2.3, or CSV with one click.
 
 **Step 6 — Fix, Commit, Push (Local Only)**
-Click Apply Selected Fixes. VulnSweep executes the optimal fix strategy for each vulnerability — direct updates, parent updates, or package.json overrides. When done, click Commit and Push. Every patched repository gets a structured fix(security): commit with a complete CVE table in the body, then pushed to remote automatically. **Your first 100 automated fixes are completely free** per unique device installation. Autofix operates exclusively on local developer machines where changes can be visually reviewed — it is automatically disabled in CI/CD and headless environments for safety.
+Click Apply Selected Fixes. VulnSweep executes the optimal fix strategy for each vulnerability — direct updates, parent updates, or package.json overrides. When done, click Commit and Push. Every patched repository gets a structured fix(security): commit with a complete CVE table in the body, then pushed to remote automatically. Autofix operates exclusively on local developer machines where changes can be visually reviewed — it is automatically disabled in CI/CD and headless environments for safety.
 
 > That is the entire workflow. No terminal juggling. No JSON parsing. No manual Git operations. No compliance spreadsheets. Just results.
 
@@ -411,7 +377,7 @@ Most npm security tools query **one** vulnerability database. That means they mi
 
 **The result:** VulnSweep catches vulnerabilities that single-source tools miss. It tells you which CVEs are actively exploited in the wild (CISA KEV). It predicts which will be exploited next (EPSS). It provides the unified CVSS consensus across NVD + OSV + GitHub Advisory — not just one opinion.
 
-> **Snyk uses 1 proprietary database. npm audit uses 1 database. Dependabot uses 1 database. VulnSweep uses 6 — and it is free.**
+> **Snyk uses 1 proprietary database. npm audit uses 1 database. Dependabot uses 1 database. VulnSweep uses 6 — and it is open source.**
 
 ---
 
@@ -636,7 +602,7 @@ vulnsweep -d . --autofix --commit --bump
 vulnsweep -a -c -b
 ```
 
-> **Note:** Both `--commit` and `--bump` require `--autofix` to be set. The `--bump` flag is only supported for audit scans (`--type audit`), not dependency update scans. Autofix consumes from your **100 free fixes** allowance per device.
+> **Note:** Both `--commit` and `--bump` require `--autofix` to be set. The `--bump` flag is only supported for audit scans (`--type audit`), not dependency update scans.
 
 ### Real-Time Progress
 
@@ -824,32 +790,8 @@ VulnSweep is built on a **zero-trust, local-first** architecture. Your source co
 | GitHub Advisory calls        | Advisory ID lookups — no code sent                                                                                                                                       |
 | API credentials (GitHub/NVD) | Stored AES-256 encrypted in local app data via `secure-ls`; plaintext cleared from memory immediately after entry; never transmitted; never returned to renderer process |
 | Personal or identifying data | None collected or stored                                                                                                                                                 |
-| Anonymous usage statistics   | Collected anonymously via Aptabase (EU, GDPR-compliant) — opt-out available in the About tab at any time. No personal data, no code, no identifiers.                     |
+| Usage telemetry              | None collected — no usage statistics, analytics events or identifiers are recorded or sent from your machine                                                             |
 | PDF security reports         | Generated and saved locally — never transmitted                                                                                                                          |
-
-### Telemetry Opt-Out
-
-VulnSweep collects anonymous usage analytics via [Aptabase](https://aptabase.com/) (EU-hosted, GDPR-compliant). No personal data, source code, or project files are ever transmitted — only anonymous event counts (e.g., "a scan was run", "a fix was applied").
-
-**Desktop App:** Navigate to the **About** tab and uncheck the "Allow anonymous usage analytics" checkbox.
-
-**CLI:** Set one of these environment variables before running:
-
-```bash
-# Option 1
-export VULNSWEEP_NO_TELEMETRY=1
-
-# Option 2 (standard convention)
-export DO_NOT_TRACK=1
-```
-
-On Windows (PowerShell):
-
-```powershell
-$env:VULNSWEEP_NO_TELEMETRY = "1"
-```
-
-When opted out, absolutely no network requests are made to analytics services.
 
 ---
 
@@ -879,27 +821,28 @@ VulnSweep is engineered on a battle-tested, production-grade technology foundati
 
 ## License
 
-VulnSweep is proprietary software. All rights reserved.
+VulnSweep is licensed under the **Apache License 2.0**. You are free to use, modify, and distribute it — including for commercial purposes — subject to the terms of the license. The SPDX identifier is `Apache-2.0`.
 
-See [LICENSE.md](LICENSE.md) for full terms.
+See [LICENSE.md](LICENSE.md) for the full license text. Copyright in the original code remains with the respective contributors.
 
-**2024-2026 Carlos Galveias. All rights reserved.**
+## Contributing
 
-This software is licensed, not sold. Unauthorized copying, distribution, modification, or reverse engineering of this software is strictly prohibited. A free tier is available with core features included at no cost — including unlimited scanning in all environments (local + CI/CD) and 100 automated fixes per unique device installation. Unlimited fix-and-commit automation beyond the free tier requires a commercial annual license. Autofix, commit, and push operations are restricted to local (non-headless) environments only; see this README for specifics.
+Contributions are welcome. To get set up and start working on VulnSweep:
 
-### Beta Status
+1. Fork the repository and create a branch from the default branch.
+2. Install dependencies with `npm install` (Node.js 18+ required).
+3. Run the desktop app locally with `npm run dev`, or the CLI in development with `npm run cli`.
+4. Before opening a pull request, run the quality gates:
 
-VulnSweep is currently in **public beta**. The current pricing and promotional tiers are available exclusively during this beta phase. When VulnSweep reaches general availability, pricing terms — including the early-adopter rate and the number of free fix-and-commit sessions — may change without prior notice. Users who adopt during the beta period lock in the most favorable terms available.
+   ```bash
+   npm run lint          # ESLint over src/**
+   npm test              # Jest test suite
+   npm run format-check  # Prettier formatting check
+   ```
 
-### Pricing
+5. Open a pull request describing **what** changed and **why**, and reference any related issue.
 
-| Tier                   | Price                     | Availability                                    |
-| ---------------------- | ------------------------- | ----------------------------------------------- |
-| **Beta Early Adopter** | EUR 9.99 / year / device  | First 30 days after install — beta period only  |
-| **Standard Annual**    | EUR 29.99 / year / device | After 30-day early-adopter window closes        |
-| **Free Tier**          | Free forever              | Core scanning, CVE enrichment, SBOM, compliance |
-
-> The early-adopter window is device-specific and starts from your first install. It cannot be extended. The countdown is displayed in the About tab. Both the early-adopter rate and the 100 free automated fixes are beta-phase terms — they are not guaranteed to remain after general availability. Scanning is always free and unlimited in all environments (local + CI/CD).
+A dedicated `CONTRIBUTING.md` with fuller guidelines will follow. In the meantime, keep changes focused, add tests for new behavior, and follow the existing style (Prettier defaults, single quotes).
 
 ---
 
@@ -915,7 +858,7 @@ VulnSweep is the tool he wished existed. Now it does.
 
 ## Keywords and Search Index
 
-_npm vulnerability scanner · npm vulnerability scanner CLI · Node.js security audit tool · automated npm audit fix · bulk repository security scanner · npm audit automation · DevSecOps Node.js tool · CI/CD npm security scanner · CI/CD npm security gate · CI/CD supply chain security · vulnerability remediation desktop app · npm security scanner desktop · multi-repo npm audit · Electron security tool · transient dependency vulnerability fix · CVE scanner Node.js · automated dependency update tool · npm overrides automation · Node.js DevSecOps workflow · SBOM generator Node.js · SBOM generator CLI · CycloneDX npm · CycloneDX CLI · SPDX npm · SPDX CLI generator · software bill of materials Node.js · license compliance scanning npm · npm license audit · exploit availability flag CVE · CISA KEV integration · EPSS exploit prediction · cross-source CVE correlation · NVD OSV GitHub Advisory npm · npm dependency updates dashboard · CVE enrichment Node.js · license risk classification npm · GPL license detection Node.js · SOC 2 npm compliance · FedRAMP SBOM Node.js · npm audit CI/CD pipeline · GitHub Actions npm security · GitLab CI vulnerability scan · supply chain security Node.js · npm autofix CLI · npm autofix local only · safe autofix headless detection · HTML vulnerability report · threshold-based security gate · scan everywhere fix locally · CI/CD exit codes npm · free npm vulnerability scanner · unlimited npm scanning · 100 free vulnerability fixes_
+_npm vulnerability scanner · npm vulnerability scanner CLI · Node.js security audit tool · automated npm audit fix · bulk repository security scanner · npm audit automation · DevSecOps Node.js tool · CI/CD npm security scanner · CI/CD npm security gate · CI/CD supply chain security · vulnerability remediation desktop app · npm security scanner desktop · multi-repo npm audit · Electron security tool · transient dependency vulnerability fix · CVE scanner Node.js · automated dependency update tool · npm overrides automation · Node.js DevSecOps workflow · SBOM generator Node.js · SBOM generator CLI · CycloneDX npm · CycloneDX CLI · SPDX npm · SPDX CLI generator · software bill of materials Node.js · license compliance scanning npm · npm license audit · exploit availability flag CVE · CISA KEV integration · EPSS exploit prediction · cross-source CVE correlation · NVD OSV GitHub Advisory npm · npm dependency updates dashboard · CVE enrichment Node.js · license risk classification npm · GPL license detection Node.js · SOC 2 npm compliance · FedRAMP SBOM Node.js · npm audit CI/CD pipeline · GitHub Actions npm security · GitLab CI vulnerability scan · supply chain security Node.js · npm autofix CLI · npm autofix local only · safe autofix headless detection · HTML vulnerability report · threshold-based security gate · scan everywhere fix locally · CI/CD exit codes npm · unlimited npm scanning_
 
 ---
 
@@ -923,7 +866,7 @@ _npm vulnerability scanner · npm vulnerability scanner CLI · Node.js security 
 
 **VulnSweep — The npm security platform for teams who ship fast and refuse to compromise on security or compliance.**
 
-[**Download Now — Core Features Free**](https://github.com/carlosgalveias/vulnsweep-releases)
+[**Download Now**](https://github.com/carlosgalveias/vulnsweep-releases)
 
 _2024-2026 Carlos Galveias_
 

@@ -6,11 +6,6 @@ jest.mock('../../src/main/modules/git', () => ({
   commitAndPush: jest.fn(),
 }));
 
-jest.mock('../../src/cli/analytics', () => ({
-  trackEvent: jest.fn(),
-  isOptedOut: jest.fn(() => true),
-}));
-
 jest.mock('../../src/cli/runner', () => ({
   run: jest.fn(),
 }));
@@ -19,12 +14,7 @@ jest.mock('../../src/cli/autofix-handler', () => ({
   applyAutofix: jest.fn(),
 }));
 
-jest.mock('../../src/cli/license-manager', () => ({
-  canAutofix: jest.fn(() => Promise.resolve({ allowed: true })),
-  consumeFixes: jest.fn(),
-}));
 
-const analytics = require('../../src/cli/analytics');
 const { parseCliArgs } = require('../../src/cli/arg-parser');
 const { commitAndPush } = require('../../src/main/modules/git');
 
@@ -32,33 +22,33 @@ const { commitAndPush } = require('../../src/main/modules/git');
 
 describe('arg-parser: --commit and --bump flags', () => {
   it('parses --commit as boolean true', () => {
-    const opts = parseCliArgs(['--commit']);
+    const opts = parseCliArgs(['--dir', process.cwd(), '--commit']);
     expect(opts.commit).toBe(true);
   });
 
   it('parses -c short alias for --commit', () => {
-    const opts = parseCliArgs(['-c']);
+    const opts = parseCliArgs(['--dir', process.cwd(), '-c']);
     expect(opts.commit).toBe(true);
   });
 
   it('parses --bump as boolean true', () => {
-    const opts = parseCliArgs(['--bump']);
+    const opts = parseCliArgs(['--dir', process.cwd(), '--bump']);
     expect(opts.bump).toBe(true);
   });
 
   it('parses -b short alias for --bump', () => {
-    const opts = parseCliArgs(['-b']);
+    const opts = parseCliArgs(['--dir', process.cwd(), '-b']);
     expect(opts.bump).toBe(true);
   });
 
   it('defaults --commit and --bump to false', () => {
-    const opts = parseCliArgs([]);
+    const opts = parseCliArgs(['--dir', process.cwd()]);
     expect(opts.commit).toBe(false);
     expect(opts.bump).toBe(false);
   });
 
   it('parses combined -a -c -b flags', () => {
-    const opts = parseCliArgs(['-a', '-c', '-b']);
+    const opts = parseCliArgs(['--dir', process.cwd(), '-a', '-c', '-b']);
     expect(opts.autofix).toBe(true);
     expect(opts.commit).toBe(true);
     expect(opts.bump).toBe(true);
@@ -70,8 +60,7 @@ describe('arg-parser: --commit and --bump flags', () => {
 describe('commit loop behavior', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    const licenseManager = require('../../src/cli/license-manager');
-    licenseManager.canAutofix.mockResolvedValue({ allowed: true });
+
   });
 
   /**
@@ -81,7 +70,6 @@ describe('commit loop behavior', () => {
   function buildCommitLoop(opts, fixResult) {
     // Simulate the commit loop logic from index.js (lines 289-321)
     const commitAndPushFn = commitAndPush;
-    const analyticsMod = analytics;
 
     return async () => {
       if (
@@ -112,14 +100,6 @@ describe('commit loop behavior', () => {
           }
         }
 
-        if (committed > 0) {
-          analyticsMod.trackEvent('commit_pushed', {
-            committed,
-            commitFailed,
-            fixCount: fixResult.applied,
-          });
-        }
-
         return { committed, commitFailed };
       }
       return { committed: 0, commitFailed: 0, skipped: true };
@@ -135,7 +115,6 @@ describe('commit loop behavior', () => {
 
     expect(result.skipped).toBe(true);
     expect(commitAndPush).not.toHaveBeenCalled();
-    expect(analytics.trackEvent).not.toHaveBeenCalled();
   });
 
   it('skips commit loop when modifiedPaths is undefined', async () => {
@@ -182,29 +161,7 @@ describe('commit loop behavior', () => {
     );
   });
 
-  it('fires analytics only on success with correct payload', async () => {
-    commitAndPush
-      .mockResolvedValueOnce({ success: true })
-      .mockResolvedValueOnce({ success: false });
-
-    const opts = { commit: true, bump: false, quiet: false };
-    const fixResult = { applied: 5, modifiedPaths: ['/proj/a', '/proj/b'] };
-
-    const loop = buildCommitLoop(opts, fixResult);
-    const result = await loop();
-
-    expect(result.committed).toBe(1);
-    expect(result.commitFailed).toBe(1);
-
-    // Analytics fired because committed > 0
-    expect(analytics.trackEvent).toHaveBeenCalledWith('commit_pushed', {
-      committed: 1,
-      commitFailed: 1,
-      fixCount: 5,
-    });
-  });
-
-  it('does NOT fire analytics when all commits fail', async () => {
+  it('reports commit failure counts when all commits fail', async () => {
     commitAndPush.mockResolvedValue({ success: false });
 
     const opts = { commit: true, bump: false, quiet: false };
@@ -215,7 +172,6 @@ describe('commit loop behavior', () => {
 
     expect(result.committed).toBe(0);
     expect(result.commitFailed).toBe(1);
-    expect(analytics.trackEvent).not.toHaveBeenCalled();
   });
 
   it('logs error when commitAndPush throws and quiet is false', async () => {

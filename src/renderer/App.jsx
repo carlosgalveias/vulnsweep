@@ -1,12 +1,6 @@
-/* eslint-disable import/order */
 import { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  OP_GET_TRIAL_STATUS,
-  OP_GET_COMMERCIAL_STATUS,
-  OP_GET_INSTALL_INFO,
   OP_GET_APP_VERSION,
-  OP_GET_ANALYTICS_OPT_OUT,
-  OP_SET_ANALYTICS_OPT_OUT,
   OP_COMMIT_AND_PUSH,
   OP_SCAN_LICENSES,
   OP_SCAN_DEP_UPDATES,
@@ -17,7 +11,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import LogConsole from './components/LogConsole';
 import Modal from './components/Modal';
-import BuyModal from './components/BuyModal';
 import VulnerabilityGrid from './components/VulnerabilityGrid';
 import StatisticsTab from './components/StatisticsTab';
 import DependencyUpdatesTab from './components/DependencyUpdatesTab';
@@ -31,19 +24,12 @@ import useLogConsole from './hooks/useLogConsole';
 import useProjectDiscovery from './hooks/useProjectDiscovery';
 import useSettings from './hooks/useSettings';
 import useVulnerabilityScanner from './hooks/useVulnerabilityScanner';
-import { MAX_FREE_FIXES } from './constants';
 
 function App() {
   const [showFirstRun, setShowFirstRun] = useState(
     () => localStorage.getItem('vulnsweep_terms_accepted') !== 'true'
   );
-  const [licStatus, setLicStatus] = useState(null);
-  const [showBuyModal, setShowBuyModal] = useState(false);
-  const [scanCount, setScanCount] = useState(0);
-  const [installInfo, setInstallInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('scanner');
-  const [trialStatus, setTrialStatus] = useState(null);
-  const [analyticsOptOut, setAnalyticsOptOut] = useState(false);
   const [appVersion, setAppVersion] = useState('');
 
   // F8/F9 — License scan state
@@ -93,64 +79,16 @@ function App() {
 
   const { logs, addLog, clearLogs } = useLogConsole();
 
-  const refreshTrialStatus = useCallback(async () => {
-    try {
-      const status = await window.electronAPI.invoke(OP_GET_TRIAL_STATUS);
-      setTrialStatus(status);
-    } catch (err) {
-      console.error('Failed to get trial status', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
-        setLicStatus(status);
-        const info = await window.electronAPI.invoke(OP_GET_INSTALL_INFO);
-        setInstallInfo(info);
-        if (status.isCommercial && (!status.isLicensed || status.isExpired)) {
-          setShowBuyModal(true);
-        }
-      } catch (err) {
-        console.error('Failed to get commercial status', err);
-        addLog('error', `Commercial status check failed: ${err.message}`);
-      }
-    };
-    fetchStatus();
-    refreshTrialStatus();
-  }, [addLog, refreshTrialStatus]);
-
   useEffect(() => {
     const load = async () => {
       try {
         const vInfo = await window.electronAPI.invoke(OP_GET_APP_VERSION);
         setAppVersion(vInfo.version || '');
-        const optInfo = await window.electronAPI.invoke(OP_GET_ANALYTICS_OPT_OUT);
-        setAnalyticsOptOut(optInfo.optOut || false);
       } catch (err) {
         console.error('Failed to load settings:', err);
       }
     };
     load();
-  }, []);
-
-  const handleAnalyticsOptOutChange = useCallback(async (newValue) => {
-    try {
-      await window.electronAPI.invoke(OP_SET_ANALYTICS_OPT_OUT, newValue);
-      setAnalyticsOptOut(newValue);
-    } catch (err) {
-      console.error('Failed to save analytics preference:', err);
-    }
-  }, []);
-
-  const handleLicenseRestored = useCallback(async () => {
-    try {
-      const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
-      setLicStatus(status);
-    } catch (err) {
-      console.error('Failed to refresh license after restore:', err);
-    }
   }, []);
 
   const projectsRef = useRef([]);
@@ -280,7 +218,6 @@ function App() {
     setVulnerabilities,
     projects,
     bumpVersion,
-    refreshTrialStatus,
     addDirtyRepo,
     removePackageLock,
     removeOverrides
@@ -470,11 +407,6 @@ function App() {
       await handleDepScan();
       return;
     }
-    if (licStatus?.isCommercial && !licStatus?.isLicensed) {
-      const n = scanCount + 1;
-      setScanCount(n);
-      if (n % 10 === 0) setShowBuyModal(true);
-    }
     await scanProjects();
   };
 
@@ -515,11 +447,6 @@ function App() {
       (dirtyRepos.size > 0 || depUpdatesDirty) && !isCommitting && !isApplying && !isScanning,
   };
 
-  const isUnlicensed = licStatus?.isCommercial && !licStatus?.isLicensed;
-  const fixesLeft = trialStatus?.fixesRemaining ?? MAX_FREE_FIXES;
-  const daysLeft = trialStatus?.daysUntilPriceChange ?? installInfo?.daysRemaining ?? 30;
-  const trialExhausted = trialStatus?.trialExhausted === true;
-
   return (
     <>
       {showFirstRun && <FirstRunModal onAccept={handleFirstRunAccept} />}
@@ -535,9 +462,6 @@ function App() {
             buttonsState={buttonsState}
             scanButtonLabel={scanButtonLabel}
             applyButtonLabel={applyButtonLabel}
-            licStatus={licStatus}
-            trialStatus={trialStatus}
-            onBuyNow={() => setShowBuyModal(true)}
             isScanning={isScanning}
             isCancelling={isCancelling}
           />
@@ -648,13 +572,7 @@ function App() {
           {activeTab === 'about' && (
             <div className="flex-1 overflow-auto p-6">
               <ErrorBoundary fallbackMessage="Failed to load About tab">
-                <AboutTab
-                  licStatus={licStatus}
-                  analyticsOptOut={analyticsOptOut}
-                  onAnalyticsOptOutChange={handleAnalyticsOptOutChange}
-                  onLicenseRestored={handleLicenseRestored}
-                  appVersion={appVersion}
-                />
+                <AboutTab appVersion={appVersion} />
               </ErrorBoundary>
             </div>
           )}
@@ -668,34 +586,6 @@ function App() {
                   onRemoveOverridesChange={setRemoveOverrides}
                 />
               </ErrorBoundary>
-            </div>
-          )}
-          {isUnlicensed && (
-            <div className="flex items-center justify-between px-4 py-1.5 bg-amber-900 bg-opacity-60 border-t border-amber-700 text-amber-200 text-xs flex-shrink-0">
-              {trialExhausted ? (
-                <>
-                  <span>Free fixes exhausted - Upgrade to continue applying fixes</span>
-                  <button
-                    onClick={() => setShowBuyModal(true)}
-                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                  >
-                    Upgrade Now
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span>
-                    You have {fixesLeft} {fixesLeft !== 1 ? 'fixes' : 'fix'} left - {daysLeft}{' '}
-                    {daysLeft !== 1 ? 'days' : 'day'} until price changes
-                  </span>
-                  <button
-                    onClick={() => setShowBuyModal(true)}
-                    className="ml-4 px-3 py-0.5 bg-amber-500 hover:bg-amber-400 text-black rounded font-bold transition-colors whitespace-nowrap"
-                  >
-                    Buy Now
-                  </button>
-                </>
-              )}
             </div>
           )}
         </div>
@@ -718,23 +608,6 @@ function App() {
           message="Git reset is ENABLED. VulnSweep will run git reset --hard on all repositories before scanning, which will discard any uncommitted changes. This action cannot be undone. Are you sure you want to proceed?"
           confirmText="Proceed with Scan"
           confirmStyle="danger"
-        />
-
-        <BuyModal
-          isOpen={showBuyModal}
-          onClose={() => setShowBuyModal(false)}
-          installInfo={installInfo}
-          isExpired={licStatus?.isExpired === true}
-          onPaymentSuccess={async ({ licenseKey }) => {
-            try {
-              const status = await window.electronAPI.invoke(OP_GET_COMMERCIAL_STATUS);
-              setLicStatus(status);
-              setShowBuyModal(false);
-              addLog('info', `Commercial license activated! Key: ${licenseKey}`);
-            } catch (err) {
-              addLog('error', `Failed to refresh license status: ${err.message}`);
-            }
-          }}
         />
       </div>
     </>

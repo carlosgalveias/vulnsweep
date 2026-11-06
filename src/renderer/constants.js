@@ -30,12 +30,6 @@ export const SBOM_FORMAT_EXT = {
 };
 
 /**
- * Maximum number of free trial fixes. Must match main process TRIAL_CONFIG.MAX_FREE_FIXES.
- * @type {number}
- */
-export const MAX_FREE_FIXES = 100;
-
-/**
  * Source presets — mirrors src/main/config/source-presets.js for renderer use.
  * Cannot import CJS directly in Vite-served renderer (module is not defined).
  */

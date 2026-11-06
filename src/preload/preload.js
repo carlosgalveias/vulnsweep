@@ -17,21 +17,8 @@ const {
   OP_SCAN_LICENSES,
   OP_SBOM_GET_SAVE_PATH,
   OP_SBOM_EXPORT,
-  OP_GET_COMMERCIAL_STATUS,
-  OP_ACTIVATE_LICENSE,
-  OP_GET_INSTALL_INFO,
-  OP_GET_TRIAL_STATUS,
-  OP_INCREMENT_TRIAL_FIX,
-  OP_OPEN_PAYMENT_WINDOW,
-  OP_VERIFY_AND_ACTIVATE,
-  OP_SEED_DEV_TRANSACTION,
-  OP_GET_ACTIVE_PRICE,
-  OP_SET_ANALYTICS_OPT_OUT,
-  OP_GET_ANALYTICS_OPT_OUT,
   OP_GET_APP_VERSION,
   OP_OPEN_LOCAL_DOC,
-  OP_LICENSE_BACKUP,
-  OP_LICENSE_RESTORE,
   OP_CACHE_CLEAR,
   OP_CACHE_GET_STATS,
   OP_GET_CREDENTIAL_STATUS,
@@ -66,20 +53,8 @@ const INVOKE_TABLE = {
   [OP_SCAN_LICENSES]: (args) => ipcRenderer.invoke('license:scan', ...args),
   [OP_SBOM_GET_SAVE_PATH]: (args) => ipcRenderer.invoke('sbom:get-save-path', ...args),
   [OP_SBOM_EXPORT]: (args) => ipcRenderer.invoke('sbom:export', ...args),
-  [OP_GET_COMMERCIAL_STATUS]: () => ipcRenderer.invoke('get-commercial-status'),
-  [OP_ACTIVATE_LICENSE]: (args) => ipcRenderer.invoke('activate-license', ...args),
-  [OP_GET_INSTALL_INFO]: () => ipcRenderer.invoke('get-install-info'),
-  [OP_GET_TRIAL_STATUS]: () => ipcRenderer.invoke('get-trial-status'),
-  [OP_INCREMENT_TRIAL_FIX]: () => ipcRenderer.invoke('increment-trial-fix'),
-  [OP_OPEN_PAYMENT_WINDOW]: (args) => ipcRenderer.invoke('open-payment-window', ...args),
-  [OP_VERIFY_AND_ACTIVATE]: (args) => ipcRenderer.invoke('verify-and-activate', ...args),
-  [OP_GET_ACTIVE_PRICE]: () => ipcRenderer.invoke('get-active-price'),
-  [OP_SET_ANALYTICS_OPT_OUT]: (args) => ipcRenderer.invoke('set-analytics-opt-out', ...args),
-  [OP_GET_ANALYTICS_OPT_OUT]: () => ipcRenderer.invoke('get-analytics-opt-out'),
   [OP_GET_APP_VERSION]: () => ipcRenderer.invoke('get-app-version'),
   [OP_OPEN_LOCAL_DOC]: (args) => ipcRenderer.invoke('open-local-doc', ...args),
-  [OP_LICENSE_BACKUP]: () => ipcRenderer.invoke('license-backup'),
-  [OP_LICENSE_RESTORE]: () => ipcRenderer.invoke('license-restore'),
   [OP_CACHE_CLEAR]: () => ipcRenderer.invoke('cache:clear'),
   [OP_CACHE_GET_STATS]: () => ipcRenderer.invoke('cache:getStats'),
   [OP_GET_CREDENTIAL_STATUS]: () => ipcRenderer.invoke('credentials:getStatus'),
@@ -90,12 +65,6 @@ const INVOKE_TABLE = {
   [OP_GET_DEPENDENCY_PATHS]: (args) => ipcRenderer.invoke('get-dependency-paths', ...args),
   [OP_OPEN_EXTERNAL]: (args) => shell.openExternal(...args),
 };
-
-// Conditionally add dev-only opcode
-if (process.env.VULNSWEEP_DEV === 'true') {
-  INVOKE_TABLE[OP_SEED_DEV_TRANSACTION] = (args) =>
-    ipcRenderer.invoke('seed-dev-transaction', ...args);
-}
 
 // ─── Event channel mapping ──────────────────────────────────────────────
 const EVENT_CHANNELS = {
