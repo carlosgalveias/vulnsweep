@@ -7,3 +7,5 @@ package.json.backup
 
 dist-cli
 .wrangler
+tmp/
+*.log
