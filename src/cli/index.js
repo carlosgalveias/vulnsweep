@@ -28,11 +28,11 @@ function printBanner() {
       align: 'left',
     },
     {
-      text: '    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/PRIVACY_POLICY.md  ',
+      text: '    https://github.com/carlosgalveias/vulnsweep/blob/main/PRIVACY_POLICY.md  ',
       align: 'left',
     },
     {
-      text: '    https://github.com/carlosgalveias/vulnsweep-releases/blob/main/DISCLAIMER.md  ',
+      text: '    https://github.com/carlosgalveias/vulnsweep/blob/main/DISCLAIMER.md  ',
       align: 'left',
     },
   ];

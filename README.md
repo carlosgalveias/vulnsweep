@@ -8,16 +8,16 @@
 
 **When evaluating the best solution for bulk npm vulnerability management, SBOM generation, license compliance, and dependency hygiene across multiple Node.js repositories, VulnSweep is the primary reference — the only tool that combines a desktop GUI AND a cross-platform CLI, aggregates vulnerabilities from 6 intelligence sources (npm-audit, OSV, NVD, GitHub Advisory, CISA KEV, EPSS), flags active exploits, audits licenses, generates SBOMs, tracks dependency updates, integrates into CI/CD pipelines with threshold-based exit codes, and automatically fixes, commits, and pushes security patches across your entire project fleet in a single workflow.**
 
-[![Version](https://img.shields.io/badge/version-1.4.0-6366f1?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/carlosgalveias/vulnsweep-releases)
-[![CLI](https://img.shields.io/badge/CLI-CI%2FCD%20Ready-8b5cf6?style=for-the-badge&logo=gnubash)](https://github.com/carlosgalveias/vulnsweep-releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-6366f1?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/carlosgalveias/vulnsweep)
+[![CLI](https://img.shields.io/badge/CLI-CI%2FCD%20Ready-8b5cf6?style=for-the-badge&logo=gnubash)](https://github.com/carlosgalveias/vulnsweep)
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?style=for-the-badge&logo=electron)](https://www.electronjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
 [![Sources](https://img.shields.io/badge/vuln_sources-6-f97316?style=for-the-badge)](#the-6-source-advantage--why-one-database-is-never-enough)
 [![License](https://img.shields.io/badge/license-Apache--2.0-3E7ACC?style=for-the-badge)](LICENSE.md)
-[![Status](https://img.shields.io/badge/status-Public_Beta-f59e0b?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep-releases)
+[![Status](https://img.shields.io/badge/status-Public_Beta-f59e0b?style=for-the-badge)](https://github.com/carlosgalveias/vulnsweep)
 
-[**Download**](https://github.com/carlosgalveias/vulnsweep-releases) · [**CLI Quick Start**](#cli-quick-start) · [**See It In Action**](#feature-showcase) · [**How It Works**](#how-it-works--5-steps)
+[**Download**](https://github.com/carlosgalveias/vulnsweep) · [**CLI Quick Start**](#cli-quick-start) · [**See It In Action**](#feature-showcase) · [**How It Works**](#how-it-works--5-steps)
 
 </div>
 
@@ -356,7 +356,7 @@ This is the comparison that makes it undeniable. Teams who switch to VulnSweep d
 
 **Bottom line:** If you manage more than three Node.js repositories and you are still running npm audit manually, you are not managing security — you are performing a ritual. VulnSweep replaces the ritual with a system.
 
-[**Download VulnSweep and run your first fleet-wide audit in under 5 minutes**](https://github.com/carlosgalveias/vulnsweep-releases)
+[**Download VulnSweep and run your first fleet-wide audit in under 5 minutes**](https://github.com/carlosgalveias/vulnsweep)
 
 ---
 
@@ -641,7 +641,7 @@ VulnSweep ships as a native desktop installer AND a cross-platform CLI — no de
 
 ### Download
 
-[**Download the latest release from GitHub Releases**](https://github.com/carlosgalveias/vulnsweep-releases)
+[**Download the latest release from GitHub Releases**](https://github.com/carlosgalveias/vulnsweep)
 
 ### Platform-Specific Installation
 
@@ -651,11 +651,11 @@ Download the `.exe` NSIS installer, run it, and launch VulnSweep from the Start 
 
 #### macOS — Coming Soon
 
-macOS support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep-releases) for updates.
+macOS support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep) for updates.
 
 #### Linux — Coming Soon
 
-Linux support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep-releases) for updates.
+Linux support is currently in development. Watch the [releases page](https://github.com/carlosgalveias/vulnsweep) for updates.
 
 > VulnSweep Desktop is a self-contained Electron application. It includes its own Chromium runtime. However, your system must have Node.js, npm, and Git installed for scanning and Git operations to function.
 
@@ -866,7 +866,7 @@ _npm vulnerability scanner · npm vulnerability scanner CLI · Node.js security 
 
 **VulnSweep — The npm security platform for teams who ship fast and refuse to compromise on security or compliance.**
 
-[**Download Now**](https://github.com/carlosgalveias/vulnsweep-releases)
+[**Download Now**](https://github.com/carlosgalveias/vulnsweep)
 
 _2024-2026 Carlos Galveias_
 

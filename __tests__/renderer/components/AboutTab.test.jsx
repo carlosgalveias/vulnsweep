@@ -44,10 +44,7 @@ describe('AboutTab — Documentation & Support', () => {
     render(<AboutTab {...defaultProps} />);
     const link = screen.getByRole('link', { name: /Report an issue/i });
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute(
-      'href',
-      'https://github.com/carlosgalveias/vulnsweep-releases/issues'
-    );
+    expect(link).toHaveAttribute('href', 'https://github.com/carlosgalveias/vulnsweep/issues');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   });

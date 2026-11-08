@@ -11,7 +11,7 @@ export default function FirstRunModal({ onAccept }) {
           <p>
             By using this application, you accept our{' '}
             <a
-              href="https://github.com/carlosgalveias/vulnsweep-releases/blob/main/PRIVACY_POLICY.md"
+              href="https://github.com/carlosgalveias/vulnsweep/blob/main/PRIVACY_POLICY.md"
               target="_blank"
               rel="noreferrer"
             >
@@ -19,7 +19,7 @@ export default function FirstRunModal({ onAccept }) {
             </a>{' '}
             and{' '}
             <a
-              href="https://github.com/carlosgalveias/vulnsweep-releases/blob/main/DISCLAIMER.md"
+              href="https://github.com/carlosgalveias/vulnsweep/blob/main/DISCLAIMER.md"
               target="_blank"
               rel="noreferrer"
             >

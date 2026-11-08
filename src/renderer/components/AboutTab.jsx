@@ -41,7 +41,7 @@ function AboutTab({ appVersion }) {
       <div className={card}>
         <h2 className={hd}>Support</h2>
         <a
-          href="https://github.com/carlosgalveias/vulnsweep-releases/issues"
+          href="https://github.com/carlosgalveias/vulnsweep/issues"
           target="_blank"
           rel="noopener noreferrer"
           className="text-blue-400 hover:text-blue-300 text-sm underline"
